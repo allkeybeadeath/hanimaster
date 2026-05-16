@@ -6,9 +6,9 @@
 <meta name="theme-color" content="#9C3030">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>方劑學 — 黃帝의 방</title>
+<title>方劑學 — 神農의 방</title>
 <link rel="manifest" href="manifest.json">
-<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,10 +16,14 @@
 
 <style>
 /* ═══════════════════════════════════════════════════════════════════
- * 方劑學 v2.0 — 中華 帝王風 디자인 시스템
- * 색채: 朱砂紅 / 帝王黃 / 墨黑 / 米色 / 翡翠綠 / 古銅
- * 文字: Noto Serif KR · SC + ZCOOL XiaoWei + Ma Shan Zheng
- * 장식: 太極(陰陽圖)·八卦·雲紋·璽印
+ * 方劑學 v2.2 — 中華 帝王風 디자인 시스템 (NO-SVG)
+ * v2.2 변경:
+ *  · SVG 전면 폐기 (메달리온·로더·차트 모두 CSS/HTML)
+ *  · 신농 아이콘 (헤더·favicon)
+ *  · 로비 버전 표시
+ *  · 등급 사다리에 등급별 사용자
+ *  · 베팅별 대기 사용자 카운트·이름
+ *  · 약재 성미 scatter + 효능 grid + 처방내 위치 pie
  * ═══════════════════════════════════════════════════════════════════ */
 
 :root{
@@ -69,7 +73,7 @@ body{
   box-shadow:inset 0 0 0 2px var(--huang),0 1px 4px rgba(0,0,0,.4);
   display:flex;align-items:center;justify-content:center;overflow:hidden;
 }
-.app-header .logo img,.app-header .logo svg{width:100%;height:100%;display:block}
+.app-header .logo img{width:100%;height:100%;display:block;object-fit:cover}
 .app-header .titlewrap{display:flex;flex-direction:column;line-height:1}
 .app-header .title{font-family:var(--font-display);font-size:19px;letter-spacing:.06em}
 .app-header .subtitle{font-size:9.5px;opacity:.88;letter-spacing:.18em;text-transform:uppercase;margin-top:1px}
@@ -88,16 +92,21 @@ body{
 }
 .head-chip .amt{font-weight:700;font-family:var(--font-display)}
 
-/* ─── 太極 / 八卦 SVG 클래스 ───────────────────────────────────────── */
-.taiji{display:inline-block;vertical-align:middle}
-.taiji.spin{animation:taijiSpin 8s linear infinite}
-.taiji.spin-fast{animation:taijiSpin 2s linear infinite}
-@keyframes taijiSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+/* ─── 버전 칩 (로비) ─────────────────────────────────────────────── */
+.version-chip{
+  display:inline-flex;align-items:center;gap:6px;
+  background:rgba(28,20,10,.06);border:1px solid var(--mi-d);
+  border-radius:12px;padding:4px 10px;
+  font-family:var(--font-display);font-size:11.5px;color:var(--gutong);
+  letter-spacing:.06em;
+}
+.version-chip .dot{width:7px;height:7px;border-radius:50%;background:var(--feicui);box-shadow:0 0 5px rgba(42,112,96,.55)}
+.version-row{display:flex;justify-content:center;gap:6px;margin:6px 0 8px;flex-wrap:wrap}
 
 /* ─── 메인 ─────────────────────────────────────────────────────────── */
 #view{max-width:680px;margin:0 auto;padding:14px 14px 24px}
 
-/* ─── 뷰 타이틀 (양옆 璽印 라인) ───────────────────────────────────── */
+/* ─── 뷰 타이틀 ───────────────────────────────────── */
 .view-title{
   display:flex;align-items:center;justify-content:center;gap:12px;
   margin:8px 0 12px;font-family:var(--font-display);font-weight:600;
@@ -183,7 +192,7 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
   background:var(--zhusha);transform:translateX(-50%);border-radius:0 0 3px 3px;
 }
 
-/* ─── 홈 타일 (게임감) ─────────────────────────────────────────────── */
+/* ─── 홈 타일 ─────────────────────────────────────────────── */
 .tile-grid{display:grid;grid-template-columns:repeat(2, 1fr);gap:10px;margin:14px 0}
 .tile{
   background:var(--mi-w);border:1.5px solid var(--zhusha);border-radius:var(--r);
@@ -206,7 +215,7 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
 .tile.gold{background:linear-gradient(180deg, #FFF8DC 0%, #FFE08A 100%);border-color:var(--huang-d)}
 .tile.gold .han{color:var(--zhusha-d)}
 
-/* ─── 카운트다운 (D-N) ────────────────────────────────────────────── */
+/* ─── 카운트다운 ────────────────────────────────────────────── */
 .dday-banner{
   background:linear-gradient(135deg, var(--zhusha-d) 0%, var(--zhusha) 50%, var(--huang-d) 100%);
   color:var(--huang-l);padding:18px 16px;border-radius:var(--r-lg);margin-bottom:14px;
@@ -224,23 +233,61 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
 .dday-banner .meta{font-size:12px;opacity:.9;margin-top:8px;line-height:1.5}
 .dday-banner .meta .han{color:var(--huang-l);font-size:13px}
 
-/* ─── 메달리온 (캐릭터 사진+SVG 합성) ──────────────────────────────── */
-.medwrap{position:relative;display:inline-block;vertical-align:middle}
-.medwrap img{position:absolute;border-radius:50%;object-fit:cover;background:var(--mi-w);
-  box-shadow:0 1px 4px rgba(0,0,0,.25);}
+/* ═══════════════════════════════════════════════════════════════════
+ * CSS 메달리온 (SVG 대체) — v2.2
+ * 9개 카테고리별 색채. 사진 있으면 위에 덮음.
+ * ═══════════════════════════════════════════════════════════════════ */
+.cmedal{
+  position:relative;display:inline-block;vertical-align:middle;
+  border-radius:50%;overflow:hidden;flex-shrink:0;
+  background:radial-gradient(circle at 50% 38%, var(--cmed-bg1, #E8C8A0) 0%, var(--cmed-bg2, #A87454) 100%);
+  border:2px solid var(--cmed-ring, #7A3D27);
+  box-shadow:0 1px 4px rgba(28,20,10,.28), inset 0 0 0 1px rgba(255,255,255,.12);
+}
+.cmedal-init{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-58%);
+  font-family:var(--font-display);font-weight:700;
+  color:var(--cmed-fg, #3A1810);line-height:1;
+  text-shadow:0 1px 2px rgba(0,0,0,.18);
+  pointer-events:none;
+}
+.cmedal-name{
+  position:absolute;left:0;right:0;bottom:0;
+  text-align:center;padding:3px 2px 4px;
+  background:linear-gradient(to bottom, transparent 0%, var(--cmed-init-bg, #3A1810) 80%);
+  color:var(--cmed-init-fg, #F5E6D3);
+  font-family:var(--font-display);font-weight:600;letter-spacing:.04em;
+  pointer-events:none;
+}
+.cmedal-photo{
+  position:absolute;border-radius:50%;object-fit:cover;
+  background:var(--mi-w);box-shadow:0 1px 4px rgba(0,0,0,.25);
+}
+
+/* 카테고리 팔레트 */
+.cmedal.cat-divine  {--cmed-ring:#C9A227; --cmed-bg1:#FFE08A; --cmed-bg2:#E0A030; --cmed-fg:#5C2C0C; --cmed-init-bg:#5C2C0C; --cmed-init-fg:#FFE08A}
+.cmedal.cat-ancient {--cmed-ring:#7A3D27; --cmed-bg1:#E8C8A0; --cmed-bg2:#A87454; --cmed-fg:#3A1810; --cmed-init-bg:#3A1810; --cmed-init-fg:#F5E6D3}
+.cmedal.cat-tang    {--cmed-ring:#B22222; --cmed-bg1:#F0C8B0; --cmed-bg2:#C04030; --cmed-fg:#2A0C08; --cmed-init-bg:#2A0C08; --cmed-init-fg:#F5E6D3}
+.cmedal.cat-song    {--cmed-ring:#4A6840; --cmed-bg1:#C8D8B8; --cmed-bg2:#688058; --cmed-fg:#1C2810; --cmed-init-bg:#1C2810; --cmed-init-fg:#E8E8C8}
+.cmedal.cat-jinyuan {--cmed-ring:#6A4C8C; --cmed-bg1:#D0BCE8; --cmed-bg2:#8064A8; --cmed-fg:#28143C; --cmed-init-bg:#28143C; --cmed-init-fg:#E8DCF4}
+.cmedal.cat-ming    {--cmed-ring:#1A4C7C; --cmed-bg1:#A8C4DC; --cmed-bg2:#3068A0; --cmed-fg:#08203C; --cmed-init-bg:#08203C; --cmed-init-fg:#D8E4F0}
+.cmedal.cat-qing    {--cmed-ring:#2A7060; --cmed-bg1:#A8D0C0; --cmed-bg2:#48907C; --cmed-fg:#0C2820; --cmed-init-bg:#0C2820; --cmed-init-fg:#D8ECDC}
+.cmedal.cat-late    {--cmed-ring:#8C5028; --cmed-bg1:#E0C098; --cmed-bg2:#B06838; --cmed-fg:#341808; --cmed-init-bg:#341808; --cmed-init-fg:#F0DCC4}
+.cmedal.cat-korean  {--cmed-ring:#9C3030; --cmed-bg1:#F0D0C0; --cmed-bg2:#C04848; --cmed-fg:#3C0C0C; --cmed-init-bg:#3C0C0C; --cmed-init-fg:#F8E8D8}
+.cmedal.cat-gag     {--cmed-ring:#E84E80; --cmed-bg1:#FFCEDC; --cmed-bg2:#FF8FB0; --cmed-fg:#5C0828; --cmed-init-bg:#5C0828; --cmed-init-fg:#FFE0EC}
 
 /* ─── 등급 진행 바 ────────────────────────────────────────────────── */
 .rank-bar{height:10px;background:var(--mi-d);border-radius:5px;overflow:hidden;position:relative;margin-top:8px}
 .rank-bar-fill{height:100%;background:linear-gradient(90deg, var(--huang) 0%, var(--zhusha) 100%);transition:width .4s ease}
 
-/* ─── 璽印 (등급 표시) ──────────────────────────────────────────────── */
+/* ─── 璽印 ──────────────────────────────────────────────── */
 .seal-stamp{
   display:inline-flex;align-items:center;justify-content:center;
   width:42px;height:42px;background:var(--zhusha);color:var(--huang-l);
   font-family:var(--font-display);font-weight:700;font-size:24px;
   border:2px solid var(--huang);border-radius:6px;
   box-shadow:0 2px 6px rgba(28,20,10,.3),inset 0 0 0 1px rgba(255,224,138,.2);
-  letter-spacing:0;
+  letter-spacing:0;flex-shrink:0;
 }
 .seal-stamp.big{width:64px;height:64px;font-size:38px;border-width:3px}
 .seal-stamp.tiny{width:22px;height:22px;font-size:14px;border-width:1.5px;border-radius:3px}
@@ -252,10 +299,10 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
   background:var(--mi-w);border:1px solid var(--mi-d);border-radius:14px;
   font-size:11.5px;color:var(--mo-l);
 }
-.presence-chip .dot{width:7px;height:7px;background:var(--feicui);border-radius:50%;box-shadow:0 0 4px rgba(42,112,96,.6)}
+.presence-chip .dot{width:7px;height:7px;background:var(--feicui);border-radius:50%;box-shadow:0 0 4px rgba(42,112,96,.6);flex-shrink:0}
 .presence-chip .nm{font-weight:600;color:var(--mo);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* ─── 피드백 박스 ─────────────────────────────────────────────────── */
+/* ─── 피드백 ─────────────────────────────────────────────────── */
 .feedback-form{display:flex;flex-direction:column;gap:8px;margin-top:6px}
 .feedback-list{margin-top:10px;display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto}
 .feedback-item{
@@ -287,7 +334,7 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
   box-shadow:var(--sh-lg);padding:20px;position:relative;
 }
 .modal .x{position:absolute;top:8px;right:10px;cursor:pointer;font-size:22px;color:var(--mo-l);
-  background:none;border:none;line-height:1;padding:4px 8px}
+  background:none;border:none;line-height:1;padding:4px 8px;z-index:5}
 
 /* ─── 페이드 ─────────────────────────────────────────────────────── */
 .fade-in{animation:fadeIn .3s ease}
@@ -338,7 +385,7 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
 .intro-name{font-family:var(--font-display);font-size:16px;font-weight:600;color:var(--mo);margin-top:4px}
 .intro-charname{font-size:11px;color:var(--gutong);margin-top:2px}
 
-/* 對決開始 — VS 자리 (큰 한자) */
+/* 對決開始 — VS */
 .intro-vs{position:relative;margin:14px auto;width:100%;text-align:center;
   animation:vsZoom .65s cubic-bezier(.34,1.6,.5,1);}
 .intro-vs-text{
@@ -354,32 +401,188 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
   z-index:-1}
 @keyframes vsZoom{0%{opacity:0;transform:scale(.3) rotate(-20deg)}60%{transform:scale(1.12) rotate(3deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
 
+/* 배틀 중 펄스 (긴박감) */
+@keyframes battlePulse{0%,100%{box-shadow:0 0 0 0 rgba(156,48,48,.55)}50%{box-shadow:0 0 0 10px rgba(156,48,48,0)}}
+.battle-pulse{animation:battlePulse 1s ease-in-out infinite}
+@keyframes battleShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+.battle-shake{animation:battleShake .4s ease-in-out infinite}
+
 /* ─── 베팅 다이얼 ─────────────────────────────────────────────────── */
 .bet-grid{display:grid;grid-template-columns:repeat(2, 1fr);gap:8px;margin-top:10px}
 .bet-cell{
   border:1.5px solid var(--mi-d);background:var(--mi-w);
-  border-radius:var(--r);padding:10px;cursor:pointer;text-align:center;
-  font-family:var(--font-body);color:var(--mo);transition:all .12s;
+  border-radius:var(--r);padding:10px 8px 8px;cursor:pointer;text-align:center;
+  font-family:var(--font-body);color:var(--mo);transition:all .12s;position:relative;
 }
-.bet-cell:hover{border-color:var(--zhusha);transform:translateY(-1px)}
+.bet-cell:not(.locked):hover{border-color:var(--zhusha);transform:translateY(-1px)}
 .bet-cell.selected{border-color:var(--zhusha);background:#FFF8E8;box-shadow:0 0 0 2px var(--huang) inset}
+.bet-cell.locked{opacity:.55;cursor:not-allowed}
 .bet-cell .han{font-family:var(--font-display);font-size:18px;color:var(--zhusha-d);letter-spacing:.04em}
 .bet-cell .pct{font-size:14px;font-weight:700;color:var(--huang-d);margin-top:2px;font-family:var(--font-display)}
 .bet-cell .min{font-size:10.5px;color:var(--gutong);margin-top:1px}
+.bet-cell .waiting-badge{
+  position:absolute;top:4px;right:4px;
+  background:var(--feicui);color:var(--mi-w);
+  font-size:9.5px;padding:1px 6px;border-radius:8px;
+  font-family:var(--font-display);font-weight:700;letter-spacing:.04em;
+  box-shadow:0 1px 3px rgba(0,0,0,.2);
+  min-width:26px;
+}
+.bet-cell .waiting-badge.zero{background:var(--mi-d);color:var(--gutong)}
+.bet-cell .waiting-list{
+  margin-top:8px;padding-top:6px;border-top:1px dashed var(--mi-d);
+  display:flex;flex-wrap:wrap;gap:3px;justify-content:center;
+  min-height:24px;
+}
+.bet-cell .waiting-list .w-chip{
+  display:flex;align-items:center;gap:3px;
+  font-size:10px;color:var(--mo-l);
+  background:rgba(42,112,96,.1);border-radius:8px;padding:2px 6px 2px 3px;
+  border:1px solid rgba(42,112,96,.25);
+}
+.bet-cell .waiting-list .w-chip .nm{font-weight:600;color:var(--mo);max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bet-cell .waiting-list .w-empty{
+  font-size:10px;color:var(--gutong);font-style:italic;padding:2px 0;
+}
 
-/* ─── 통계 차트 (SVG) ─────────────────────────────────────────────── */
+/* ─── 통계 차트 ─────────────────────────────── */
 .bar-chart{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .bar-row{display:flex;align-items:center;gap:8px;font-size:12.5px}
-.bar-row .bar-label{width:90px;color:var(--mo);font-weight:600;text-align:right;font-size:12px}
-.bar-row .bar-track{flex:1;height:14px;background:var(--mi-d);border-radius:7px;overflow:hidden;position:relative}
+.bar-row .bar-label{width:90px;color:var(--mo);font-weight:600;text-align:right;font-size:12px;flex-shrink:0}
+.bar-row .bar-track{flex:1;height:14px;background:var(--mi-d);border-radius:7px;overflow:hidden;position:relative;min-width:0}
 .bar-row .bar-fill{height:100%;background:linear-gradient(90deg, var(--huang) 0%, var(--zhusha) 100%);
   border-radius:7px;display:flex;align-items:center;justify-content:flex-end;
-  padding-right:6px;color:var(--huang-l);font-size:10.5px;font-weight:700;font-family:var(--font-display)}
-.bar-row .bar-val{width:48px;text-align:left;color:var(--mo-l);font-size:11.5px;font-family:var(--font-display)}
+  padding-right:6px;color:var(--huang-l);font-size:10.5px;font-weight:700;font-family:var(--font-display);
+  transition:width .4s ease;min-width:fit-content}
+.bar-row .bar-val{width:48px;text-align:left;color:var(--mo-l);font-size:11.5px;font-family:var(--font-display);flex-shrink:0}
 
-/* ─── 메달 (등급 변경 알림 등) ──────────────────────────────────────── */
-@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
-.pulse{animation:pulse 1.5s ease infinite}
+/* ─── 약재 성미 scatter ──────────────── */
+.herb-scatter{
+  position:relative;width:100%;max-width:600px;aspect-ratio:5/4;margin:0 auto;
+  background:linear-gradient(180deg, #FFF5DC 0%, #F5E6D3 100%);
+  border:1.5px solid var(--mi-d);border-radius:var(--r);overflow:hidden;
+}
+.herb-scatter .axis{position:absolute;background:var(--gutong);opacity:.35}
+.herb-scatter .axis-x{left:6%;right:6%;height:1px;top:88%}
+.herb-scatter .axis-y{top:8%;bottom:14%;width:1px;left:50%}
+.herb-scatter .axis-tick{
+  position:absolute;font-size:10.5px;color:var(--mo-l);
+  font-family:var(--font-display);text-align:center;letter-spacing:.04em;
+}
+.herb-scatter .axis-tick.tk-x{top:90%;transform:translateX(-50%);padding-top:2px}
+.herb-scatter .axis-tick.tk-y{left:51%;transform:translateY(-50%);padding-left:4px;font-size:9.5px;color:var(--gutong)}
+.herb-scatter .ax-title{
+  position:absolute;font-size:10px;color:var(--gutong);font-family:var(--font-display);letter-spacing:.06em;
+}
+.herb-scatter .ax-title.tt-x{bottom:1px;left:50%;transform:translateX(-50%)}
+.herb-scatter .ax-title.tt-y{top:2px;left:51%;transform:translateX(-50%)}
+.herb-scatter .herb-bubble{
+  position:absolute;border-radius:50%;
+  color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-han);font-size:9.5px;font-weight:700;
+  cursor:pointer;transform:translate(-50%,-50%);
+  box-shadow:0 1px 4px rgba(0,0,0,.30);
+  border:1.5px solid rgba(255,255,255,.65);
+  transition:transform .12s, box-shadow .12s, z-index 0s;
+  z-index:1;
+}
+.herb-scatter .herb-bubble:hover{transform:translate(-50%,-50%) scale(1.18);box-shadow:0 3px 10px rgba(0,0,0,.45);z-index:5}
+/* 性 (찬↔뜨거움) 색상 */
+.herb-scatter .b-cold{background:radial-gradient(circle at 30% 30%, #5DA8C8, #08405C)}
+.herb-scatter .b-cool{background:radial-gradient(circle at 30% 30%, #6FB0D8, #2A6080)}
+.herb-scatter .b-neut{background:radial-gradient(circle at 30% 30%, #B5946A, #6E5028)}
+.herb-scatter .b-warm{background:radial-gradient(circle at 30% 30%, #E08858, #A02818)}
+.herb-scatter .b-hot {background:radial-gradient(circle at 30% 30%, #FF8030, #6E0E0E)}
+
+.legend-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:8px;font-size:11px;color:var(--mo-l)}
+.legend-row .lg-sw{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:4px;vertical-align:middle;border:1px solid rgba(255,255,255,.6);box-shadow:0 1px 2px rgba(0,0,0,.2)}
+
+/* 효능 grid */
+.efn-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(140px,1fr));gap:8px;margin-top:10px}
+.efn-cell{
+  background:var(--mi-w);border:1.5px solid var(--mi-d);border-radius:var(--r-sm);
+  padding:8px 10px;font-size:12px;color:var(--mo);
+}
+.efn-cell .ef-title{font-family:var(--font-display);font-size:13px;color:var(--zhusha-d);font-weight:700;margin-bottom:3px;display:flex;align-items:center;justify-content:space-between}
+.efn-cell .ef-count{font-family:var(--font-display);color:var(--gutong);font-size:11px}
+.efn-cell .ef-herbs{font-size:11px;color:var(--mo-l);line-height:1.5;margin-top:2px}
+
+/* role pie — CSS conic */
+.role-pie-wrap{display:flex;flex-direction:column;align-items:center;margin-top:8px}
+.role-pie{
+  width:170px;height:170px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 8px rgba(28,20,10,.25), inset 0 0 0 2px var(--mi-w);
+  position:relative;
+}
+.role-pie .core{
+  width:78px;height:78px;background:var(--mi-w);border-radius:50%;
+  display:flex;align-items:center;justify-content:center;flex-direction:column;
+  font-family:var(--font-display);font-size:12px;color:var(--mo);text-align:center;line-height:1.2;
+  box-shadow:inset 0 0 0 1px var(--mi-d);
+}
+.role-pie .core .big{font-size:22px;color:var(--zhusha-d);font-weight:700}
+.role-pie .core .lb{font-size:10.5px;color:var(--gutong)}
+.role-legend{display:grid;grid-template-columns:repeat(2,1fr);gap:5px 10px;margin-top:10px;font-size:11.5px;max-width:240px}
+.role-legend .lg{display:flex;align-items:center;gap:5px;font-family:var(--font-display)}
+.role-legend .sw{width:13px;height:13px;border-radius:3px;flex-shrink:0;border:1px solid rgba(0,0,0,.1)}
+.role-legend .v{margin-left:auto;color:var(--gutong);font-family:var(--font-body);font-weight:600}
+
+/* ─── 등급 사다리 ─────────────────────────────────── */
+.ladder-row{
+  display:flex;align-items:flex-start;gap:10px;padding:8px 6px;border-radius:6px;
+  margin-bottom:4px;
+}
+.ladder-row.is-current{background:#FFF8E0;outline:1.5px solid var(--huang)}
+.ladder-row .ladder-mid{flex:1;min-width:0}
+.ladder-row .ladder-title{font-family:var(--font-display);font-size:14px}
+.ladder-row .ladder-desc{font-size:10.5px;color:var(--gutong);margin-top:1px;line-height:1.4}
+.ladder-row .ladder-cost{font-size:11.5px;font-family:var(--font-display);white-space:nowrap;flex-shrink:0}
+.ladder-users{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.ladder-user-chip{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:10.5px;color:var(--mo-l);
+  background:var(--mi-w);border:1px solid var(--mi-d);
+  border-radius:10px;padding:2px 7px 2px 3px;
+}
+.ladder-user-chip.is-me{background:#FFF8E0;border-color:var(--huang)}
+.ladder-user-chip .nm{font-weight:600;color:var(--mo);max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ladder-user-empty{font-size:10.5px;color:var(--gutong);font-style:italic;margin-top:4px}
+
+/* ─── 분석 sub-tabs ──────────────── */
+.subtab-row{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0 10px}
+.subtab-btn{
+  font-family:var(--font-body);font-size:11.5px;
+  padding:5px 11px;border-radius:14px;cursor:pointer;
+  background:var(--mi-w);border:1.5px solid var(--mi-d);color:var(--mo-l);
+}
+.subtab-btn.on{background:var(--zhusha);color:var(--mi-w);border-color:var(--zhusha)}
+.subtab-btn:hover:not(.on){border-color:var(--zhusha)}
+
+/* ─── 太極 SVG 회전 (장식용 — 인물 외 사용 OK) ─────────────────── */
+.taiji{display:inline-block;vertical-align:middle;filter:drop-shadow(0 2px 6px rgba(28,20,10,.25))}
+.taiji.spin{animation:rotate360 4.5s linear infinite}
+.taiji.spin.fast{animation-duration:1s}
+
+/* ─── CSS 로더 (太極 SVG 대체) ──────────────────────────────────── */
+@keyframes rotate360 {to{transform:rotate(360deg)}}
+.cloader{
+  display:inline-block;border-radius:50%;position:relative;
+  background:conic-gradient(from 0deg, var(--zhusha) 0deg, var(--huang) 90deg, var(--mi-w) 180deg, var(--xuan) 270deg, var(--zhusha) 360deg);
+  animation:rotate360 1.8s linear infinite;
+  box-shadow:0 2px 8px rgba(28,20,10,.25), inset 0 0 0 2px var(--mi-w);
+  vertical-align:middle;
+}
+.cloader::after{
+  content:'';position:absolute;inset:18%;border-radius:50%;
+  background:radial-gradient(circle at 50% 38%, var(--mi-w), var(--mi));
+}
+.cloader.fast{animation-duration:.55s}
+.cloader.battle{
+  background:conic-gradient(from 0deg, var(--zhusha-d) 0deg, var(--zhusha) 60deg, var(--huang) 120deg, var(--zhusha-d) 180deg, var(--zhusha) 240deg, var(--huang) 300deg, var(--zhusha-d) 360deg);
+  animation-duration:.7s;
+}
 
 /* ─── 작은 화면 ────────────────────────────────────────────────────── */
 @media (max-width:380px){
@@ -389,6 +592,9 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
   .dday-banner .big{font-size:36px}
   .view-title{font-size:21px}
   .char-grid{grid-template-columns:repeat(2, 1fr)}
+  .bet-cell{padding:8px 6px 6px}
+  .bet-cell .han{font-size:16px}
+  .bet-cell .pct{font-size:12.5px}
 }
 
 /* ─── 스크롤바 ─────────────────────────────────────────────────────── */
@@ -396,15 +602,6 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--gutong);border-radius:4px}
 ::-webkit-scrollbar-thumb:hover{background:var(--zhusha)}
-
-/* ─── 太極 회전 인디케이터 (로딩) ───────────────────────────────────── */
-.loading-overlay{
-  position:fixed;inset:0;background:rgba(245,230,211,.85);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  z-index:1000;backdrop-filter:blur(2px);
-}
-.loading-overlay .label{margin-top:14px;font-family:var(--font-display);color:var(--zhusha-d);font-size:14px;letter-spacing:.12em}
-
 </style>
 </head>
 <body>
@@ -412,10 +609,10 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
 <!-- 헤더 -->
 <header class="app-header">
   <div class="row">
-    <div class="logo"><img src="icon.svg" alt="黃帝" id="logo-img"></div>
+    <div class="logo"><img src="icon-192.png" alt="神農" id="logo-img"></div>
     <div class="titlewrap">
       <div class="title">方劑學</div>
-      <div class="subtitle" id="user-name-mini">黃帝의 방</div>
+      <div class="subtitle" id="user-name-mini">神農의 방</div>
     </div>
     <div class="head-chips">
       <div class="head-chip" id="rank-chip" title="현재 등급">

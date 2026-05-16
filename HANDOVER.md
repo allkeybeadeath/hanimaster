@@ -1,4 +1,4 @@
-# 方劑學 PWA v2.0 — HANDOVER
+# 方劑學 PWA v2.2 — HANDOVER
 
 > CIM Lab 본과 2학년 방제학 학습 도구. Greek v60 패턴을 따른 단일-파일 PWA.
 

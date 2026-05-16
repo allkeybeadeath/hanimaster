@@ -20,6 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
+const APP_VERSION = 'v2.2.0';              // ★ 로비 표시용 (2026-05)
+const APP_BUILD   = '2026.05.17';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -35,6 +37,10 @@ const EXAM_META = {
 const PRESENCE_REFRESH_MS = 30 * 1000;     // 30초마다 presence 갱신
 const PRESENCE_FRESH_MS   = 90 * 1000;     // 90초 이내면 "온라인"
 const BATTLE_INTRO_MS     = 5000;          // 인트로 컷 자동 진행
+const LOBBY_REFRESH_MS    = 4000;          // 배틀 로비 사용자 갱신
+const LOBBY_FRESH_MS      = 60 * 1000;     // 60초 이내면 대기중
+const MATCH_TIMEOUT_MS    = 75 * 1000;     // 75초 매칭 실패 시 자동 환불
+const POLL_INTERVAL_MS    = 2500;          // 매칭 폴링 간격
 
 // ───── 2. 상태 + STORAGE ────────────────────────────────────────────────────
 // 기본 상태 (사용자별 진행)
@@ -174,87 +180,53 @@ function ago(ts){
   return Math.floor(d/86400000) + '일 전';
 }
 
-// ───── 4. 메달리온 (사진+SVG 합성) ─────────────────────────────────────────
+// ───── 4. 메달리온 (CSS only — 인물 SVG 폐기 v2.2) ────────────────────────
 // charOrId: 객체 또는 id 문자열
 // size: 픽셀
-// 사진 있으면 위에 덮고 onerror 시 SVG 폴백
-// 시대별 고유 외곽 모티프 + 이중 ring + 인장 배경으로 풍부하게
+// CSS 메달리온: cmedal.cat-{cat} 클래스로 카테고리 팔레트 적용
+// 사진 있으면 위에 덮음. onerror 시 자연스럽게 CSS 배경 노출.
 function _charMedallion(charOrId, size){
   const c = (typeof charOrId === 'string') ? PHYSICIAN_BY_ID[charOrId] : charOrId;
   if(!c){
-    return `<svg viewBox="0 0 100 100" width="${size}" height="${size}" style="display:inline-block;vertical-align:middle"><circle cx="50" cy="50" r="48" fill="#8B6B45"/><text x="50" y="68" text-anchor="middle" font-family="serif" font-size="44" font-weight="700" fill="#F4E8D8">?</text></svg>`;
+    return `<div class="cmedal cat-ancient" style="width:${size}px;height:${size}px" role="img" aria-label="未知">
+      <div class="cmedal-init" style="font-size:${Math.round(size*0.45)}px">?</div>
+    </div>`;
   }
-  const p = CHAR_PALETTES[c.cat] || CHAR_PALETTES.ancient;
   const showName = size >= 80;
-  const showOrnaments = size >= 60;
-  const gradId = '_g_' + c.id + '_' + size + '_' + Math.floor(Math.random()*100000).toString(36);
-  const initY = showName ? 55 : 62;
-  const initSize = showName ? 38 : 48;
-
-  // 8 방위 위치
-  const ornDots = [0,45,90,135,180,225,270,315].map(deg=>{
-    const rad=(deg-90)*Math.PI/180;
-    return {x:(50+Math.cos(rad)*43).toFixed(1), y:(50+Math.sin(rad)*43).toFixed(1)};
-  });
-
-  // 카테고리별 외곽 모티프
-  let ornaments;
-  if(showOrnaments){
-    const M = {
-      divine:  (x,y)=>`<circle cx="${x}" cy="${y}" r="2.2" fill="${p.ring}"/><circle cx="${x}" cy="${y}" r="1.1" fill="${p.initFg}" opacity=".85"/>`,
-      ancient: (x,y)=>`<rect x="${+x-1.8}" y="${+y-1.8}" width="3.6" height="3.6" fill="${p.ring}" transform="rotate(45 ${x} ${y})"/>`,
-      tang:    (x,y)=>`<path d="M ${x},${+y-2.5} L ${+x+2},${+y-0.5} L ${+x+1.2},${+y+2} L ${+x-1.2},${+y+2} L ${+x-2},${+y-0.5} Z" fill="${p.ring}"/>`,
-      song:    (x,y)=>`<circle cx="${x}" cy="${y}" r="2" fill="none" stroke="${p.ring}" stroke-width="1"/><circle cx="${x}" cy="${y}" r="0.7" fill="${p.ring}"/>`,
-      jinyuan: (x,y)=>`<path d="M ${+x-2},${y} A 2,2 0 0 1 ${+x+2},${y} A 2,2 0 0 0 ${+x-2},${y}" fill="${p.ring}"/>`,
-      ming:    (x,y)=>`<polygon points="${x},${+y-2.3} ${+x+2},${+y+1.5} ${+x-2},${+y+1.5}" fill="${p.ring}"/>`,
-      qing:    (x,y)=>`<path d="M ${x},${+y-2.5} C ${+x+2.3},${+y-1} ${+x+2.3},${+y+1} ${x},${+y+2.5} C ${+x-2.3},${+y+1} ${+x-2.3},${+y-1} ${x},${+y-2.5} Z" fill="${p.ring}"/>`,
-      late:    (x,y)=>`<rect x="${+x-1.8}" y="${+y-2}" width="3.6" height="4" rx="0.6" fill="${p.ring}"/>`,
-      korean:  (x,y)=>`<circle cx="${x}" cy="${y}" r="2.2" fill="${p.ring}"/>`,
-      gag:     (x,y)=>`<path d="M ${x},${+y-2.5} L ${+x+0.7},${+y-0.7} L ${+x+2.5},${+y-0.4} L ${+x+1.2},${+y+0.9} L ${+x+1.5},${+y+2.5} L ${x},${+y+1.6} L ${+x-1.5},${+y+2.5} L ${+x-1.2},${+y+0.9} L ${+x-2.5},${+y-0.4} L ${+x-0.7},${+y-0.7} Z" fill="${p.ring}"/>`
-    };
-    const fn = M[c.cat] || M.ancient;
-    ornaments = `<g>${ornDots.map(d=>fn(d.x,d.y)).join('')}</g>`;
-  } else {
-    ornaments = `<g fill="${p.ring}" opacity="0.5">${ornDots.map(d=>`<circle cx="${d.x}" cy="${d.y}" r="1.2"/>`).join('')}</g>`;
-  }
-
-  // 중앙 篆書 인장 배경
-  const sealBg = showOrnaments
-    ? `<rect x="32" y="${initY-32}" width="36" height="40" rx="2" fill="${p.initBg}" fill-opacity="0.12" stroke="${p.initBg}" stroke-width="0.5" stroke-opacity="0.32"/>`
-    : '';
-
-  return `<svg viewBox="0 0 100 100" width="${size}" height="${size}" role="img" aria-label="${esc(c.ko)} (${esc(c.han)})" style="display:inline-block;vertical-align:middle">
-    <defs><radialGradient id="${gradId}" cx="50%" cy="38%" r="70%">
-      <stop offset="0%" stop-color="${p.bg1}"/><stop offset="100%" stop-color="${p.bg2}"/>
-    </radialGradient></defs>
-    <circle cx="50" cy="50" r="49" fill="${p.ring}"/>
-    <circle cx="50" cy="50" r="46.5" fill="url(#${gradId})"/>
-    <circle cx="50" cy="50" r="44.5" fill="none" stroke="${p.ring}" stroke-width="0.5" stroke-opacity="0.55"/>
-    ${ornaments}
-    ${sealBg}
-    <text x="50" y="${initY}" text-anchor="middle" font-family="'ZCOOL XiaoWei','Ma Shan Zheng',serif" font-size="${initSize}" font-weight="700" fill="${p.fg}">${c.init||c.han[0]||'?'}</text>
-    ${showName?`<path d="M 14,82 Q 50,90 86,82 L 86,90 Q 50,98 14,90 Z" fill="${p.initBg}" opacity="0.92"/><text x="50" y="91" text-anchor="middle" font-family="'Noto Serif KR',serif" font-size="9" font-weight="600" letter-spacing="0.5" fill="${p.initFg}">${esc(c.ko)}</text>`:''}
-  </svg>`;
+  const init = c.init || (c.han && c.han[0]) || '?';
+  const initSize = showName ? Math.round(size * 0.42) : Math.round(size * 0.55);
+  const nameSize = Math.max(8, Math.round(size * 0.105));
+  return `<div class="cmedal cat-${esc(c.cat||'ancient')}" style="width:${size}px;height:${size}px" role="img" aria-label="${esc(c.ko)} (${esc(c.han)})">
+    <div class="cmedal-init" style="font-size:${initSize}px">${esc(init)}</div>
+    ${showName ? `<div class="cmedal-name" style="font-size:${nameSize}px">${esc(c.ko)}</div>` : ''}
+  </div>`;
 }
 window._charMedallion = _charMedallion;
 
+// 사진 있는 캐릭터는 사진을 덮어 표시. 사진 onerror 시 CSS 메달리온이 자동 노출.
 function _charPhotoMedallion(charOrId, size){
   const c = (typeof charOrId === 'string') ? PHYSICIAN_BY_ID[charOrId] : charOrId;
   if(!c) return _charMedallion(charOrId, size);
   const imgs = (typeof CHARACTER_IMAGES !== 'undefined') ? CHARACTER_IMAGES : {};
   const meta = imgs[c.id];
   if(!meta || !meta.url) return _charMedallion(c, size);
-  const uid = 'cpm_' + c.id + '_' + size + '_' + Math.floor(Math.random()*100000).toString(36);
-  const svg = _charMedallion(c, size);
-  const pad = Math.max(2, Math.round(size * 0.04));
-  const ring = (CHAR_PALETTES[c.cat] || CHAR_PALETTES.ancient).ring;
+  // 메달리온을 안쪽에 깔고 사진을 위에 덮음. 사진 onerror → 숨김 → CSS 메달리온 노출.
+  const showName = size >= 80;
+  const init = c.init || (c.han && c.han[0]) || '?';
+  const initSize = showName ? Math.round(size * 0.42) : Math.round(size * 0.55);
+  const nameSize = Math.max(8, Math.round(size * 0.105));
+  const pad = Math.max(2, Math.round(size * 0.06));
   const labelEsc = `${esc(c.ko)} — ${esc(c.han)}`;
-  return `<div id="${uid}" role="img" aria-label="${labelEsc}" title="${labelEsc} · ${esc(meta.caption||'')}" style="position:relative;display:inline-block;width:${size}px;height:${size}px;vertical-align:middle">
-    <div style="position:absolute;inset:0">${svg}</div>
+  return `<div role="img" aria-label="${labelEsc}" title="${labelEsc} · ${esc(meta.caption||'')}" style="position:relative;display:inline-block;width:${size}px;height:${size}px;vertical-align:middle">
+    <div class="cmedal cat-${esc(c.cat||'ancient')}" style="position:absolute;inset:0;width:100%;height:100%">
+      <div class="cmedal-init" style="font-size:${initSize}px">${esc(init)}</div>
+      ${showName ? `<div class="cmedal-name" style="font-size:${nameSize}px">${esc(c.ko)}</div>` : ''}
+    </div>
     <img src="${esc(meta.url)}" alt="${labelEsc}" loading="lazy" decoding="async"
          onerror="this.style.display='none'"
-         style="position:absolute;inset:${pad}px;width:calc(100% - ${pad*2}px);height:calc(100% - ${pad*2}px);border-radius:50%;object-fit:cover;border:2px solid ${ring};box-shadow:0 1px 4px rgba(0,0,0,.25);background:var(--mi-w)">
-    ${size>=80?`<div style="position:absolute;left:0;right:0;bottom:0;padding:3px 4px;background:linear-gradient(to bottom, transparent 0%, rgba(28,20,10,.92) 65%);color:var(--mi-w);font-size:${Math.max(9,Math.round(size*0.11))}px;text-align:center;font-family:var(--font-display);font-weight:600;letter-spacing:.04em;border-radius:0 0 50% 50%/0 0 100% 100%;pointer-events:none">${esc(c.ko)}</div>`:''}
+         class="cmedal-photo"
+         style="top:${pad}px;left:${pad}px;width:calc(100% - ${pad*2}px);height:calc(100% - ${pad*2}px)">
+    ${showName ? `<div style="position:absolute;left:0;right:0;bottom:0;padding:3px 2px 4px;background:linear-gradient(to bottom, transparent 0%, rgba(28,20,10,.85) 80%);color:var(--mi-w);font-size:${nameSize}px;text-align:center;font-family:var(--font-display);font-weight:600;letter-spacing:.04em;pointer-events:none;border-radius:0 0 50%/0 0 100%">${esc(c.ko)}</div>` : ''}
   </div>`;
 }
 window._charPhotoMedallion = _charPhotoMedallion;
@@ -320,6 +292,8 @@ function refreshHeader(){
 // 古琴 시뮬레이션: sine + saw mix, 부드러운 attack, 긴 decay
 const bgm = {
   ctx: null, master: null, on: false, timer: null, t0: 0,
+  mode: null,        // 'ambient' | 'battle' | null
+  prevMode: null,
   scale: [261.63, 293.66, 329.63, 392.00, 440.00],  // C D E G A (penta major)
   bass:  [130.81, 196.00],  // C G drone
 
@@ -362,9 +336,36 @@ const bgm = {
     o2.start(t); o2.stop(t + dur + 0.05);
   },
 
+  // 戰鼓 — 짧고 강한 저주파 펄스 (배틀 음악용)
+  drum(when, gain){
+    if(!this.ctx) return;
+    const t = when;
+    // 노이즈 + 저주파 sine
+    const o = this.ctx.createOscillator();
+    o.type = 'sine'; o.frequency.setValueAtTime(110, t);
+    o.frequency.exponentialRampToValueAtTime(38, t + 0.08);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(gain || 0.32, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + 0.22);
+    // 단단한 attack — 짧은 잡음 클릭
+    const bn = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.04, this.ctx.sampleRate);
+    const data = bn.getChannelData(0);
+    for(let i = 0; i < data.length; i++) data[i] = (Math.random()*2 - 1) * (1 - i/data.length);
+    const src = this.ctx.createBufferSource();
+    src.buffer = bn;
+    const ng = this.ctx.createGain();
+    ng.gain.setValueAtTime((gain||0.32) * 0.35, t);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    src.connect(ng); ng.connect(this.master);
+    src.start(t);
+  },
+
   // 古琴 멜로디 패턴 — 五聲音階 무작위, 4박자 1마디 × N마디 반복
   schedule(){
-    if(!this.ctx || !this.on) return;
+    if(!this.ctx || !this.on || this.mode === 'battle') return;
     const t = this.ctx.currentTime;
     const bpm = 70;
     const beat = 60 / bpm;
@@ -386,25 +387,89 @@ const bgm = {
     this.timer = setTimeout(() => this.schedule(), bar * numBars * 1000 - 200);
   },
 
+  // 戰鬪 BGM — 五聲音階 단조형 (角宮羽商徵 거꾸로), 140 BPM, 戰鼓 강조
+  // A2/E3 드론 + 짧고 빠른 멜로디 + 16분음 戰鼓 → 긴박감
+  scheduleBattle(){
+    if(!this.ctx || !this.on || this.mode !== 'battle') return;
+    const t = this.ctx.currentTime;
+    const bpm = 140;
+    const beat = 60 / bpm;
+    const bar = beat * 4;
+    const numBars = 4;
+    // 단조형 五聲 (D minor pentatonic): D F G A C
+    const battleScale = [146.83, 174.61, 196.00, 220.00, 261.63];
+    const battleBass = [73.42, 110.00];  // D2, A2
+    for(let b = 0; b < numBars; b++){
+      const tb = t + b * bar;
+      // 戰鼓 — 매박 강박, 1·3박 강함
+      for(let i = 0; i < 4; i++){
+        const isStrong = (i === 0 || i === 2);
+        this.drum(tb + i * beat, isStrong ? 0.34 : 0.18);
+        // 16분음 추가 (긴박)
+        if(i === 1 || i === 3){
+          this.drum(tb + (i + 0.5) * beat, 0.12);
+        }
+      }
+      // 멜로디 — 8분음표로 빠르게, 가끔 16분음 추가
+      for(let i = 0; i < 8; i++){
+        if(Math.random() < 0.78){
+          const note = battleScale[Math.floor(Math.random() * battleScale.length)];
+          const oct = Math.random() < 0.4 ? 2 : 1;
+          this.pluck(note * oct, tb + i * (beat/2), beat * 0.7, 0.13 + Math.random() * 0.05);
+        }
+      }
+      // 베이스 드론 — 1박 + 3박 강조
+      this.pluck(battleBass[b % 2], tb, beat * 1.9, 0.18);
+      this.pluck(battleBass[(b+1) % 2], tb + beat * 2, beat * 1.9, 0.16);
+    }
+    this.timer = setTimeout(() => this.scheduleBattle(), bar * numBars * 1000 - 200);
+  },
+
   start(){
     this.init();
     if(!this.ctx){ toast('이 기기는 BGM 미지원'); return; }
     if(this.ctx.state === 'suspended') this.ctx.resume();
     this.on = true;
+    this.mode = 'ambient';
+    clearTimeout(this.timer);
     this.schedule();
     refreshHeader();
   },
   stop(){
     this.on = false;
+    this.mode = null;
     clearTimeout(this.timer);
     refreshHeader();
   },
-  toggle(){ this.on ? this.stop() : this.start(); }
+  toggle(){ this.on ? this.stop() : this.start(); },
+
+  // 배틀 입장 시 호출 — 긴박한 戰鬪 BGM 으로 즉시 전환 (사용자 토글에 무관)
+  startBattle(){
+    this.init();
+    if(!this.ctx) return;
+    if(this.ctx.state === 'suspended') this.ctx.resume();
+    this.on = true;
+    this.mode = 'battle';
+    this.prevMode = this.prevMode || 'ambient';
+    clearTimeout(this.timer);
+    this.scheduleBattle();
+    refreshHeader();
+  },
+  // 배틀 종료 시 호출 — 이전 ambient 모드로 복귀
+  stopBattle(){
+    if(this.mode !== 'battle') return;
+    this.mode = 'ambient';
+    clearTimeout(this.timer);
+    if(this.on) this.schedule();
+    refreshHeader();
+  }
 };
 window.bgm = bgm;
 
 // ───── 7. 라우팅 ─────────────────────────────────────────────────────────────
 function setTab(name){
+  // 다른 탭으로 이동 시 배틀 로비 polling 정리
+  if(typeof stopLobbyPoll === 'function') stopLobbyPoll();
   S.lastTab = name; saveState();
   $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   view.scrollTop = 0; window.scrollTo({top:0, behavior:'instant'});
@@ -447,7 +512,7 @@ function renderHome(){
     <!-- 캐릭터 인사 (큰 메달리온 + 등급 진행) -->
     <div class="card imperial fade-in" id="hello-card">
       <div style="display:flex;align-items:center;gap:14px">
-        <div style="flex-shrink:0">${_charPhotoMedallion(S.character, 80)}</div>
+        <div style="flex-shrink:0;cursor:pointer" id="char-pick-medal" title="캐릭터 변경">${_charPhotoMedallion(S.character, 80)}</div>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span class="seal-stamp tiny" style="background:${rk.color}">${rk.seal}</span>
@@ -460,6 +525,12 @@ function renderHome(){
             ${nxt ? `· 다음 <span class="han">${esc(nxt.han)}</span>까지 ${(nxt.cost - S.qi).toLocaleString()} 氣` : '· <b>최고 등급</b>'}
           </div>
           <div class="rank-bar"><div class="rank-bar-fill" style="width:${(prog*100).toFixed(1)}%"></div></div>
+          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-o" type="button" id="char-pick-btn">
+              <span class="han" style="margin-right:3px">人</span>캐릭터 (${PHYSICIANS.length}인)
+            </button>
+            <span style="font-size:10.5px;color:var(--gutong);align-self:center">현재: <span class="han">${esc((PHYSICIAN_BY_ID[S.character]||{}).han||'?')}</span> · ${esc((PHYSICIAN_BY_ID[S.character]||{}).ko||'')}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -468,7 +539,7 @@ function renderHome(){
     <div class="tile-grid fade-in">
       <button class="tile" type="button" onclick="setTab('formula')">
         <span class="han">方劑</span><span class="ttl">처방</span>
-        <span class="desc">24 처방 카드 · 작용·구성·적응증</span>
+        <span class="desc">26 처방 카드 · 작용·구성·적응증</span>
       </button>
       <button class="tile" type="button" onclick="setTab('quiz')">
         <span class="han">問答</span><span class="ttl">기출·암기</span>
@@ -476,15 +547,15 @@ function renderHome(){
       </button>
       <button class="tile" type="button" onclick="setTab('herb')">
         <span class="han">本草</span><span class="ttl">약재</span>
-        <span class="desc">68 약재 · 처방 역인덱스</span>
+        <span class="desc">80 약재 · 처방 역인덱스</span>
       </button>
       <button class="tile" type="button" onclick="setTab('stats')">
         <span class="han">析究</span><span class="ttl">통계·분석</span>
-        <span class="desc">전체 오답 랭킹 · 기출·약재 시각화</span>
+        <span class="desc">기출·약재 시각화 · 全 학습자 오답</span>
       </button>
       <button class="tile gold wide" type="button" onclick="setTab('hall')">
         <span class="han">譽 · 對決</span><span class="ttl">명예의 전당 · 멀티 對決</span>
-        <span class="desc">9 等級 (賓醫→眞人) · 50 의가 · 氣博 베팅 배틀</span>
+        <span class="desc">9 等級 (賓醫→眞人) · 51 의가 · 氣博 베팅 배틀</span>
       </button>
     </div>
 
@@ -524,6 +595,14 @@ function renderHome(){
         <div><div class="seal" style="font-size:22px;color:var(--zhusha-d)">${(S.wrongIds||[]).length}</div><div style="font-size:11px;color:var(--mo-l)">오답</div></div>
       </div>
     </div>
+
+    <!-- 버전 표시 -->
+    <div class="version-row fade-in">
+      <span class="version-chip" title="앱 버전 ${esc(APP_VERSION)} (${esc(APP_BUILD)})">
+        <span class="dot"></span>
+        <span>方劑學 ${esc(APP_VERSION)} · ${esc(APP_BUILD)}</span>
+      </span>
+    </div>
   `;
 
   // 이름 편집
@@ -546,6 +625,10 @@ function renderHome(){
       renderHome();
     });
   });
+
+  // 캐릭터 선택 — 메달리온 & 버튼 둘 다 picker 열기
+  $('#char-pick-btn').addEventListener('click', openCharacterPicker);
+  $('#char-pick-medal').addEventListener('click', openCharacterPicker);
 
   // 피드백 send / refresh
   $('#fb-send').addEventListener('click', sendFeedback);
@@ -762,19 +845,25 @@ function renderHall(){
       </div>
     </div>
 
-    <!-- 등급 사다리 -->
+    <!-- 등급 사다리 (등급별 사용자 표시 v2.2) -->
     <div class="card fade-in" style="margin-top:14px">
       <div class="card-title"><span class="han">階梯</span> 등급 사다리</div>
       ${RANKS.map((r,i) => {
         const reached = S.qi >= r.cost;
         const current = r.id === rk.id;
-        return `<div style="display:flex;align-items:center;gap:10px;padding:7px 4px;${current?'background:#FFF8E0;border-radius:6px':''}">
+        const nextCost = RANKS[i+1] ? RANKS[i+1].cost : null;
+        return `<div class="ladder-row ${current?'is-current':''}">
           <span class="seal-stamp tiny" style="background:${r.color};${reached?'':'opacity:.35'}">${r.seal}</span>
-          <div style="flex:1">
-            <div style="font-family:var(--font-display);font-size:14px;color:${reached?'var(--mo)':'var(--gutong)'}">${esc(r.han)} <span style="font-size:11.5px;color:var(--mo-l);font-family:var(--font-body)">${esc(r.ko)}</span></div>
-            <div style="font-size:10.5px;color:var(--gutong);margin-top:1px">${esc(r.desc)}</div>
+          <div class="ladder-mid">
+            <div class="ladder-title" style="color:${reached?'var(--mo)':'var(--gutong)'}">
+              ${esc(r.han)} <span style="font-size:11.5px;color:var(--mo-l);font-family:var(--font-body)">${esc(r.ko)}</span>
+            </div>
+            <div class="ladder-desc">${esc(r.desc)}</div>
+            <div class="ladder-users" data-rank="${r.id}" data-min="${r.cost}" ${nextCost?`data-max="${nextCost}"`:''}>
+              <span class="ladder-user-empty">불러오는 중…</span>
+            </div>
           </div>
-          <span style="font-size:11.5px;color:${reached?'var(--zhusha-d)':'var(--gutong)'};font-family:var(--font-display)">${r.cost.toLocaleString()} 氣</span>
+          <span class="ladder-cost" style="color:${reached?'var(--zhusha-d)':'var(--gutong)'}">${r.cost.toLocaleString()} 氣</span>
         </div>`;
       }).join('')}
       <div style="font-size:10.5px;color:var(--gutong);margin-top:8px;font-style:italic;line-height:1.5">
@@ -805,6 +894,37 @@ function renderHall(){
   `;
   view.innerHTML = html;
   loadGlobalRank();
+  loadLadderUsers();
+}
+
+// 등급 사다리 각 행에 해당 등급에 오른 사용자 표시 (v2.2)
+async function loadLadderUsers(){
+  if(!FB){
+    $$('.ladder-users').forEach(el => { el.innerHTML = '<span class="ladder-user-empty">오프라인</span>'; });
+    return;
+  }
+  const all = await FB.get('presence');
+  $$('.ladder-users').forEach(el => {
+    const min = parseInt(el.dataset.min) || 0;
+    const max = el.dataset.max ? parseInt(el.dataset.max) : Infinity;
+    if(!all){ el.innerHTML = '<span class="ladder-user-empty">아무도 없음</span>'; return; }
+    // presence 데이터에서 min ≤ qi < max 범위에 해당하는 사용자 모두
+    const matched = Object.entries(all)
+      .map(([uid,p]) => ({uid, ...p}))
+      .filter(p => (p.qi||0) >= min && (p.qi||0) < max)
+      .sort((a,b) => (b.qi||0) - (a.qi||0));
+    if(!matched.length){
+      el.innerHTML = '<span class="ladder-user-empty">아직 도달자 없음</span>';
+      return;
+    }
+    el.innerHTML = matched.slice(0, 18).map(p => {
+      const isMe = p.uid === S.userId;
+      const med = _charMedallion(p.character || 'qibo', 18);
+      return `<span class="ladder-user-chip ${isMe?'is-me':''}" title="${esc(p.name||'')} · ${(p.qi||0).toLocaleString()} 氣">
+        ${med}<span class="nm">${esc(p.name||'익명')}${isMe?'(나)':''}</span>
+      </span>`;
+    }).join('') + (matched.length > 18 ? `<span class="ladder-user-empty" style="font-style:normal">+${matched.length-18}명</span>` : '');
+  });
 }
 
 async function loadGlobalRank(){
@@ -845,6 +965,8 @@ function calcBet(level){
 
 // 배틀 상태 (메모리)
 let _battle = null;
+let _lobbyTimer = null;
+let _lobbySelfTimer = null;
 
 function openBattleLobby(){
   // 입장 가능 베팅 레벨 필터링
@@ -856,37 +978,46 @@ function openBattleLobby(){
   let selected = opts.find(o => o.can)?.id || 'small';
   view.innerHTML = `
     <h2 class="view-title fade-in"><span class="han">對決</span>멀티 배틀</h2>
-    <div class="view-sub">2~6인 · 같은 베팅 레벨끼리 매칭 · 승자가 패자의 氣 획득</div>
+    <div class="view-sub">같은 베팅 레벨끼리 자동 매칭 · 승자가 패자의 氣 획득</div>
 
     <div class="card imperial fade-in">
-      <div class="card-title"><span class="han">氣博</span> 베팅 단계</div>
-      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:6px">현재 보유: <b class="seal" style="color:var(--zhusha-d)">${S.qi.toLocaleString()} 氣</b></div>
+      <div class="card-title">
+        <span class="han">氣博</span> 베팅 단계
+        <span style="float:right;font-size:11px;color:var(--gutong);font-family:var(--font-body);font-weight:400">실시간 대기자</span>
+      </div>
+      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:8px">현재 보유: <b class="seal" style="color:var(--zhusha-d)">${S.qi.toLocaleString()} 氣</b></div>
       <div class="bet-grid" id="bet-grid">
         ${opts.map(o => `
           <button class="bet-cell ${o.id===selected?'selected':''} ${o.can?'':'locked'}" type="button" data-id="${o.id}" ${o.can?'':'disabled'}>
-            <div class="han">${esc(o.han)}</div>
+            <span class="waiting-badge zero" data-level="${o.id}">…</span>
+            <div class="han">${esc(o.han)} <span style="font-size:11.5px;color:var(--gutong);font-family:var(--font-body)">${esc(o.ko)}</span></div>
             <div class="pct">${(o.pct*100)|0}%</div>
             <div class="min">${o.can?`= ${o.bet.toLocaleString()} 氣`:`氣 부족 (≥${o.min})`}</div>
+            <div class="waiting-list" data-list="${o.id}">
+              <span class="w-empty">대기자 없음</span>
+            </div>
           </button>
         `).join('')}
       </div>
     </div>
 
     <div class="card fade-in">
-      <div class="card-title"><span class="han">大廳</span> 대기실 (실시간)</div>
-      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:8px">선택한 레벨의 다른 학습자와 자동 매칭됩니다.</div>
-      <div style="display:flex;gap:6px;justify-content:center;margin-top:10px">
-        <button class="btn btn-lg" id="join-battle">入場</button>
+      <div style="display:flex;gap:6px;justify-content:center">
+        <button class="btn btn-lg" id="join-battle"><span class="han" style="margin-right:4px">入</span>入場</button>
         <button class="btn btn-o" id="cancel-battle">취소</button>
+      </div>
+      <div style="text-align:center;font-size:11px;color:var(--gutong);margin-top:8px">
+        선택한 레벨에 대기자가 있으면 즉시 매칭됩니다.
       </div>
     </div>
 
     <div class="card fade-in" style="font-size:11px;color:var(--gutong);background:var(--mi)">
       <div style="font-family:var(--font-display);font-size:13px;color:var(--zhusha-d);margin-bottom:4px">對決 규칙</div>
       <div>1. 입장 시 베팅액이 미리 차감(에스크로). 매칭 실패 시 환불.</div>
-      <div>2. 5문제 객관식 (작년 기출 + 처방 자동 생성). 60초 제한.</div>
+      <div>2. 5문제 객관식 (작년 기출 + 처방 자동 생성). 시간 제한.</div>
       <div>3. 승자가 패자의 베팅 全額 획득. 무승부면 환불.</div>
-      <div>4. 입장 시 캐릭터의 명언이 말풍선에 표시됩니다.</div>
+      <div>4. 입장 시 캐릭터의 명언이 말풍선에 표시됩니다. (긴박한 戰鬪 BGM)</div>
+      <div>5. ${Math.round(MATCH_TIMEOUT_MS/1000)}초 내 매칭 실패 시 자동 환불.</div>
     </div>
   `;
   $$('#bet-grid .bet-cell').forEach(el => {
@@ -896,93 +1027,229 @@ function openBattleLobby(){
       $$('#bet-grid .bet-cell').forEach(x => x.classList.toggle('selected', x.dataset.id === selected));
     });
   });
-  $('#cancel-battle').addEventListener('click', () => setTab('hall'));
-  $('#join-battle').addEventListener('click', () => joinBattleQueue(selected));
+  $('#cancel-battle').addEventListener('click', () => {
+    stopLobbyPoll();
+    setTab('hall');
+  });
+  $('#join-battle').addEventListener('click', () => {
+    stopLobbyPoll();
+    joinBattleQueue(selected);
+  });
+  // 베팅 레벨별 대기자 실시간 polling 시작
+  startLobbyPoll();
 }
 window.openBattleLobby = openBattleLobby;
 
-// 매칭 큐 — Firebase RTDB 의 /lobby/{level}/{userId} 에 자기 정보 push
-// 같은 level 의 다른 user 가 보이면 방을 만들고 양쪽 redirect
+// 각 베팅 레벨별 대기자 실시간 카운트·이름 표시 (v2.2)
+function startLobbyPoll(){
+  stopLobbyPoll();
+  refreshLobbyPresence();  // 즉시 1회
+  _lobbyTimer = setInterval(refreshLobbyPresence, LOBBY_REFRESH_MS);
+}
+function stopLobbyPoll(){
+  if(_lobbyTimer){ clearInterval(_lobbyTimer); _lobbyTimer = null; }
+}
+async function refreshLobbyPresence(){
+  if(!FB) return;
+  const now = Date.now();
+  for(const lvl of BET_LEVELS){
+    const all = await FB.get(`lobby/${lvl.id}`);
+    const badge = $(`.waiting-badge[data-level="${lvl.id}"]`);
+    const list  = $(`.waiting-list[data-list="${lvl.id}"]`);
+    if(!badge || !list) continue;
+    const fresh = all
+      ? Object.values(all).filter(p => (now - (p.ts||0)) < LOBBY_FRESH_MS)
+      : [];
+    badge.textContent = fresh.length;
+    badge.classList.toggle('zero', fresh.length === 0);
+    if(!fresh.length){
+      list.innerHTML = '<span class="w-empty">대기자 없음</span>';
+    } else {
+      list.innerHTML = fresh.slice(0, 6).map(p => {
+        const med = _charMedallion(p.character || 'qibo', 16);
+        return `<span class="w-chip" title="${esc(p.name||'')} · ${esc(p.character||'')} · ${ago(p.ts||0)}">
+          ${med}<span class="nm">${esc(p.name||'익명')}</span>
+        </span>`;
+      }).join('') + (fresh.length > 6 ? `<span class="w-empty" style="font-style:normal">+${fresh.length-6}명</span>` : '');
+    }
+  }
+}
+
+// 매칭 큐 — v2.2: 타임아웃·환불·견고화
+// Firebase RTDB 의 /lobby/{level}/{userId} 에 자기 정보 push
+// 같은 level 의 다른 user 가 보이면 방 생성 (userId 사전 순 작은 쪽이 생성 → race 회피)
+// 무한 로딩 방지: MATCH_TIMEOUT_MS 이내 매칭 실패 시 자동 환불
 async function joinBattleQueue(level){
   if(!FB){ toast('Firebase 연결 안됨'); return; }
   const bet = calcBet(level);
   if(S.qi < bet){ toast('氣 부족'); return; }
+
+  // 에스크로 — 즉시 氣 차감 (매칭 실패 시 환불)
+  S.qi -= bet;
+  saveState(); refreshHeader();
+
+  const startedAt = Date.now();
+  const lvlInfo = BET_LEVELS.find(l=>l.id===level);
   view.innerHTML = `
     <h2 class="view-title fade-in"><span class="han">入場</span>대결 대기</h2>
     <div class="view-sub">상대를 찾는 중입니다…</div>
-    <div style="text-align:center;margin:40px 0">
+    <div style="text-align:center;margin:36px 0">
       ${taijiSVG(120, true)}
       <div style="font-family:var(--font-display);font-size:14px;color:var(--zhusha-d);margin-top:18px;letter-spacing:.08em">
-        ${BET_LEVELS.find(l=>l.id===level).han} · ${bet.toLocaleString()} 氣
+        ${esc(lvlInfo.han)} · ${bet.toLocaleString()} 氣 <span style="color:var(--gutong);font-size:11px">(에스크로)</span>
       </div>
       <div style="font-size:12px;color:var(--mo-l);margin-top:8px" id="queue-status">대기 중…</div>
-      <button class="btn btn-o btn-sm" id="leave-queue" style="margin-top:18px">취소</button>
+      <div style="font-size:11px;color:var(--gutong);margin-top:4px" id="queue-timer"></div>
+      <button class="btn btn-o btn-sm" id="leave-queue" style="margin-top:18px">취소 (환불)</button>
     </div>
   `;
-  // 큐에 등록
+
+  // 큐 등록
   const myEntry = {
     userId: S.userId, name: S.name, character: S.character,
-    bet, level, qi: S.qi, ts: Date.now()
+    bet, level, qi: S.qi + bet, ts: Date.now()
   };
-  await FB.put(`lobby/${level}/${S.userId}`, myEntry);
-  // 폴링: 같은 level 의 다른 사용자 탐지 → 첫 발견 시 매칭 시도
   let polling = true;
-  $('#leave-queue').addEventListener('click', async () => {
+  let cleanedUp = false;
+  let pollCount = 0;
+
+  const cleanup = async (refund) => {
+    if(cleanedUp) return;
+    cleanedUp = true;
     polling = false;
-    await FB.del(`lobby/${level}/${S.userId}`);
+    try{ await FB.del(`lobby/${level}/${S.userId}`); }catch(_){}
+    if(refund){
+      S.qi += bet;
+      saveState(); refreshHeader();
+      toast(`매칭 실패 — ${bet} 氣 환불`,'gold');
+    }
+  };
+
+  const ok = await FB.put(`lobby/${level}/${S.userId}`, myEntry);
+  if(!ok){
+    await cleanup(true);
+    toast('큐 등록 실패. 네트워크 확인 후 재시도');
+    setTab('hall');
+    return;
+  }
+
+  // 자기 entry 30초 keep-alive (TS 갱신) — Firebase 폴링 사용자 detection 용
+  _lobbySelfTimer = setInterval(async () => {
+    if(!polling) return;
+    try{ await FB.put(`lobby/${level}/${S.userId}`, {...myEntry, ts: Date.now()}); }catch(_){}
+  }, 25 * 1000);
+
+  $('#leave-queue').addEventListener('click', async () => {
+    if(_lobbySelfTimer){ clearInterval(_lobbySelfTimer); _lobbySelfTimer = null; }
+    await cleanup(true);
     setTab('hall');
   });
-  let pollCount = 0;
+
+  // 타임아웃 알람 표시용
+  const timerDisp = setInterval(() => {
+    const el = $('#queue-timer');
+    if(!el) return;
+    const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+    const remain = Math.max(0, Math.ceil(MATCH_TIMEOUT_MS/1000) - elapsed);
+    el.textContent = `경과 ${elapsed}초 · ${remain}초 후 자동 환불`;
+  }, 1000);
+
   async function poll(){
-    if(!polling) return;
+    if(!polling){ clearInterval(timerDisp); return; }
     pollCount++;
-    const all = await FB.get(`lobby/${level}`);
-    if(!all){ setTimeout(poll, 2000); return; }
+    const elapsed = Date.now() - startedAt;
+    // ① 타임아웃 체크
+    if(elapsed > MATCH_TIMEOUT_MS){
+      clearInterval(timerDisp);
+      if(_lobbySelfTimer){ clearInterval(_lobbySelfTimer); _lobbySelfTimer = null; }
+      await cleanup(true);
+      view.innerHTML = `
+        <h2 class="view-title fade-in"><span class="han">流</span>매칭 실패</h2>
+        <div class="card imperial fade-in" style="text-align:center;padding:22px">
+          <div style="font-size:14px;color:var(--mo-l);margin-bottom:10px">${Math.round(MATCH_TIMEOUT_MS/1000)}초 동안 상대를 찾지 못했습니다.</div>
+          <div class="seal" style="font-size:18px;color:var(--feicui)">+${bet} 氣 환불 완료</div>
+          <div style="margin-top:14px;display:flex;gap:6px;justify-content:center">
+            <button class="btn" onclick="openBattleLobby()">다시 시도</button>
+            <button class="btn btn-o" onclick="setTab('hall')">명예의 전당</button>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    // ② 내 방이 이미 만들어졌나? (상대가 생성자였을 경우)
+    try{
+      const battles = await FB.get('battles');
+      if(battles){
+        const myRoom = Object.values(battles).find(r => r && r.players && r.players[S.userId] && r.status !== 'done');
+        if(myRoom){
+          clearInterval(timerDisp);
+          if(_lobbySelfTimer){ clearInterval(_lobbySelfTimer); _lobbySelfTimer = null; }
+          polling = false;
+          try{ await FB.del(`lobby/${level}/${S.userId}`); }catch(_){}
+          startBattle(myRoom.roomId, false);
+          return;
+        }
+      }
+    }catch(_){}
+
+    // ③ 같은 level 에 fresh 한 다른 사용자가 있나?
+    let all;
+    try{ all = await FB.get(`lobby/${level}`); }catch(_){ all = null; }
+    if(!all){
+      $('#queue-status') && ($('#queue-status').textContent = `대기 중… (${pollCount}회 검색)`);
+      setTimeout(poll, POLL_INTERVAL_MS);
+      return;
+    }
     const now = Date.now();
     const others = Object.values(all)
-      .filter(p => p.userId !== S.userId && (now - (p.ts||0)) < 60000)
+      .filter(p => p.userId !== S.userId && (now - (p.ts||0)) < LOBBY_FRESH_MS)
       .sort((a,b) => (a.ts||0) - (b.ts||0));
-    if(others.length > 0){
-      // 가장 먼저 등록된 상대와 매칭
-      const opp = others[0];
-      // race 회피: userId 가 더 작은 쪽이 방 생성
-      if(S.userId < opp.userId){
-        const roomId = 'r_' + Math.random().toString(36).slice(2,8);
-        const room = {
-          roomId, level, bet, status: 'starting',
-          players: {
-            [S.userId]: {name:S.name, character:S.character, score:0, qi:S.qi},
-            [opp.userId]: {name:opp.name, character:opp.character, score:0, qi:opp.qi},
-          },
-          questions: generateBattleQuestions(5),
-          createdAt: Date.now()
-        };
-        await FB.put(`battles/${roomId}`, room);
-        // 큐에서 제거
-        await FB.del(`lobby/${level}/${S.userId}`);
-        await FB.del(`lobby/${level}/${opp.userId}`);
-        polling = false;
-        startBattle(roomId, true);
-        return;
-      } else {
-        // 상대가 방 생성 대기 — 잠깐 더 폴링
-        $('#queue-status').textContent = '상대 발견! 방 생성 대기…';
-      }
+
+    if(others.length === 0){
+      $('#queue-status') && ($('#queue-status').textContent = `대기 중… (${pollCount}회 검색)`);
+      setTimeout(poll, POLL_INTERVAL_MS);
+      return;
     }
-    // 자기 방이 생성됐는지 확인
-    const battles = await FB.get('battles');
-    if(battles){
-      const myRoom = Object.values(battles).find(r => r.players && r.players[S.userId]);
-      if(myRoom){
-        polling = false;
-        startBattle(myRoom.roomId, false);
+
+    // 매칭 후보 발견
+    const opp = others[0];
+    // race 회피: userId 사전 순 더 작은 쪽이 방 생성
+    if(S.userId < opp.userId){
+      $('#queue-status') && ($('#queue-status').textContent = '상대 발견 — 방 생성 중…');
+      const roomId = 'r_' + Math.random().toString(36).slice(2,8) + Date.now().toString(36).slice(-4);
+      const room = {
+        roomId, level, bet, status: 'starting',
+        players: {
+          [S.userId]:  { userId:S.userId,  name:S.name,  character:S.character,  score:0, qi:S.qi+bet, bet, done:false },
+          [opp.userId]:{ userId:opp.userId,name:opp.name,character:opp.character,score:0, qi:opp.qi,    bet, done:false },
+        },
+        questions: generateBattleQuestions(5),
+        createdAt: Date.now()
+      };
+      const created = await FB.put(`battles/${roomId}`, room);
+      if(!created){
+        // 방 생성 실패 → 다시 폴링
+        setTimeout(poll, POLL_INTERVAL_MS);
         return;
       }
+      // 큐에서 양쪽 제거 (각자 노력)
+      try{ await FB.del(`lobby/${level}/${S.userId}`); }catch(_){}
+      try{ await FB.del(`lobby/${level}/${opp.userId}`); }catch(_){}
+      clearInterval(timerDisp);
+      if(_lobbySelfTimer){ clearInterval(_lobbySelfTimer); _lobbySelfTimer = null; }
+      polling = false;
+      startBattle(roomId, true);
+      return;
+    } else {
+      // 상대가 방 생성자 — 방이 만들어졌는지 다음 poll 에서 ② 분기로 잡힘
+      $('#queue-status') && ($('#queue-status').textContent = `상대 발견 (${esc(opp.name||'')}) — 방 생성 대기…`);
+      setTimeout(poll, Math.min(POLL_INTERVAL_MS, 1500));
+      return;
     }
-    $('#queue-status').textContent = `대기 중… (${pollCount * 2}초)`;
-    setTimeout(poll, 2000);
   }
-  setTimeout(poll, 1500);
+
+  setTimeout(poll, 1200);
 }
 
 // 배틀 문제 생성 (기출/자동) — 데이터가 있으면 사용, 없으면 placeholder
@@ -992,6 +1259,8 @@ async function startBattle(roomId, isCreator){
   const room = await FB.get(`battles/${roomId}`);
   if(!room){ toast('방을 찾을 수 없음'); setTab('hall'); return; }
   _battle = { roomId, isCreator, room };
+  // 戰鬪 BGM 시작 — 긴박감 (사용자 토글과 무관하게 켜짐)
+  try{ bgm.startBattle(); }catch(_){}
   // 인트로 컷 (對決開始 + 명언 말풍선)
   renderBattleIntro(room, () => renderBattleGame(roomId));
 }
@@ -1124,47 +1393,76 @@ async function renderBattleGame(roomId){
     view.innerHTML = `
       <h2 class="view-title"><span class="han">候</span>판정 대기</h2>
       <div style="text-align:center;margin:40px 0">${taijiSVG(80, true)}
-      <div style="margin-top:12px;color:var(--mo-l);font-size:12px">상대 결과 대기…</div></div>
+      <div style="margin-top:12px;color:var(--mo-l);font-size:12px" id="judging-status">상대 결과 대기…</div></div>
     `;
     // 내 점수 기록
     await FB.put(`battles/${roomId}/players/${S.userId}/score`, myScore);
     await FB.put(`battles/${roomId}/players/${S.userId}/done`, true);
-    // 폴링
+    // 폴링 — 최대 30초 대기 후 강제 종료 (상대 disconnect 시 부전승)
+    const MAX_TRIES = 20;
+    const POLL_MS = 1500;
     let tries = 0;
     async function pollEnd(){
       tries++;
       const r = await FB.get(`battles/${roomId}`);
-      if(!r){ toast('방이 사라졌습니다'); setTab('hall'); return; }
-      const players = r.players || {};
-      const allDone = Object.values(players).every(p => p.done);
-      if(allDone || tries > 30){
-        showResult(r);
+      if(!r){
+        // 방이 사라짐 → 패배 처리 안 함, 환불 (에스크로 복구)
+        S.qi += room.bet;
+        saveState(); refreshHeader();
+        bgm.stopBattle();
+        toast('방이 사라졌습니다 — 베팅 환불','gold');
+        setTab('hall');
         return;
       }
-      setTimeout(pollEnd, 1500);
+      const players = r.players || {};
+      const allDone = Object.values(players).every(p => p.done);
+      if(allDone){
+        showResult(r, false);
+        return;
+      }
+      if(tries > MAX_TRIES){
+        // 상대 타임아웃 → 부전승 (forfeit)
+        showResult(r, true);
+        return;
+      }
+      const elapsed = tries * POLL_MS / 1000;
+      const st = $('#judging-status');
+      if(st) st.textContent = `상대 결과 대기… (${elapsed.toFixed(0)}초)`;
+      setTimeout(pollEnd, POLL_MS);
     }
     pollEnd();
   }
 
-  async function showResult(room){
+  async function showResult(room, forfeit){
+    bgm.stopBattle();  // 戰鬪 BGM 종료 → ambient 복귀
     const players = room.players;
     const me = players[S.userId];
     const oppId = Object.keys(players).find(k => k !== S.userId);
     const opp = players[oppId];
     const bet = room.bet;
     let outcome = 'draw';
-    let deltaQi = 0;
-    if(me.score > (opp.score||0)){ outcome = 'win'; deltaQi = bet; }
-    else if(me.score < (opp.score||0)){ outcome = 'lose'; deltaQi = -bet; }
-    else { outcome = 'draw'; deltaQi = 0; }
+    let deltaQi = 0;          // 사용자 노출용: 진입 전 대비 변화
+    let qiAdjust = 0;          // 에스크로 후 추가 조정량
 
-    // 氣 정산 (개인만 — 글로벌은 presence 다음 ping 으로 반영)
-    S.qi += deltaQi;
+    if(forfeit && (!opp.done)){
+      outcome = 'win';
+      deltaQi = bet;
+      qiAdjust = bet * 2;       // 에스크로 환불 + 상대 베팅 흡수
+    } else if(me.score > (opp.score||0)){
+      outcome = 'win';  deltaQi = bet;  qiAdjust = bet * 2;
+    } else if(me.score < (opp.score||0)){
+      outcome = 'lose'; deltaQi = -bet; qiAdjust = 0;            // 에스크로로 이미 차감됨
+    } else {
+      outcome = 'draw'; deltaQi = 0;   qiAdjust = bet;            // 환불
+    }
+
+    // 氣 정산 (에스크로 후 추가 조정)
+    S.qi += qiAdjust;
     if(S.qi < 0) S.qi = 0;
     // 배틀 히스토리
     S.battleHistory = S.battleHistory || [];
     S.battleHistory.unshift({
-      ts: Date.now(), win: outcome === 'win', draw: outcome === 'draw',
+      ts: Date.now(), win: outcome === 'win', draw: outcome === 'draw', forfeit: !!forfeit,
       myScore: me.score, oppScore: opp.score||0,
       opponentName: opp.name, opponentChar: opp.character,
       bet, deltaQi
@@ -1179,7 +1477,7 @@ async function renderBattleGame(roomId){
     const meChar = PHYSICIAN_BY_ID[me.character];
     const oppChar = PHYSICIAN_BY_ID[opp.character];
     const titleHan = outcome === 'win' ? '勝' : (outcome === 'lose' ? '敗' : '和');
-    const titleKo = outcome === 'win' ? '승리' : (outcome === 'lose' ? '패배' : '무승부');
+    const titleKo = outcome === 'win' ? (forfeit?'부전승':'승리') : (outcome === 'lose' ? '패배' : '무승부');
     view.innerHTML = `
       <h2 class="view-title fade-in"><span class="han">${titleHan}</span>${esc(titleKo)}</h2>
       <div class="card imperial fade-in" style="text-align:center;padding:24px 14px">
@@ -1187,7 +1485,7 @@ async function renderBattleGame(roomId){
         <div style="font-size:30px;font-family:var(--font-display);color:${deltaQi>0?'var(--feicui)':(deltaQi<0?'var(--zhusha)':'var(--gutong)')}">
           ${deltaQi>0?'+':''}${deltaQi} 氣
         </div>
-        <div style="margin-top:6px;font-size:13px;color:var(--mo-l)">베팅 ${bet.toLocaleString()} 氣 · 현재 ${S.qi.toLocaleString()} 氣</div>
+        <div style="margin-top:6px;font-size:13px;color:var(--mo-l)">베팅 ${bet.toLocaleString()} 氣 · 현재 ${S.qi.toLocaleString()} 氣${forfeit?'<br><span style="color:var(--gutong);font-size:11px;font-style:italic">(상대 응답 없음 — 부전승)</span>':''}</div>
       </div>
       <div class="card fade-in" style="margin-top:14px">
         <div class="card-title"><span class="han">戰況</span> 결과</div>
@@ -1205,7 +1503,7 @@ async function renderBattleGame(roomId){
             <div style="font-weight:600;color:var(--mo)">${esc(opp.name)}</div>
             <div style="font-size:11px;color:var(--gutong)"><span class="han">${esc(oppChar?.han||'')}</span></div>
           </div>
-          <div class="seal" style="font-size:22px;color:var(--zhusha-d)">${opp.score||0}</div>
+          <div class="seal" style="font-size:22px;color:var(--zhusha-d)">${opp.score||0}${forfeit?' <span style="font-size:10px;color:var(--gutong)">(미응답)</span>':''}</div>
         </div>
       </div>
       <div style="display:flex;gap:6px;justify-content:center;margin-top:14px">
@@ -1286,119 +1584,469 @@ async function renderWrongsRank(det){
   `;
 }
 
+// ─── 기출 분석 v2.2 ──────────────────────────────────────────────────────
+// 모든 년도 기출 + 유형·章·처방·난이도별 분포. sub-tabs 로 5종 차트 전환.
 function renderExamAnalysis(det){
   const exams = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
   if(!exams.length){
     det.innerHTML = `<div class="card"><div class="card-title"><span class="han">問</span> 기출 분석</div><div style="font-size:12.5px;color:var(--gutong);text-align:center;padding:16px">data-formulas.js 에 PAST_EXAMS 배열이 필요합니다.</div></div>`;
     return;
   }
-  // 유형별 카운트
-  const byType = {};
-  const byFormula = {};
+
+  // 년도·시험 추출 (src: "22-2 1차수시", "22-1 기말고사", "심화" 등)
+  function srcYear(src){
+    const m = (src||'').match(/^(\d{2})/);
+    return m ? `20${m[1]}` : (src && src.startsWith('심화') ? '심화' : '기타');
+  }
+  function srcExam(src){
+    // 22-2 1차수시 → "22-2 1차수시", 심화 → "심화"
+    return src || '기타';
+  }
+
+  // 집계
+  const byYear     = {};
+  const byExam     = {};
+  const byType     = {};
+  const byFormula  = {};
+  const byChapter  = {};
+  const byDiff     = {};
   exams.forEach(e => {
-    byType[e.type||'기타'] = (byType[e.type||'기타']||0) + 1;
-    if(e.formula) byFormula[e.formula] = (byFormula[e.formula]||0) + 1;
+    const y = srcYear(e.src);
+    const ex = srcExam(e.src);
+    const ty = e.type || '기타';
+    const fo = e.formula || '기타';
+    const ch = (e.chapter||'').split('-')[0] || '?';
+    const d  = e.difficulty || 1;
+    byYear[y] = (byYear[y]||0)+1;
+    byExam[ex] = (byExam[ex]||0)+1;
+    byType[ty] = (byType[ty]||0)+1;
+    byFormula[fo] = (byFormula[fo]||0)+1;
+    byChapter[ch] = (byChapter[ch]||0)+1;
+    byDiff[d] = (byDiff[d]||0)+1;
   });
-  const typeArr = Object.entries(byType).sort((a,b)=>b[1]-a[1]);
-  const formulaArr = Object.entries(byFormula).sort((a,b)=>b[1]-a[1]).slice(0, 12);
-  const maxT = typeArr[0]?.[1] || 1;
-  const maxF = formulaArr[0]?.[1] || 1;
+
+  const bar = (arr, maxOverride) => {
+    const max = maxOverride || (arr[0]?.[1] || 1);
+    return `<div class="bar-chart">${arr.map(([k,v]) => `
+      <div class="bar-row">
+        <span class="bar-label">${esc(k)}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${v/max*100}%">${v}</div></div>
+      </div>
+    `).join('')}</div>`;
+  };
+
+  const sort = (obj, lim) => Object.entries(obj).sort((a,b)=>b[1]-a[1]).slice(0, lim||999);
+
   det.innerHTML = `
     <div class="card fade-in">
-      <div class="card-title"><span class="han">問</span> 기출 ${exams.length}문 분석</div>
-
-      <div style="margin-top:8px"><b style="font-size:13px;color:var(--zhusha-d)">유형별 분포</b></div>
-      <div class="bar-chart">
-        ${typeArr.map(([k,v]) => `
-          <div class="bar-row">
-            <span class="bar-label">${esc(k)}</span>
-            <div class="bar-track"><div class="bar-fill" style="width:${v/maxT*100}%">${v}</div></div>
-          </div>
-        `).join('')}
+      <div class="card-title"><span class="han">問</span> 기출 ${exams.length}문 종합 분석</div>
+      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:8px">${Object.keys(byExam).length}회 시험 · ${Object.keys(byFormula).length}처방 · ${Object.keys(byType).length}유형</div>
+      <div class="subtab-row" id="exam-subtab">
+        <button class="subtab-btn on" data-k="exam">시험회차</button>
+        <button class="subtab-btn" data-k="year">년도별</button>
+        <button class="subtab-btn" data-k="formula">처방별</button>
+        <button class="subtab-btn" data-k="type">유형별</button>
+        <button class="subtab-btn" data-k="chapter">章별</button>
+        <button class="subtab-btn" data-k="difficulty">난이도</button>
       </div>
-
-      <div style="margin-top:14px"><b style="font-size:13px;color:var(--zhusha-d)">처방별 출제 빈도 TOP 12</b></div>
-      <div class="bar-chart">
-        ${formulaArr.map(([k,v]) => `
-          <div class="bar-row">
-            <span class="bar-label">${esc(k)}</span>
-            <div class="bar-track"><div class="bar-fill" style="width:${v/maxF*100}%">${v}</div></div>
-          </div>
-        `).join('')}
-      </div>
+      <div id="exam-detail"></div>
     </div>
   `;
+
+  const detEl = $('#exam-detail');
+  const charts = {
+    exam:       () => `<div><b style="font-size:13px;color:var(--zhusha-d)">시험 회차별 출제 수</b><div style="font-size:11px;color:var(--gutong);margin-bottom:6px">모든 년도 시험을 포함합니다 (${exams.length}문)</div>${bar(sort(byExam))}</div>`,
+    year:       () => `<div><b style="font-size:13px;color:var(--zhusha-d)">년도별 출제 수</b>${bar(sort(byYear))}</div>`,
+    formula:    () => `<div><b style="font-size:13px;color:var(--zhusha-d)">처방별 출제 빈도 (전체 ${Object.keys(byFormula).length}처방)</b><div style="font-size:11px;color:var(--gutong);margin-bottom:6px">시험에서 자주 출제된 처방 순</div>${bar(sort(byFormula, 20))}</div>`,
+    type:       () => `<div><b style="font-size:13px;color:var(--zhusha-d)">유형별 분포</b>${bar(sort(byType))}</div>`,
+    chapter:    () => `<div><b style="font-size:13px;color:var(--zhusha-d)">章별 분포</b><div style="font-size:11px;color:var(--gutong);margin-bottom:6px">6장 溫經散寒·7장 表裏雙解·8장 補益</div>${bar(sort(byChapter))}</div>`,
+    difficulty: () => {
+      const dm = (typeof DIFFICULTY_META !== 'undefined') ? DIFFICULTY_META : {1:{ko:'초급',han:'初級'},2:{ko:'중급',han:'中級'},3:{ko:'고급',han:'高級'},4:{ko:'지옥',han:'地獄'}};
+      const arr = [1,2,3,4].map(d => [`${dm[d].han} ${dm[d].ko}`, byDiff[d]||0]);
+      return `<div><b style="font-size:13px;color:var(--zhusha-d)">난이도별 분포</b>${bar(arr)}</div>`;
+    },
+  };
+  function showChart(k){
+    detEl.innerHTML = (charts[k] || charts.exam)();
+    $$('#exam-subtab .subtab-btn').forEach(b => b.classList.toggle('on', b.dataset.k === k));
+  }
+  $$('#exam-subtab .subtab-btn').forEach(b => b.addEventListener('click', () => showChart(b.dataset.k)));
+  showChart('exam');
 }
 
+// ─── 약재 분석 v2.2 ──────────────────────────────────────────────────────
+// 단순 君臣佐使가 아닌 — 性味·効能·처방내 쓰임으로 시각화
+//   ① 性味 scatter — x축 性(寒↔熱), y축 味(辛甘苦酸鹹)
+//   ② 効能 category grid — 補氣·補血·解表 등 작용군별 그룹
+//   ③ 君臣佐使 conic-gradient pie (총합)
+//   ④ TOP 20 빈출 약재 bar
 function renderHerbAnalysis(det){
   const formulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
-  if(!formulas.length){
-    det.innerHTML = `<div class="card"><div class="card-title"><span class="han">本草</span> 약재 분석</div><div style="font-size:12.5px;color:var(--gutong);text-align:center;padding:16px">data-formulas.js 에 FORMULAS 배열이 필요합니다.</div></div>`;
+  const herbs    = (typeof HERBS    !== 'undefined') ? HERBS    : [];
+  if(!formulas.length || !herbs.length){
+    det.innerHTML = `<div class="card"><div class="card-title"><span class="han">本草</span> 약재 분석</div><div style="font-size:12.5px;color:var(--gutong);text-align:center;padding:16px">data-formulas.js 의 FORMULAS·HERBS 필요</div></div>`;
     return;
   }
-  // 약재 → 처방 역인덱스
+
+  // 약재 → 처방 역인덱스 (han 기준)
   const herbIdx = {};
   formulas.forEach(f => {
     (f.composition||[]).forEach(h => {
       const name = (typeof h === 'string') ? h : (h.name||h.han||h.ko||'?');
-      (herbIdx[name] ||= []).push(f);
+      // 괄호 안 포자명 제거 (e.g., 甘草(炙) → 甘草)
+      const clean = name.replace(/\([^)]*\)/g, '').trim();
+      (herbIdx[clean] ||= []).push(f);
     });
   });
-  const sorted = Object.entries(herbIdx).sort((a,b)=>b[1].length-a[1].length).slice(0, 20);
-  const max = sorted[0]?.[1].length || 1;
+
+  // 性 (-2 寒 ~ +2 熱) 파싱
+  function parseNature(sm){
+    if(!sm) return 0;
+    if(/大熱/.test(sm)) return 2;
+    if(/熱/.test(sm))    return 1.5;
+    if(/微溫/.test(sm)) return 0.8;
+    if(/溫/.test(sm))   return 1.2;
+    if(/平/.test(sm))   return 0;
+    if(/凉|涼/.test(sm)) return -1;
+    if(/微寒/.test(sm)) return -0.8;
+    if(/大寒/.test(sm)) return -2;
+    if(/寒/.test(sm))   return -1.5;
+    return 0;
+  }
+  // 性 → CSS bubble class
+  function natureClass(n){
+    if(n <= -1.4) return 'b-cold';
+    if(n <= -0.4) return 'b-cool';
+    if(n <= 0.4)  return 'b-neut';
+    if(n <= 1.4)  return 'b-warm';
+    return 'b-hot';
+  }
+  // 味 — 가중 평균 ([辛甘苦酸鹹] 위치)
+  // y axis: -2 (辛) ~ +2 (鹹) — 五味의 配置는 임의지만 인접 미가 가까이
+  // 辛(陽散, 上)=-2, 甘(緩中)=-1, 苦(降泄)=0, 酸(收斂)=+1, 鹹(軟堅, 下)=+2
+  // 淡(滲) ≒ 甘, 澁 ≒ 酸
+  const FLAVOR_POS = {'辛':-2, '甘':-1, '淡':-1, '苦':0, '酸':1, '澁':1, '澀':1, '鹹':2, '咸':2};
+  function parseFlavor(sm){
+    if(!sm) return 0;
+    // sm 형태 예: "甘微苦,微溫" → 부분 "甘微苦"에서 맛만 추출
+    const tastePart = sm.split(',')[0] || sm;
+    const tastes = [];
+    for(const ch of tastePart){
+      if(FLAVOR_POS[ch] !== undefined) tastes.push(FLAVOR_POS[ch]);
+    }
+    if(!tastes.length) return 0;
+    return tastes.reduce((a,b)=>a+b,0) / tastes.length;
+  }
+
+  // 効能 카테고리 — meaning 키워드 매칭
+  const EFFICACY_CATS = [
+    { id:'buqi',   ko:'補氣',  han:'補氣',   keys:['補氣','益氣','補中','補脾','大補元氣'] },
+    { id:'buxue',  ko:'補血',  han:'補血',   keys:['補血','養血','生血'] },
+    { id:'buyin',  ko:'補陰',  han:'補陰',   keys:['滋陰','養陰','補陰','潤燥','生津'] },
+    { id:'buyang', ko:'補陽',  han:'補陽',   keys:['補陽','助陽','溫補','溫腎','補火'] },
+    { id:'jiebiao',ko:'解表',  han:'解表',   keys:['解表','發汗','解肌','疏散','疏風'] },
+    { id:'qingre', ko:'清熱',  han:'清熱',   keys:['清熱','瀉火','凉血','解毒','除煩'] },
+    { id:'wenli',  ko:'溫裏',  han:'溫裏',   keys:['溫中','溫裏','散寒','回陽','溫經'] },
+    { id:'xiexia', ko:'瀉下',  han:'瀉下',   keys:['瀉下','潤腸','通便','軟堅'] },
+    { id:'huatan', ko:'化痰',  han:'化痰',   keys:['化痰','止咳','平喘','宣肺','降逆'] },
+    { id:'xingqi', ko:'行氣',  han:'行氣',   keys:['行氣','理氣','降氣','破氣','疏肝'] },
+    { id:'huoxue', ko:'活血',  han:'活血',   keys:['活血','祛瘀','行血','通脈'] },
+    { id:'anshen', ko:'安神',  han:'安神',   keys:['安神','寧心','養心','鎮驚'] },
+    { id:'lishui', ko:'利水',  han:'利水',   keys:['利水','滲濕','利尿','燥濕'] },
+    { id:'guse',   ko:'固澁',  han:'固澁',   keys:['固表','止汗','澀精','收斂','止瀉'] },
+    { id:'kaiqiao',ko:'開竅',  han:'開竅',   keys:['開竅','醒神','豁痰開竅'] },
+  ];
+  // 약재별 효능 분류
+  function efficacyOf(h){
+    const m = h.meaning || '';
+    return EFFICACY_CATS.filter(c => c.keys.some(k => m.includes(k))).map(c => c.id);
+  }
+
+  // 君臣佐使 전체 분포 (모든 처방·약재)
+  const totalRoles = {君:0, 臣:0, 佐:0, 使:0, 미배정:0};
+  formulas.forEach(f => {
+    const ms = f.monarch_minister || {};
+    (f.composition||[]).forEach(h => {
+      const name = (typeof h === 'string') ? h.replace(/\([^)]*\)/g,'').trim() : h;
+      let assigned = false;
+      ['君','臣','佐','使'].forEach(r => {
+        const v = ms[r];
+        if(v && (Array.isArray(v) ? v.some(x => (x||'').replace(/\([^)]*\)/g,'').trim()===name) : v.includes(name))){
+          totalRoles[r]++; assigned = true;
+        }
+      });
+      if(!assigned) totalRoles.미배정++;
+    });
+  });
+
+  // herbs 배열의 각 항목에 위치 정보 부여
+  const herbsX = herbs.map(h => {
+    const used = herbIdx[h.han] || [];
+    return {
+      ...h,
+      nature: parseNature(h.sm),
+      flavor: parseFlavor(h.sm),
+      usedCount: used.length,
+      usedFormulas: used,
+      efficacies: efficacyOf(h)
+    };
+  }).filter(h => h.usedCount > 0);  // 처방에 실제로 쓰인 것만
+
+  // 효능 category × 약재 grid
+  const efnGroups = {};
+  EFFICACY_CATS.forEach(c => { efnGroups[c.id] = []; });
+  herbsX.forEach(h => h.efficacies.forEach(eid => efnGroups[eid].push(h)));
+
+  // scatter 좌표 변환 — 캔버스 percentage (좌측 패딩 6%, 우측 6%)
+  // x: nature -2 → 8%, +2 → 92% (linear)
+  // y: flavor -2 → 12%, +2 → 84%
+  function xPct(n){ return (8 + ((n+2)/4)*84).toFixed(2); }
+  function yPct(f){
+    // 위에서 아래로 (辛↑ 鹹↓) — flavor -2 → top 12, +2 → bottom 84 → invert
+    return (12 + ((f+2)/4)*72).toFixed(2);
+  }
+
+  // 빈출 TOP 20 정렬
+  const top20 = Object.entries(herbIdx).sort((a,b)=>b[1].length-a[1].length).slice(0, 20);
+  const topMax = top20[0]?.[1].length || 1;
+
+  // role pie 비율
+  const totalRoleSum = Object.values(totalRoles).reduce((a,b)=>a+b,0) || 1;
+  const roleColors = {君:'#9C3030', 臣:'#C9A227', 佐:'#3068A0', 使:'#2A7060', 미배정:'#876A36'};
+  let acc = 0;
+  const stops = ['君','臣','佐','使','미배정'].map(r => {
+    const pct = totalRoles[r] / totalRoleSum * 100;
+    const from = acc, to = acc + pct;
+    acc = to;
+    return `${roleColors[r]} ${from.toFixed(2)}% ${to.toFixed(2)}%`;
+  }).join(', ');
+  const totalHerbInstances = totalRoleSum;
+
   det.innerHTML = `
     <div class="card fade-in">
-      <div class="card-title"><span class="han">本草</span> 약재 분석 (${Object.keys(herbIdx).length} 종)</div>
-      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:6px">처방에 가장 많이 쓰이는 약재 TOP 20</div>
-      <div class="bar-chart">
-        ${sorted.map(([h, list]) => `
-          <div class="bar-row" style="cursor:pointer" onclick="openHerbDetail('${esc(h)}')">
-            <span class="bar-label">${esc(h)}</span>
-            <div class="bar-track"><div class="bar-fill" style="width:${list.length/max*100}%">${list.length}</div></div>
-            <span class="bar-val">${list.slice(0,2).map(x=>x.han||x.ko).join('·')}${list.length>2?'…':''}</span>
-          </div>
-        `).join('')}
+      <div class="card-title"><span class="han">本草</span> 약재 종합 분석 (${herbsX.length} 종 · ${formulas.length} 처방)</div>
+      <div class="subtab-row" id="herb-subtab">
+        <button class="subtab-btn on" data-k="scatter">性味 분포</button>
+        <button class="subtab-btn" data-k="efficacy">効能 분류</button>
+        <button class="subtab-btn" data-k="role">君臣佐使</button>
+        <button class="subtab-btn" data-k="top">빈출 TOP 20</button>
       </div>
-      <div style="font-size:11px;color:var(--gutong);margin-top:8px;font-style:italic">바를 탭하면 해당 약재의 처방 목록·군신좌사 위치 분석을 볼 수 있습니다.</div>
+      <div id="herb-detail"></div>
     </div>
   `;
+
+  const detEl = $('#herb-detail');
+
+  function renderScatter(){
+    // 사이즈별 (사용 빈도) bubble radius
+    const maxUse = Math.max(...herbsX.map(h => h.usedCount));
+    const minR = 12, maxR = 28;
+    const bubbles = herbsX.map(h => {
+      const r = minR + (maxR - minR) * (h.usedCount / maxUse);
+      const x = xPct(h.nature);
+      const y = yPct(h.flavor);
+      const cls = natureClass(h.nature);
+      return `<button type="button" class="herb-bubble ${cls}" style="left:${x}%;top:${y}%;width:${r}px;height:${r}px"
+        onclick="openHerbDetail('${esc(h.han)}')"
+        title="${esc(h.han)} (${esc(h.ko)}) · 性味: ${esc(h.sm)} · ${h.usedCount}처방">${esc(h.han.slice(0,1))}</button>`;
+    }).join('');
+    detEl.innerHTML = `
+      <div style="font-size:12px;color:var(--mo-l);margin:6px 0 4px">
+        <b style="color:var(--zhusha-d)">性味 분포도</b> · X축 性(寒↔熱) Y축 味(辛甘苦酸鹹) · 圓크기 = 사용 빈도
+      </div>
+      <div class="herb-scatter">
+        <span class="axis axis-x"></span>
+        <span class="axis axis-y"></span>
+        <!-- x축 눈금 -->
+        <span class="axis-tick tk-x" style="left:8%">寒</span>
+        <span class="axis-tick tk-x" style="left:30%">凉</span>
+        <span class="axis-tick tk-x" style="left:50%">平</span>
+        <span class="axis-tick tk-x" style="left:70%">溫</span>
+        <span class="axis-tick tk-x" style="left:92%">熱</span>
+        <!-- y축 눈금 -->
+        <span class="axis-tick tk-y" style="top:12%">辛</span>
+        <span class="axis-tick tk-y" style="top:30%">甘</span>
+        <span class="axis-tick tk-y" style="top:48%">苦</span>
+        <span class="axis-tick tk-y" style="top:66%">酸</span>
+        <span class="axis-tick tk-y" style="top:84%">鹹</span>
+        <span class="ax-title tt-x">性 ─ 四氣 (寒↔熱)</span>
+        <span class="ax-title tt-y">味 (辛↑ 鹹↓)</span>
+        ${bubbles}
+      </div>
+      <div class="legend-row">
+        <span><span class="lg-sw" style="background:radial-gradient(circle at 30% 30%, #5DA8C8, #08405C)"></span>寒</span>
+        <span><span class="lg-sw" style="background:radial-gradient(circle at 30% 30%, #6FB0D8, #2A6080)"></span>凉</span>
+        <span><span class="lg-sw" style="background:radial-gradient(circle at 30% 30%, #B5946A, #6E5028)"></span>平</span>
+        <span><span class="lg-sw" style="background:radial-gradient(circle at 30% 30%, #E08858, #A02818)"></span>溫</span>
+        <span><span class="lg-sw" style="background:radial-gradient(circle at 30% 30%, #FF8030, #6E0E0E)"></span>熱</span>
+      </div>
+      <div style="font-size:11px;color:var(--gutong);margin-top:8px;font-style:italic;line-height:1.5">
+        圓 탭 → 해당 약재의 처방 내 役割·効能 상세. 같은 작용군의 약재들이 비슷한 위치에 모입니다.
+      </div>
+    `;
+  }
+
+  function renderEfficacy(){
+    detEl.innerHTML = `
+      <div style="font-size:12px;color:var(--mo-l);margin:6px 0 4px">
+        <b style="color:var(--zhusha-d)">효능 분류</b> · 작용 키워드별 약재 그룹 (한 약재가 여러 그룹에 속할 수 있음)
+      </div>
+      <div class="efn-grid">
+        ${EFFICACY_CATS.map(c => {
+          const list = efnGroups[c.id] || [];
+          if(!list.length) return '';
+          return `<div class="efn-cell">
+            <div class="ef-title">
+              <span><span class="han">${esc(c.han)}</span> · ${esc(c.ko)}</span>
+              <span class="ef-count">${list.length}종</span>
+            </div>
+            <div class="ef-herbs">${list.map(h=>`<a style="color:var(--zhusha-d);text-decoration:none;cursor:pointer" onclick="openHerbDetail('${esc(h.han)}')">${esc(h.han)}</a>`).join(' · ')}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="font-size:11px;color:var(--gutong);margin-top:10px;font-style:italic;line-height:1.5">
+        분류 기준: HERBS 데이터의 meaning(효능) 필드에서 키워드 자동 매칭. 클릭 → 약재 상세.
+      </div>
+    `;
+  }
+
+  function renderRolePie(){
+    const cells = ['君','臣','佐','使','미배정'].map(r => `
+      <div class="lg">
+        <span class="sw" style="background:${roleColors[r]}"></span>
+        <span class="han">${esc(r)}</span>
+        <span class="v">${totalRoles[r]} / ${(totalRoles[r]/totalRoleSum*100).toFixed(1)}%</span>
+      </div>
+    `).join('');
+    detEl.innerHTML = `
+      <div style="font-size:12px;color:var(--mo-l);margin:6px 0 4px">
+        <b style="color:var(--zhusha-d)">君臣佐使 전체 분포</b> · ${formulas.length}처방의 약재 ${totalHerbInstances}건
+      </div>
+      <div class="role-pie-wrap">
+        <div class="role-pie" style="background:conic-gradient(${stops})">
+          <div class="core">
+            <span class="big">${totalHerbInstances}</span>
+            <span class="lb">총 약재 인스턴스</span>
+          </div>
+        </div>
+        <div class="role-legend">${cells}</div>
+      </div>
+      <div style="font-size:11px;color:var(--gutong);margin-top:10px;font-style:italic;line-height:1.5">
+        統編教材 군신좌사 통설 기준. 약재 단위 분석은 性味 분포·효능 분류 탭 또는 圓 탭에서 확인.
+      </div>
+    `;
+  }
+
+  function renderTop(){
+    detEl.innerHTML = `
+      <div style="font-size:12px;color:var(--mo-l);margin:6px 0 6px">
+        <b style="color:var(--zhusha-d)">빈출 약재 TOP 20</b> · 가장 많은 처방에 쓰인 순
+      </div>
+      <div class="bar-chart">
+        ${top20.map(([h, list]) => {
+          const meta = herbs.find(x => x.han === h);
+          const sm = meta?.sm || '';
+          return `<div class="bar-row" style="cursor:pointer" onclick="openHerbDetail('${esc(h)}')">
+            <span class="bar-label">${esc(h)}<span style="color:var(--gutong);font-size:10px;margin-left:3px">${esc(sm.split(',')[1]||'')}</span></span>
+            <div class="bar-track"><div class="bar-fill" style="width:${list.length/topMax*100}%">${list.length}</div></div>
+            <span class="bar-val">${list.slice(0,2).map(x=>x.han||x.ko).join('·')}${list.length>2?'…':''}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="font-size:11px;color:var(--gutong);margin-top:10px;font-style:italic">바 클릭 → 처방 내 役割·効能·性味 상세</div>
+    `;
+  }
+
+  const renderers = {scatter:renderScatter, efficacy:renderEfficacy, role:renderRolePie, top:renderTop};
+  function showHerbView(k){
+    (renderers[k] || renderScatter)();
+    $$('#herb-subtab .subtab-btn').forEach(b => b.classList.toggle('on', b.dataset.k === k));
+  }
+  $$('#herb-subtab .subtab-btn').forEach(b => b.addEventListener('click', () => showHerbView(b.dataset.k)));
+  showHerbView('scatter');
 }
+
+// ─── 약재 상세 — 효능·性味·役割·사용 처방 v2.2 ──────────────────────────
 window.openHerbDetail = function(herbName){
   const formulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
+  const herbs    = (typeof HERBS    !== 'undefined') ? HERBS    : [];
+  const meta = herbs.find(h => h.han === herbName) || herbs.find(h => h.ko === herbName);
   const using = formulas.filter(f => (f.composition||[]).some(h => {
-    const name = (typeof h === 'string') ? h : (h.name||h.han||h.ko||'?');
+    const name = (typeof h === 'string') ? h.replace(/\([^)]*\)/g,'').trim() : (h.name||h.han||h.ko||'?');
     return name === herbName;
   }));
-  // 君臣佐使 위치 카운트
-  const roles = {君:0, 臣:0, 佐:0, 使:0, 기타:0};
+  // 君臣佐使 위치 카운트 + 어느 처방에서 어느 역할인지
+  const roles = {君:[], 臣:[], 佐:[], 使:[], 미배정:[]};
   using.forEach(f => {
     const ms = f.monarch_minister || {};
     let assigned = false;
     ['君','臣','佐','使'].forEach(r => {
-      const v = ms[r] || ms[r.toLowerCase()];
-      if(v && (Array.isArray(v) ? v.some(x => (x.name||x.ko||x.han)===herbName) : v.includes(herbName))){
-        roles[r]++; assigned = true;
+      const v = ms[r];
+      if(v && (Array.isArray(v) ? v.some(x => (x||'').replace(/\([^)]*\)/g,'').trim()===herbName) : v.includes(herbName))){
+        roles[r].push(f); assigned = true;
       }
     });
-    if(!assigned) roles.기타++;
+    if(!assigned) roles.미배정.push(f);
   });
+  // 役割 pie (CSS conic-gradient)
+  const total = using.length || 1;
+  const roleColors = {君:'#9C3030', 臣:'#C9A227', 佐:'#3068A0', 使:'#2A7060', 미배정:'#876A36'};
+  let acc = 0;
+  const stops = ['君','臣','佐','使','미배정'].map(r => {
+    const pct = roles[r].length / total * 100;
+    const from = acc, to = acc + pct;
+    acc = to;
+    if(pct === 0) return `${roleColors[r]} ${from.toFixed(2)}% ${from.toFixed(2)}%`;
+    return `${roleColors[r]} ${from.toFixed(2)}% ${to.toFixed(2)}%`;
+  }).join(', ');
+
+  const meaningParts = (meta?.meaning || '').split(',').map(s=>s.trim()).filter(Boolean);
+  const sm = meta?.sm || '?';
+  const [tastes, nature] = sm.split(',').map(s=>s||'');
+
   openModal(`
-    <h3 class="seal" style="margin:0 0 6px;color:var(--zhusha-d)">${esc(herbName)}</h3>
-    <div style="font-size:12px;color:var(--mo-l);margin-bottom:10px">사용 처방 ${using.length} 종</div>
+    <h3 class="seal" style="margin:0 0 4px;color:var(--zhusha-d)">${esc(herbName)} <span style="font-size:14px;color:var(--gutong);font-family:var(--font-body)">${esc(meta?.ko||'')}</span></h3>
+    <div style="font-size:12px;color:var(--mo-l);margin-bottom:10px">
+      性味: <b class="han" style="color:var(--zhusha-d)">${esc(tastes||'?')}</b><span style="color:var(--gutong)"> · ${esc(nature||'?')}</span>
+      &nbsp;·&nbsp; 사용 처방 <b>${using.length}</b>종
+    </div>
+    ${meaningParts.length ? `<div style="margin-bottom:14px">
+      <b style="font-size:12px;color:var(--zhusha-d)">効能</b>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px">
+        ${meaningParts.map(p => `<span class="presence-chip" style="background:rgba(201,162,39,.12);border-color:rgba(201,162,39,.4)"><span class="han">${esc(p)}</span></span>`).join('')}
+      </div>
+    </div>` : ''}
+
     <div style="margin-bottom:14px">
-      <b style="font-size:12px;color:var(--zhusha-d)">君臣佐使 위치</b>
-      <div class="bar-chart" style="margin-top:6px">
-        ${Object.entries(roles).map(([r,n])=>`
-          <div class="bar-row">
-            <span class="bar-label han">${r}</span>
-            <div class="bar-track"><div class="bar-fill" style="width:${using.length?n/using.length*100:0}%">${n}</div></div>
+      <b style="font-size:12px;color:var(--zhusha-d)">処方 內 役割 분포</b>
+      <div class="role-pie-wrap">
+        <div class="role-pie" style="background:conic-gradient(${stops})">
+          <div class="core">
+            <span class="big">${using.length}</span>
+            <span class="lb">처방</span>
           </div>
-        `).join('')}
+        </div>
+        <div class="role-legend">
+          ${['君','臣','佐','使','미배정'].map(r => `
+            <div class="lg" title="${roles[r].map(f=>f.han).join(', ')}">
+              <span class="sw" style="background:${roleColors[r]}"></span>
+              <span class="han">${esc(r)}</span>
+              <span class="v">${roles[r].length}</span>
+            </div>
+          `).join('')}
+        </div>
       </div>
     </div>
-    <b style="font-size:12px;color:var(--zhusha-d)">사용 처방</b>
-    <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px">
-      ${using.map(f => `<span class="presence-chip"><span class="han">${esc(f.han||'')}</span> ${esc(f.ko||'')}</span>`).join('')}
+
+    <b style="font-size:12px;color:var(--zhusha-d)">処方別 役割</b>
+    <div style="display:flex;flex-direction:column;gap:4px;margin-top:6px;font-size:11.5px">
+      ${['君','臣','佐','使','미배정'].flatMap(r => roles[r].map(f => `
+        <div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--mi-w);border-radius:4px;border-left:3px solid ${roleColors[r]}">
+          <span class="han" style="color:${roleColors[r]};font-weight:700;width:24px;text-align:center">${esc(r)}</span>
+          <span style="flex:1"><span class="han" style="color:var(--zhusha-d)">${esc(f.han||'')}</span> ${esc(f.ko||'')}</span>
+          <span style="font-size:10px;color:var(--gutong)">${esc(f.action||'')}</span>
+        </div>
+      `)).join('')}
     </div>
   `);
 };

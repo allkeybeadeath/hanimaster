@@ -1,7 +1,7 @@
 {
-  "name": "方劑學 — 黃帝의 방",
+  "name": "方劑學 — 神農의 방",
   "short_name": "方劑",
-  "description": "中華 帝王風 방제학 학습 PWA — 51의가·9등급·멀티 對決",
+  "description": "中華 帝王風 방제학 학습 PWA — 51의가·9등급·멀티 對決 (v2.2)",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
@@ -9,9 +9,8 @@
   "background_color": "#F5E6D3",
   "theme_color": "#9C3030",
   "icons": [
-    { "src": "icon-192.png",        "sizes": "192x192", "type": "image/png" },
-    { "src": "icon-512.png",        "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
-    { "src": "icon.svg",            "sizes": "any",     "type": "image/svg+xml" }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ],
   "lang": "ko"
 }
