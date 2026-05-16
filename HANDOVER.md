@@ -168,3 +168,69 @@ hanimaster-245f6-default-rtdb.asia-southeast1/
 4. **`sw.js` 캐시 키 bump** — `bangje-pwa-v2-2-2026-05` → `bangje-pwa-v2-2-1-2026-05` (사용자 단말 자동 갱신).
 
 작성: 2026-05-17 · CIM Lab
+
+---
+
+## v2.2.2 — 2026-05-17 패치 (CIM Lab)
+
+### 멀티 매칭 실시간성 개선 (핵심)
+
+**문제**: `lobby/{level}/{userId}`에 `入場` 누른 사용자만 등록되는 닭/달걀 구조 + 4s × 4 level 순차 REST 폴링 + 1.2s 초기 매칭 폴링. 두 사람이 동시에 로비를 봐도 서로의 존재를 모름 → 아무도 먼저 안 누름 → 매칭 0건.
+
+**수정**:
+
+1. **Firebase RTDB SSE 스트리밍** — `FB.subscribe(path, onUpdate)` 신설. EventSource 기반, `put`·`patch`·`keep-alive`·`cancel`·`auth_revoked` 처리. EventSource 미지원/실패 시 폴링(3s)으로 자동 폴백. 변경 ≤1초 반영.
+2. **둘러보는 중(idle) 프레전스 분리** — `lobby_idle/{userId}`에 로비 체류자 broadcast (12s keep-alive, fresh 30s). 로비 카드 상단에 "N명이 둘러보는 중" 배너 표시 → 두 사람이 서로의 존재를 인지하고 入場 진입.
+3. **cell 별 큐/관심 배지 분리** — `대기 N`(queue, 비취색)과 `관심 N`(idle 같은 level 선호, 古銅색) 두 줄 배지. 사용자가 선택 level 변경 시 idle entry의 `level` 필드 즉시 갱신.
+4. **`joinBattleQueue`도 SSE로** — `/lobby/{level}` + `/battles` 동시 구독. 상대 발견 즉시 매칭 (사전 순 작은 쪽이 방 생성). 상대가 생성자일 때도 `/battles` SSE가 ≤1초 안에 잡아냄. 75s 타임아웃 환불 유지.
+5. **`pagehide`/`beforeunload` 클린업** — `fetch(... , {keepalive:true})` DELETE로 idle·queue 잔여 정리. 비정상 종료해도 다른 사용자에게 stale entry 60s 노출되던 문제 해소.
+6. **상수 조정** — `LOBBY_FRESH_MS` 60s → 45s, idle은 30s. self keep-alive 25s → 15s.
+
+### 오답 빈도 분석 + 클릭으로 문제 복원
+
+1. **`qidOf(q)` 콘텐츠 해시** — 기존 `q.id || 'auto:'+curQ`는 자동 문제마다 `curQ=0,1,2…`가 세션 간 충돌해서 `/stats/wrongs/auto:0` 카운터가 의미 없었음. 이제 PAST_EXAMS은 `past_001` 그대로, auto는 `auto:<djb2(q+옵션정렬+type)>`로 콘텐츠 해시 → 같은 내용의 자동 문제는 항상 같은 qid에 누적.
+2. **`renderWrongsRank` 전면 개편** — qid → PAST_EXAMS lookup. TOP 30 row 클릭 → `openWrongDetailModal`(문제·옵션·정답·해설·글로벌 오답 회수 + "이 처방 심층 분석" 버튼). auto:* qid는 "재현 불가" 명시 (즉석 생성이므로 원본 복원 불가).
+3. **자동 문제 생성 방식 명시** — 처방 모달에 "자동 생성 = 매번 즉석 stochastic 생성" 안내. 같은 콘텐츠는 콘텐츠 해시로 통계 누적되지만 1:1 복원은 불가.
+
+### 처방별 심층 분석 (시각화)
+
+새 stats 타일 **처방별 심층** + 기존 `byFormula` 막대에 클릭 기능. 5종 시각화 sub-tab:
+- **① 効能 클러스터**: EFFICACY_CATS(補氣·補血·補陰·補陽·解表·淸熱·溫裏·瀉下·化痰·行氣·活血·安神·利水·固澁·開竅·升陽·和裏) 17 카테고리 그리드. 처방의 `action` 키워드 매칭. 한 처방이 여러 효능에 동시 매칭 허용 (예: 보중익기탕 = 補氣 + 升陽).
+- **② 章·分類**: chapter sub-category(補氣·補血·氣血雙補·補陰·補陽·陰陽幷補·溫中祛寒·回陽救逆·溫經散寒·解表攻裏·解表淸裡·解表溫裏) 그룹.
+- **③ 補瀉×寒熱 scatter**: `action` 키워드로 좌표 산출 (補=−x, 瀉/解=+x, 寒=−y, 熱=+y). chapter 가중치 추가. 章별 색상 (補益劑=黃, 溫裏劑=朱砂, 表裏雙解=翡翠).
+- **④ 구성 약재 수 분포**: ≤3·4–5·6–7·8–10·≥11味 bin 히스토그램 + 大方 TOP 10.
+- **⑤ 君藥 빈도 TOP 12**: 全 처방의 君藥. 막대 클릭 → 해당 君藥을 쓰는 처방 펼치기.
+
+처방 칩 클릭 → **`openFormulaDeep` 모달** (구성·작용·적응증·君臣佐使 pill·핵심 포인트 + 자주 묻는 유형·출제 시험 mini-bar + 글로벌 오답순 기출 리스트). 기출 행 클릭 → 문제 상세 모달 재귀.
+
+칩 배경 농도가 글로벌 오답 회수에 비례(`--heat`) → 빈출 오답 처방이 시각적으로 두드러짐.
+
+`EFFICACY_CATS`를 약재 분석과 공용(module scope hoist) → 단일 사전.
+
+### 사진 오류 정정 (진자명·장로)
+
+`chenziming`(陳自明 1190–1270), `zhanglu`(張璐 1617–1700) — Wikimedia Commons의 `Chen_Ziming.jpg`·`Zhang_Lu.jpg`가 동명 현대인을 가리켜 잘못된 사진이 표시되던 문제. 두 entry를 CHARACTER_IMAGES에서 제거 → SVG 메달리온이 자동 폴백.
+
+### 사진 보완 진행 상황
+
+v2.2.1에서 추가한 20인의 Wikimedia FilePath 패턴은 추정값. Commons에 실제 존재하는 파일은 약 절반. 나머지는 onerror → SVG 폴백 동작. 다음 인물들은 SVG 메달리온 상태이며 검증된 도상 URL이 있으면 추가 가능:
+
+> 巢元方·王燾·嚴用和·陳師文·王好古·薛己·龔廷賢·趙獻可·李梴·薛雪·王孟英·唐宗海·程國彭·鄭欽安·黃元御·費伯雄·王清任·徐大椿·吳鞠通·吳又可·張景岳
+
+陳自明·張璐는 의도적으로 SVG 폴백 (동명인 충돌). 검증된 URL 발견 시 `data-physicians.js`의 `CHARACTER_IMAGES` 에 entry 추가만 하면 됨 (스키마 동일).
+
+### Firebase 보안 룰 (추가 필요)
+
+```json
+{ "rules": {
+    "lobby_idle": { ".read": true, ".write": true }
+}}
+```
+
+기존 룰에 `lobby_idle` 항목 추가. 누락 시 SSE 폴백·SVG 폴백 둘 다 작동하므로 fatal은 아니지만 둘러보는 중 기능이 무력화됨.
+
+### 캐시 키
+
+`bangje-pwa-v2-2-1-2026-05` → `bangje-pwa-v2-2-2-2026-05`.
+
+작성: 2026-05-17 · CIM Lab

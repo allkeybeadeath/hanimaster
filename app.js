@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v2.2.1';              // ★ 로비 표시용 (2026-05)
+const APP_VERSION = 'v2.2.2';              // ★ 로비 표시용 (2026-05)
 const APP_BUILD   = '2026.05.17';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
@@ -37,10 +37,14 @@ const EXAM_META = {
 const PRESENCE_REFRESH_MS = 30 * 1000;     // 30초마다 presence 갱신
 const PRESENCE_FRESH_MS   = 90 * 1000;     // 90초 이내면 "온라인"
 const BATTLE_INTRO_MS     = 5000;          // 인트로 컷 자동 진행
-const LOBBY_REFRESH_MS    = 4000;          // 배틀 로비 사용자 갱신
-const LOBBY_FRESH_MS      = 60 * 1000;     // 60초 이내면 대기중
+const LOBBY_REFRESH_MS    = 4000;          // (legacy) SSE 실패 시 폴링 fallback 주기
+const LOBBY_FRESH_MS      = 45 * 1000;     // 45초 이내면 대기중 (v2.2.2: 60→45)
 const MATCH_TIMEOUT_MS    = 75 * 1000;     // 75초 매칭 실패 시 자동 환불
-const POLL_INTERVAL_MS    = 2500;          // 매칭 폴링 간격
+const POLL_INTERVAL_MS    = 2500;          // (legacy) SSE 실패 시 폴링 주기
+// v2.2.2: 둘러보는 중 (idle browse) — 入場 버튼 누르기 전 로비 체류자
+const LOBBY_IDLE_REFRESH_MS = 12 * 1000;   // 12초마다 idle ts 갱신
+const LOBBY_IDLE_FRESH_MS   = 30 * 1000;   // 30초 이내면 둘러보는 중
+const SSE_FALLBACK_POLL_MS  = 3000;        // SSE 실패 시 폴링 백오프 주기
 
 // ───── 2. 상태 + STORAGE ────────────────────────────────────────────────────
 // 기본 상태 (사용자별 진행)
@@ -149,6 +153,134 @@ const FB = (() => {
       try{ await fetch(`${base}/${path}.json`, {method:'DELETE'}); return true; }
       catch(_){ return false; }
     },
+    // v2.2.2: page-unload 안전 DELETE (fetch keepalive 옵션)
+    delKeepalive: (path) => {
+      try{
+        fetch(`${base}/${path}.json`, {method:'DELETE', keepalive:true});
+        return true;
+      }catch(_){ return false; }
+    },
+    // v2.2.2: Firebase RTDB SSE 스트리밍 — 실시간 매칭/대기자 동기화
+    //   const sub = FB.subscribe('lobby/small', snap => updateUI(snap));
+    //   sub.close();
+    // EventSource 미지원·실패 시 폴링으로 자동 폴백.
+    // 콜백은 path 의 현재 스냅샷(객체 or null)을 전달, put/patch 적용 후마다 호출.
+    subscribe: (path, onUpdate, opts) => {
+      const o = Object.assign({fallbackPollMs: SSE_FALLBACK_POLL_MS}, opts||{});
+      const url = `${base}/${path}.json`;
+      let snapshot = null;
+      let closed = false;
+      let es = null;
+      let pollTimer = null;
+      let gotFirst = false;
+
+      const emit = () => { if(!closed){ try{ onUpdate(snapshot); }catch(_){} } };
+
+      // 상대 path("/", "/key", "/key/sub")에 put/patch 적용
+      const applyEvent = (type, raw) => {
+        let parsed;
+        try{ parsed = JSON.parse(raw); }catch(_){ return; }
+        const rel = (parsed && parsed.path) || '/';
+        const data = parsed && 'data' in parsed ? parsed.data : null;
+        const parts = rel.split('/').filter(Boolean);
+        if(type === 'put'){
+          if(parts.length === 0){
+            snapshot = data;
+          } else {
+            if(snapshot === null || typeof snapshot !== 'object') snapshot = {};
+            let cur = snapshot;
+            for(let i=0; i<parts.length-1; i++){
+              const k = parts[i];
+              if(cur[k] === null || cur[k] === undefined || typeof cur[k] !== 'object'){
+                cur[k] = {};
+              }
+              cur = cur[k];
+            }
+            const lastK = parts[parts.length-1];
+            if(data === null) delete cur[lastK];
+            else              cur[lastK] = data;
+          }
+        } else if(type === 'patch'){
+          // patch: data 의 키만 merge. value === null 이면 해당 키 삭제.
+          let cur;
+          if(parts.length === 0){
+            if(snapshot === null || typeof snapshot !== 'object') snapshot = {};
+            cur = snapshot;
+          } else {
+            if(snapshot === null || typeof snapshot !== 'object') snapshot = {};
+            cur = snapshot;
+            for(const k of parts){
+              if(cur[k] === null || cur[k] === undefined || typeof cur[k] !== 'object'){
+                cur[k] = {};
+              }
+              cur = cur[k];
+            }
+          }
+          for(const k of Object.keys(data || {})){
+            if(data[k] === null) delete cur[k];
+            else                 cur[k] = data[k];
+          }
+        }
+        emit();
+      };
+
+      const startPolling = async () => {
+        if(pollTimer) return;
+        const tick = async () => {
+          if(closed) return;
+          try{
+            const v = await (async () => {
+              try{
+                const r = await fetch(`${base}/${path}.json`);
+                if(!r.ok) return null;
+                return await r.json();
+              }catch(_){ return null; }
+            })();
+            snapshot = v;
+            emit();
+          }catch(_){}
+          if(!closed) pollTimer = setTimeout(tick, o.fallbackPollMs);
+        };
+        tick();
+      };
+
+      const startSSE = () => {
+        if(typeof EventSource === 'undefined'){ startPolling(); return; }
+        try{ es = new EventSource(url); }
+        catch(_){ startPolling(); return; }
+        es.addEventListener('put',   e => { gotFirst = true; applyEvent('put',   e.data); });
+        es.addEventListener('patch', e => { gotFirst = true; applyEvent('patch', e.data); });
+        es.addEventListener('keep-alive', () => {});
+        es.addEventListener('cancel', () => {
+          try{ es.close(); }catch(_){}
+          if(!closed) startPolling();
+        });
+        es.addEventListener('auth_revoked', () => {
+          try{ es.close(); }catch(_){}
+          if(!closed) startPolling();
+        });
+        es.onerror = () => {
+          // 첫 메시지 전 에러면 SSE 미지원 가능성 → 폴링 폴백.
+          // 그 외엔 브라우저가 자동 재연결하므로 무시.
+          if(!gotFirst){
+            try{ es.close(); }catch(_){}
+            es = null;
+            setTimeout(() => { if(!closed) startPolling(); }, 1200);
+          }
+        };
+      };
+
+      startSSE();
+
+      return {
+        close: () => {
+          closed = true;
+          if(es){ try{ es.close(); }catch(_){} es = null; }
+          if(pollTimer){ clearTimeout(pollTimer); pollTimer = null; }
+        },
+        get snapshot(){ return snapshot; },
+      };
+    },
   };
 })();
 
@@ -204,6 +336,47 @@ function ago(ts){
   if(d < 3600000) return Math.floor(d/60000) + '분 전';
   if(d < 86400000) return Math.floor(d/3600000) + '시간 전';
   return Math.floor(d/86400000) + '일 전';
+}
+
+// v2.2.2: 効能 카테고리 — 약재(meaning)·처방(action) 공용 키워드 사전
+// renderHerbAnalysis 와 renderFormulaIndex 가 공유.
+const EFFICACY_CATS = [
+  { id:'buqi',   ko:'補氣',  han:'補氣',   color:'#C9A227', keys:['補氣','益氣','補中','補脾','大補元氣'] },
+  { id:'buxue',  ko:'補血',  han:'補血',   color:'#9C3030', keys:['補血','養血','生血','和血'] },
+  { id:'buyin',  ko:'補陰',  han:'補陰',   color:'#3068A0', keys:['滋陰','養陰','補陰','潤燥','生津','滋腎陰'] },
+  { id:'buyang', ko:'補陽',  han:'補陽',   color:'#876A36', keys:['補陽','助陽','溫補','溫腎','補火','補腎陽'] },
+  { id:'jiebiao',ko:'解表',  han:'解表',   color:'#2A7060', keys:['解表','發表','發汗','解肌','疏散','疏風'] },
+  { id:'qingre', ko:'淸熱',  han:'淸熱',   color:'#3CA6A6', keys:['淸熱','清熱','瀉火','凉血','解毒','除煩','淸裡','清裡'] },
+  { id:'wenli',  ko:'溫裏',  han:'溫裏',   color:'#B25040', keys:['溫中','溫裏','溫經','散寒','祛寒','回陽','救逆'] },
+  { id:'xiexia', ko:'瀉下',  han:'瀉下',   color:'#5B4080', keys:['瀉下','潤腸','通便','軟堅','攻裏','內瀉','瀉熱'] },
+  { id:'huatan', ko:'化痰',  han:'化痰',   color:'#807040', keys:['化痰','止咳','平喘','宣肺','降逆','開竅化痰'] },
+  { id:'xingqi', ko:'行氣',  han:'行氣',   color:'#A07020', keys:['行氣','理氣','降氣','破氣','疏肝','順氣','消痞'] },
+  { id:'huoxue', ko:'活血',  han:'活血',   color:'#883050', keys:['活血','祛瘀','行血','通脈','通痺','消積'] },
+  { id:'anshen', ko:'安神',  han:'安神',   color:'#406090', keys:['安神','寧心','養心','鎮驚'] },
+  { id:'lishui', ko:'利水',  han:'利水',   color:'#3090A0', keys:['利水','滲濕','利尿','燥濕'] },
+  { id:'guse',   ko:'固澁',  han:'固澁',   color:'#705030', keys:['固表','止汗','澀精','收斂','止瀉'] },
+  { id:'kaiqiao',ko:'開竅',  han:'開竅',   color:'#9050A0', keys:['開竅','醒神','豁痰開竅'] },
+  { id:'shengyang',ko:'升陽',han:'升陽',   color:'#D08020', keys:['升陽','擧陷','升擧'] },
+  { id:'heli',   ko:'和裏',  han:'和裏',   color:'#608060', keys:['和解','和裏','緩急','調和'] },
+];
+function efficaciesOfText(txt){
+  const t = txt || '';
+  return EFFICACY_CATS.filter(c => c.keys.some(k => t.includes(k))).map(c => c.id);
+}
+
+// v2.2.2: 콘텐츠 해시 기반 안정 qid
+//   • PAST_EXAMS: q.id (예: 'past_001') 그대로 — click 으로 문제 복원 가능
+//   • auto-generated: 문제 텍스트+선택지(정렬)+유형 해시 → 'auto:<base36>'
+//     같은 내용의 자동 문제는 항상 같은 qid 로 모이므로 /stats/wrongs 집계가 의미있어짐.
+//     순서 셔플로 인한 변동은 options 정렬로 무효화.
+function qidOf(q){
+  if(q && q.id) return q.id;
+  if(!q) return 'auto:0';
+  const opts = Array.isArray(q.options) ? q.options.slice().sort().join('|') : '';
+  const txt = (q.q || '') + '||' + opts + '||' + (q.type || '');
+  let h = 5381;
+  for(let i=0; i<txt.length; i++){ h = ((h << 5) + h + txt.charCodeAt(i)) | 0; }
+  return 'auto:' + (h >>> 0).toString(36);
 }
 
 // ───── 4. 메달리온 (CSS only — 인물 SVG 폐기 v2.2) ────────────────────────
@@ -494,8 +667,9 @@ window.bgm = bgm;
 
 // ───── 7. 라우팅 ─────────────────────────────────────────────────────────────
 function setTab(name){
-  // 다른 탭으로 이동 시 배틀 로비 polling 정리
-  if(typeof stopLobbyPoll === 'function') stopLobbyPoll();
+  // v2.2.2: 다른 탭으로 이동 시 멀티 로비 SSE/idle 정리
+  if(typeof stopLobbyStreams === 'function') stopLobbyStreams();
+  if(typeof stopLobbyIdle    === 'function') stopLobbyIdle();
   S.lastTab = name; saveState();
   $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   view.scrollTop = 0; window.scrollTo({top:0, behavior:'instant'});
@@ -991,8 +1165,17 @@ function calcBet(level){
 
 // 배틀 상태 (메모리)
 let _battle = null;
-let _lobbyTimer = null;
+let _lobbyTimer = null;          // (legacy) 폴링 fallback 시에만 사용
 let _lobbySelfTimer = null;
+// v2.2.2: SSE 스트림 + 둘러보는 중(idle) 프레전스
+let _lobbyStream     = null;     // /lobby SSE (모든 level 한 번에)
+let _lobbyIdleStream = null;     // /lobby_idle SSE
+let _lobbyIdleTimer  = null;     // 자기 idle entry keep-alive
+let _lobbyIdleLevel  = null;     // 현재 둘러보는 중인 선호 level
+let _battlesStream   = null;     // 큐 중 /battles SSE (내 방 생성 감지)
+let _lobbyQueueStream = null;    // 큐 중 /lobby/{level} SSE (상대 발견)
+// 마지막 렌더 캐시 (불필요한 DOM 업데이트 방지용)
+let _lobbyRenderSig = '';
 
 function openBattleLobby(){
   // 입장 가능 베팅 레벨 필터링
@@ -1006,16 +1189,29 @@ function openBattleLobby(){
     <h2 class="view-title fade-in"><span class="han">對決</span>멀티 배틀</h2>
     <div class="view-sub">같은 베팅 레벨끼리 자동 매칭 · 승자가 패자의 氣 획득</div>
 
+    <!-- v2.2.2: 둘러보는 중(idle browsers) 실시간 표시 -->
+    <div class="card fade-in idle-banner" id="idle-banner" style="display:none">
+      <div class="idle-banner-title">
+        <span class="han">觀</span>
+        <span id="idle-banner-count">0</span>명이 멀티 對決을 둘러보는 중
+        <span class="idle-banner-hint">— 入場을 누르면 같은 레벨 사람과 매칭됩니다</span>
+      </div>
+      <div class="idle-banner-list" id="idle-banner-list"></div>
+    </div>
+
     <div class="card imperial fade-in">
       <div class="card-title">
         <span class="han">氣博</span> 베팅 단계
-        <span style="float:right;font-size:11px;color:var(--gutong);font-family:var(--font-body);font-weight:400">실시간 대기자</span>
+        <span style="float:right;font-size:11px;color:var(--gutong);font-family:var(--font-body);font-weight:400">실시간 대기·관심</span>
       </div>
       <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:8px">현재 보유: <b class="seal" style="color:var(--zhusha-d)">${S.qi.toLocaleString()} 氣</b></div>
       <div class="bet-grid" id="bet-grid">
         ${opts.map(o => `
           <button class="bet-cell ${o.id===selected?'selected':''} ${o.can?'':'locked'}" type="button" data-id="${o.id}" ${o.can?'':'disabled'}>
-            <span class="waiting-badge zero" data-level="${o.id}">…</span>
+            <span class="waiting-badges">
+              <span class="waiting-badge queue zero" data-level="${o.id}" data-kind="queue" title="入場 대기자">대기 0</span>
+              <span class="waiting-badge idle zero"  data-level="${o.id}" data-kind="idle"  title="이 레벨을 둘러보는 중">관심 0</span>
+            </span>
             <div class="han">${esc(o.han)} <span style="font-size:11.5px;color:var(--gutong);font-family:var(--font-body)">${esc(o.ko)}</span></div>
             <div class="pct">${(o.pct*100)|0}%</div>
             <div class="min">${o.can?`= ${o.bet.toLocaleString()} 氣`:`氣 부족 (≥${o.min})`}</div>
@@ -1051,60 +1247,162 @@ function openBattleLobby(){
       if(el.disabled) return;
       selected = el.dataset.id;
       $$('#bet-grid .bet-cell').forEach(x => x.classList.toggle('selected', x.dataset.id === selected));
+      // v2.2.2: 선호 level 변경 → idle entry 갱신
+      setLobbyIdleLevel(selected);
     });
   });
   $('#cancel-battle').addEventListener('click', () => {
-    stopLobbyPoll();
+    stopLobbyStreams();
+    stopLobbyIdle();
     setTab('hall');
   });
   $('#join-battle').addEventListener('click', () => {
-    stopLobbyPoll();
+    stopLobbyStreams();
+    stopLobbyIdle();
     joinBattleQueue(selected);
   });
-  // 베팅 레벨별 대기자 실시간 polling 시작
-  startLobbyPoll();
+  // v2.2.2: SSE 기반 실시간 동기화 + 둘러보는 중 등록
+  startLobbyStreams();
+  startLobbyIdle(selected);
 }
 window.openBattleLobby = openBattleLobby;
 
-// 각 베팅 레벨별 대기자 실시간 카운트·이름 표시 (v2.2)
-function startLobbyPoll(){
-  stopLobbyPoll();
-  refreshLobbyPresence();  // 즉시 1회
-  _lobbyTimer = setInterval(refreshLobbyPresence, LOBBY_REFRESH_MS);
-}
-function stopLobbyPoll(){
-  if(_lobbyTimer){ clearInterval(_lobbyTimer); _lobbyTimer = null; }
-}
-async function refreshLobbyPresence(){
+// v2.2.2: SSE 기반 실시간 대기자/관심자 동기화
+//   _lobbyStream      : /lobby      전체 (모든 level) SSE 1개
+//   _lobbyIdleStream  : /lobby_idle 전체 SSE 1개
+//   _lobbyIdleTimer   : 자기 idle entry 12s keep-alive
+function startLobbyStreams(){
+  stopLobbyStreams();
   if(!FB) return;
-  const now = Date.now();
+  _lobbyStream     = FB.subscribe('lobby',      renderLobbyStreams);
+  _lobbyIdleStream = FB.subscribe('lobby_idle', renderLobbyStreams);
+}
+function stopLobbyStreams(){
+  if(_lobbyStream){     try{ _lobbyStream.close();     }catch(_){} _lobbyStream     = null; }
+  if(_lobbyIdleStream){ try{ _lobbyIdleStream.close(); }catch(_){} _lobbyIdleStream = null; }
+  if(_lobbyTimer){ clearInterval(_lobbyTimer); _lobbyTimer = null; }
+  _lobbyRenderSig = '';
+}
+
+// 양쪽 SSE 스냅샷을 합쳐 DOM 일괄 업데이트 (시그니처 비교로 noop 회피)
+function renderLobbyStreams(){
+  const now   = Date.now();
+  const lobby = (_lobbyStream     && _lobbyStream.snapshot)     || {};
+  const idle  = (_lobbyIdleStream && _lobbyIdleStream.snapshot) || {};
+
+  // 시그니처
+  const idleFresh = [];
+  let sig = '';
+  for(const [uid, p] of Object.entries(idle)){
+    if(!p) continue;
+    if((now - (p.ts||0)) < LOBBY_IDLE_FRESH_MS && uid !== S.userId){
+      idleFresh.push({uid, ...p});
+      sig += `i:${uid}:${p.level||''};`;
+    }
+  }
+  const perLevelQueue = {};
+  const perLevelIdle  = {};
   for(const lvl of BET_LEVELS){
-    const all = await FB.get(`lobby/${lvl.id}`);
-    const badge = $(`.waiting-badge[data-level="${lvl.id}"]`);
-    const list  = $(`.waiting-list[data-list="${lvl.id}"]`);
-    if(!badge || !list) continue;
-    const fresh = all
-      ? Object.values(all).filter(p => (now - (p.ts||0)) < LOBBY_FRESH_MS)
-      : [];
-    badge.textContent = fresh.length;
-    badge.classList.toggle('zero', fresh.length === 0);
-    if(!fresh.length){
-      list.innerHTML = '<span class="w-empty">대기자 없음</span>';
+    perLevelIdle[lvl.id] = idleFresh.filter(p => p.level === lvl.id);
+    const all = lobby[lvl.id] || {};
+    const queueFresh = Object.entries(all)
+      .map(([uid,p]) => ({uid, ...(p||{})}))
+      .filter(p => p && (now - (p.ts||0)) < LOBBY_FRESH_MS);
+    perLevelQueue[lvl.id] = queueFresh;
+    queueFresh.forEach(p => sig += `q:${lvl.id}:${p.uid};`);
+  }
+  if(sig === _lobbyRenderSig) return;
+  _lobbyRenderSig = sig;
+
+  // 둘러보는 중 배너
+  const banner = $('#idle-banner');
+  if(banner){
+    if(idleFresh.length === 0){
+      banner.style.display = 'none';
     } else {
-      list.innerHTML = fresh.slice(0, 6).map(p => {
-        const med = _charMedallion(p.character || 'qibo', 16);
-        return `<span class="w-chip" title="${esc(p.name||'')} · ${esc(p.character||'')} · ${ago(p.ts||0)}">
-          ${med}<span class="nm">${esc(p.name||'익명')}</span>
-        </span>`;
-      }).join('') + (fresh.length > 6 ? `<span class="w-empty" style="font-style:normal">+${fresh.length-6}명</span>` : '');
+      banner.style.display = '';
+      const c = $('#idle-banner-count'); if(c) c.textContent = idleFresh.length;
+      const list = $('#idle-banner-list');
+      if(list){
+        list.innerHTML = idleFresh.slice(0, 12).map(p => {
+          const med   = _charMedallion(p.character || 'qibo', 18);
+          const lvHan = (BET_LEVELS.find(l => l.id === p.level) || {}).han || '?';
+          return `<span class="idle-chip" title="${esc(p.name||'')} · 선호 ${esc(lvHan)} · ${ago(p.ts||0)}">
+            ${med}<span class="nm">${esc(p.name||'익명')}</span><span class="lv">${esc(lvHan)}</span>
+          </span>`;
+        }).join('') + (idleFresh.length > 12 ? `<span class="idle-more">+${idleFresh.length-12}</span>` : '');
+      }
+    }
+  }
+
+  // cell 별 큐/관심 배지 + 리스트
+  for(const lvl of BET_LEVELS){
+    const qBadge = $(`.waiting-badge[data-level="${lvl.id}"][data-kind="queue"]`);
+    const iBadge = $(`.waiting-badge[data-level="${lvl.id}"][data-kind="idle"]`);
+    const listEl = $(`.waiting-list[data-list="${lvl.id}"]`);
+    const qN = perLevelQueue[lvl.id].length;
+    const iN = perLevelIdle[lvl.id].length;
+    if(qBadge){ qBadge.textContent = `대기 ${qN}`; qBadge.classList.toggle('zero', qN === 0); }
+    if(iBadge){ iBadge.textContent = `관심 ${iN}`; iBadge.classList.toggle('zero', iN === 0); }
+    if(listEl){
+      const combined = perLevelQueue[lvl.id].map(p => ({...p, _kind:'q'}))
+        .concat(perLevelIdle[lvl.id].map(p => ({...p, _kind:'i'})));
+      if(combined.length === 0){
+        listEl.innerHTML = '<span class="w-empty">대기·관심 없음</span>';
+      } else {
+        listEl.innerHTML = combined.slice(0, 6).map(p => {
+          const med = _charMedallion(p.character || 'qibo', 16);
+          const cls = p._kind === 'q' ? 'w-chip q' : 'w-chip i';
+          const tip = (p._kind === 'q' ? '入場 대기 · ' : '둘러보는 중 · ') + (p.name||'') + ' · ' + ago(p.ts||0);
+          return `<span class="${cls}" title="${esc(tip)}">${med}<span class="nm">${esc(p.name||'익명')}</span></span>`;
+        }).join('') + (combined.length > 6 ? `<span class="w-empty" style="font-style:normal">+${combined.length-6}명</span>` : '');
+      }
     }
   }
 }
 
-// 매칭 큐 — v2.2: 타임아웃·환불·견고화
-// Firebase RTDB 의 /lobby/{level}/{userId} 에 자기 정보 push
-// 같은 level 의 다른 user 가 보이면 방 생성 (userId 사전 순 작은 쪽이 생성 → race 회피)
-// 무한 로딩 방지: MATCH_TIMEOUT_MS 이내 매칭 실패 시 자동 환불
+// 둘러보는 중 (idle browse) — 入場 누르기 전 로비 체류자
+function startLobbyIdle(level){
+  if(!FB) return;
+  stopLobbyIdle();
+  _lobbyIdleLevel = level;
+  const writeIdle = () => {
+    if(!FB || !_lobbyIdleLevel) return;
+    FB.put(`lobby_idle/${S.userId}`, {
+      userId: S.userId, name: S.name, character: S.character,
+      level: _lobbyIdleLevel, ts: Date.now(),
+    }).catch(()=>{});
+  };
+  writeIdle();
+  _lobbyIdleTimer = setInterval(writeIdle, LOBBY_IDLE_REFRESH_MS);
+}
+function setLobbyIdleLevel(level){
+  if(!FB || !_lobbyIdleTimer) return;
+  _lobbyIdleLevel = level;
+  // 즉시 한 번 갱신해 다른 사용자가 빠르게 알아챌 수 있게
+  FB.put(`lobby_idle/${S.userId}`, {
+    userId: S.userId, name: S.name, character: S.character,
+    level: _lobbyIdleLevel, ts: Date.now(),
+  }).catch(()=>{});
+}
+function stopLobbyIdle(){
+  if(_lobbyIdleTimer){ clearInterval(_lobbyIdleTimer); _lobbyIdleTimer = null; }
+  if(FB && S.userId){
+    // best-effort 정리 (keepalive 로 unload 도 대응)
+    FB.delKeepalive(`lobby_idle/${S.userId}`);
+  }
+  _lobbyIdleLevel = null;
+}
+
+// ── legacy 폴링 헬퍼 (joinBattleQueue 가 호출하지 않게 됐으나 fallback 보존)
+function startLobbyPoll(){ startLobbyStreams(); }
+function stopLobbyPoll(){  stopLobbyStreams(); stopLobbyIdle(); }
+
+// 매칭 큐 — v2.2.2: SSE 기반 실시간 매칭
+//   • /lobby/{level} 과 /battles 를 SSE 로 동시 구독
+//   • 새 entry 가 떨어지면 즉시 매칭 시도 (race 회피: userId 사전 순 작은 쪽이 방 생성)
+//   • 상대가 생성자였을 때도 /battles SSE 가 즉시 알려줌
+//   • 무한 로딩 방지: MATCH_TIMEOUT_MS 이내 매칭 실패 시 자동 환불
 async function joinBattleQueue(level){
   if(!FB){ toast('Firebase 연결 안됨'); return; }
   const bet = calcBet(level);
@@ -1130,19 +1428,23 @@ async function joinBattleQueue(level){
     </div>
   `;
 
-  // 큐 등록
+  // 큐 등록 정보
   const myEntry = {
     userId: S.userId, name: S.name, character: S.character,
     bet, level, qi: S.qi + bet, ts: Date.now()
   };
-  let polling = true;
+  let active = true;
   let cleanedUp = false;
-  let pollCount = 0;
+  let matching = false;   // 방 생성 중복 회피 (re-entrancy guard)
 
   const cleanup = async (refund) => {
     if(cleanedUp) return;
     cleanedUp = true;
-    polling = false;
+    active = false;
+    if(_lobbySelfTimer){ clearInterval(_lobbySelfTimer); _lobbySelfTimer = null; }
+    if(_lobbyQueueStream){ try{ _lobbyQueueStream.close(); }catch(_){} _lobbyQueueStream = null; }
+    if(_battlesStream){    try{ _battlesStream.close();    }catch(_){} _battlesStream    = null; }
+    clearInterval(timerDisp);
     try{ await FB.del(`lobby/${level}/${S.userId}`); }catch(_){}
     if(refund){
       S.qi += bet;
@@ -1151,10 +1453,10 @@ async function joinBattleQueue(level){
     }
   };
 
+  // 1) 큐 등록 (재시도)
   const ok = await FB.putRetry(`lobby/${level}/${S.userId}`, myEntry, {tries:3, backoffMs:400});
   if(!ok.ok){
     await cleanup(true);
-    // 무토스트로 환불 후 명시적 에러 카드 — 무엇이 잘못됐고 어떻게 복구할지 안내
     const reason = ok.status === 401 || ok.status === 403
       ? 'Firebase 보안 룰이 lobby 쓰기를 막고 있습니다. 관리자에게 룰 확인을 요청하세요.'
       : (ok.message || '네트워크 오류 — 잠시 후 다시 시도하세요.');
@@ -1175,35 +1477,25 @@ async function joinBattleQueue(level){
     return;
   }
 
-  // 자기 entry 30초 keep-alive (TS 갱신) — Firebase 폴링 사용자 detection 용
+  // 2) 자기 entry keep-alive (15초마다 ts 갱신)
   _lobbySelfTimer = setInterval(async () => {
-    if(!polling) return;
+    if(!active) return;
     try{ await FB.put(`lobby/${level}/${S.userId}`, {...myEntry, ts: Date.now()}); }catch(_){}
-  }, 25 * 1000);
+  }, 15 * 1000);
 
+  // 3) 취소 버튼
   $('#leave-queue').addEventListener('click', async () => {
-    if(_lobbySelfTimer){ clearInterval(_lobbySelfTimer); _lobbySelfTimer = null; }
     await cleanup(true);
     setTab('hall');
   });
 
-  // 타임아웃 알람 표시용
-  const timerDisp = setInterval(() => {
+  // 4) 타임아웃 시계 표시
+  const timerDisp = setInterval(async () => {
     const el = $('#queue-timer');
-    if(!el) return;
     const elapsed = Math.floor((Date.now() - startedAt) / 1000);
     const remain = Math.max(0, Math.ceil(MATCH_TIMEOUT_MS/1000) - elapsed);
-    el.textContent = `경과 ${elapsed}초 · ${remain}초 후 자동 환불`;
-  }, 1000);
-
-  async function poll(){
-    if(!polling){ clearInterval(timerDisp); return; }
-    pollCount++;
-    const elapsed = Date.now() - startedAt;
-    // ① 타임아웃 체크
-    if(elapsed > MATCH_TIMEOUT_MS){
-      clearInterval(timerDisp);
-      if(_lobbySelfTimer){ clearInterval(_lobbySelfTimer); _lobbySelfTimer = null; }
+    if(el) el.textContent = `경과 ${elapsed}초 · ${remain}초 후 자동 환불`;
+    if(elapsed * 1000 > MATCH_TIMEOUT_MS && active){
       await cleanup(true);
       view.innerHTML = `
         <h2 class="view-title fade-in"><span class="han">流</span>매칭 실패</h2>
@@ -1216,49 +1508,47 @@ async function joinBattleQueue(level){
           </div>
         </div>
       `;
-      return;
     }
+  }, 1000);
 
-    // ② 내 방이 이미 만들어졌나? (상대가 생성자였을 경우)
-    try{
-      const battles = await FB.get('battles');
-      if(battles){
-        const myRoom = Object.values(battles).find(r => r && r.players && r.players[S.userId] && r.status !== 'done');
-        if(myRoom){
-          clearInterval(timerDisp);
-          if(_lobbySelfTimer){ clearInterval(_lobbySelfTimer); _lobbySelfTimer = null; }
-          polling = false;
-          try{ await FB.del(`lobby/${level}/${S.userId}`); }catch(_){}
-          startBattle(myRoom.roomId, false);
-          return;
-        }
-      }
-    }catch(_){}
+  // 5) /battles SSE — 상대가 방 생성자였을 때 즉시 감지
+  const onBattlesSnap = (battles) => {
+    if(!active || matching) return;
+    if(!battles) return;
+    const myRoom = Object.values(battles).find(r => r && r.players && r.players[S.userId] && r.status !== 'done');
+    if(myRoom){
+      matching = true;
+      const status = $('#queue-status'); if(status) status.textContent = '방 발견 — 입장 중…';
+      // cleanup 은 cleanedUp 플래그로 중복 호출 보호되므로 안전
+      (async () => {
+        await cleanup(false);  // 환불 안 함 (실제 매칭 성공)
+        startBattle(myRoom.roomId, false);
+      })();
+    }
+  };
+  _battlesStream = FB.subscribe('battles', onBattlesSnap);
 
-    // ③ 같은 level 에 fresh 한 다른 사용자가 있나?
-    let all;
-    try{ all = await FB.get(`lobby/${level}`); }catch(_){ all = null; }
+  // 6) /lobby/{level} SSE — 상대 발견 시 사전순 작은 쪽이 방 생성
+  const onLobbySnap = async (all) => {
+    if(!active || matching) return;
     if(!all){
-      $('#queue-status') && ($('#queue-status').textContent = `대기 중… (${pollCount}회 검색)`);
-      setTimeout(poll, POLL_INTERVAL_MS);
+      const status = $('#queue-status'); if(status) status.textContent = '대기 중…';
       return;
     }
     const now = Date.now();
     const others = Object.values(all)
-      .filter(p => p.userId !== S.userId && (now - (p.ts||0)) < LOBBY_FRESH_MS)
+      .filter(p => p && p.userId !== S.userId && (now - (p.ts||0)) < LOBBY_FRESH_MS)
       .sort((a,b) => (a.ts||0) - (b.ts||0));
-
     if(others.length === 0){
-      $('#queue-status') && ($('#queue-status').textContent = `대기 중… (${pollCount}회 검색)`);
-      setTimeout(poll, POLL_INTERVAL_MS);
+      const status = $('#queue-status'); if(status) status.textContent = '대기 중…';
       return;
     }
-
-    // 매칭 후보 발견
     const opp = others[0];
-    // race 회피: userId 사전 순 더 작은 쪽이 방 생성
     if(S.userId < opp.userId){
-      $('#queue-status') && ($('#queue-status').textContent = '상대 발견 — 방 생성 중…');
+      // 내가 방 생성자
+      if(matching) return;
+      matching = true;
+      const status = $('#queue-status'); if(status) status.textContent = `상대 발견 (${esc(opp.name||'')}) — 방 생성 중…`;
       const roomId = 'r_' + Math.random().toString(36).slice(2,8) + Date.now().toString(36).slice(-4);
       const room = {
         roomId, level, bet, status: 'starting',
@@ -1271,28 +1561,22 @@ async function joinBattleQueue(level){
       };
       const created = await FB.putRetry(`battles/${roomId}`, room, {tries:3, backoffMs:300});
       if(!created.ok){
-        // 방 생성 실패 → 다시 폴링 (자동 회복)
-        $('#queue-status') && ($('#queue-status').textContent = `방 생성 실패 (HTTP ${created.status||'?'}) — 재시도`);
-        setTimeout(poll, POLL_INTERVAL_MS);
+        // 방 생성 실패 — matching flag 해제하고 SSE 다음 스냅샷에서 재시도
+        matching = false;
+        const st = $('#queue-status'); if(st) st.textContent = `방 생성 실패 (HTTP ${created.status||'?'}) — 재시도 대기`;
         return;
       }
-      // 큐에서 양쪽 제거 (각자 노력)
+      // 양쪽 큐 entry 제거 (각자 노력 — 상대가 실패해도 자기는 정리됨)
       try{ await FB.del(`lobby/${level}/${S.userId}`); }catch(_){}
       try{ await FB.del(`lobby/${level}/${opp.userId}`); }catch(_){}
-      clearInterval(timerDisp);
-      if(_lobbySelfTimer){ clearInterval(_lobbySelfTimer); _lobbySelfTimer = null; }
-      polling = false;
+      await cleanup(false);  // 환불 안 함 (정상 매칭)
       startBattle(roomId, true);
-      return;
     } else {
-      // 상대가 방 생성자 — 방이 만들어졌는지 다음 poll 에서 ② 분기로 잡힘
-      $('#queue-status') && ($('#queue-status').textContent = `상대 발견 (${esc(opp.name||'')}) — 방 생성 대기…`);
-      setTimeout(poll, Math.min(POLL_INTERVAL_MS, 1500));
-      return;
+      // 상대가 방 생성자 — _battlesStream 이 곧 잡아냄
+      const status = $('#queue-status'); if(status) status.textContent = `상대 발견 (${esc(opp.name||'')}) — 방 생성 대기…`;
     }
-  }
-
-  setTimeout(poll, 1200);
+  };
+  _lobbyQueueStream = FB.subscribe(`lobby/${level}`, onLobbySnap);
 }
 
 // 배틀 문제 생성 (기출/자동) — 데이터가 있으면 사용, 없으면 placeholder
@@ -1415,9 +1699,9 @@ async function renderBattleGame(roomId){
           x.style.color = 'var(--mi-w)';
           x.style.borderColor = 'transparent';
         });
-        // 오답 기록 (개인 + 글로벌 통계)
+        // 오답 기록 (개인 + 글로벌 통계) — v2.2.2: 콘텐츠 해시 qid
         if(!correct){
-          const qid = q.id || `${q.type||'q'}:${curQ}`;
+          const qid = qidOf(q);
           if(!S.wrongIds.includes(qid)) S.wrongIds.push(qid);
           // 글로벌 통계: stats/wrongs/{qid} 증가
           if(FB){
@@ -1563,21 +1847,25 @@ async function renderBattleGame(roomId){
 function renderStats(){
   view.innerHTML = `
     <h2 class="view-title fade-in"><span class="han">析</span>통계·분석</h2>
-    <div class="view-sub">전체 학습자 데이터 + 기출·약재 시각화</div>
+    <div class="view-sub">전체 학습자 데이터 + 기출·약재·처방별 시각화</div>
 
     <!-- 메뉴 -->
     <div class="tile-grid fade-in">
       <button class="tile" type="button" data-stab="wrongs">
         <span class="han">難題</span><span class="ttl">전체 오답 랭킹</span>
-        <span class="desc">가장 많이 틀린 문제 TOP 20</span>
+        <span class="desc">가장 많이 틀린 문제 TOP 30 · 클릭하면 해당 문제</span>
       </button>
       <button class="tile" type="button" data-stab="exam">
         <span class="han">問</span><span class="ttl">기출 분석</span>
-        <span class="desc">유형·章·처방별 분포</span>
+        <span class="desc">유형·章·처방·난이도 분포</span>
       </button>
-      <button class="tile wide" type="button" data-stab="herb">
+      <button class="tile" type="button" data-stab="formula">
+        <span class="han">析</span><span class="ttl">처방별 심층</span>
+        <span class="desc">처방마다 기출·유형·글로벌 오답률</span>
+      </button>
+      <button class="tile" type="button" data-stab="herb">
         <span class="han">本草</span><span class="ttl">약재 분석</span>
-        <span class="desc">빈출 약재 · 君臣佐使 위치 · 처방별 쓰임</span>
+        <span class="desc">빈출 약재 · 君臣佐使 · 처방내 쓰임</span>
       </button>
     </div>
 
@@ -1592,11 +1880,322 @@ function renderStats(){
 
 async function renderStatDetail(kind){
   const det = $('#stat-detail');
-  if(kind === 'wrongs') return renderWrongsRank(det);
-  if(kind === 'exam')   return renderExamAnalysis(det);
-  if(kind === 'herb')   return renderHerbAnalysis(det);
+  if(kind === 'wrongs')  return renderWrongsRank(det);
+  if(kind === 'exam')    return renderExamAnalysis(det);
+  if(kind === 'formula') return renderFormulaIndex(det);
+  if(kind === 'herb')    return renderHerbAnalysis(det);
 }
 
+// v2.2.2: 처방별 심층 분석 — 약재 분석 패턴 그대로, 5종 시각화
+//   ① 効能 카테고리 그리드 — 補氣·補血·解表·溫裏·... 별 처방 클러스터
+//   ② 章·分類 — chapter sub-category 별 그룹
+//   ③ 補瀉×寒熱 scatter — 처방마다 action 키워드로 좌표 산출
+//   ④ 구성 약재 수 분포 — 軆方의 크기
+//   ⑤ 君藥 빈도 — 全 처방의 君藥 TOP
+async function renderFormulaIndex(det){
+  const formulas = (typeof FORMULAS    !== 'undefined') ? FORMULAS    : [];
+  const exams    = (typeof PAST_EXAMS  !== 'undefined') ? PAST_EXAMS  : [];
+  if(!formulas.length){
+    det.innerHTML = `<div class="card"><div class="card-title"><span class="han">析</span> 처방별 분석</div><div style="font-size:12.5px;color:var(--gutong);text-align:center;padding:16px">data-formulas.js 의 FORMULAS 가 필요합니다.</div></div>`;
+    return;
+  }
+
+  // 글로벌 오답 ─ 처방마다 (해당 처방의 past_* qid 합산)
+  let wrongMap = {};
+  if(FB){ try{ const w = await FB.get('stats/wrongs'); if(w) wrongMap = w; }catch(_){} }
+  const totalWrongFor = (name) => exams
+    .filter(e => e.formula === name)
+    .reduce((s, e) => s + (Number(wrongMap[e.id])||0), 0);
+  const examCountFor = (name) => exams.filter(e => e.formula === name).length;
+
+  // 각 처방의 effect 카테고리
+  const formulaEffs = formulas.map(f => ({
+    f, effs: efficaciesOfText(f.action || ''),
+    examN: examCountFor(f.ko),
+    wrongN: totalWrongFor(f.ko),
+  }));
+
+  // ① 効能 → 처방 역인덱스
+  const effIdx = {};
+  EFFICACY_CATS.forEach(c => effIdx[c.id] = []);
+  formulaEffs.forEach(fe => fe.effs.forEach(eid => effIdx[eid].push(fe)));
+
+  // ② chapter sub-category (·뒤) 그룹
+  const subIdx = {};
+  formulas.forEach(f => {
+    const ch = f.chapter || '';
+    // "8장 補益劑·補氣" → main "8장 補益劑", sub "補氣"
+    const parts = ch.split('·');
+    const main = parts[0] || '?';
+    const sub  = parts[1] || '기타';
+    const key  = `${main} · ${sub}`;
+    (subIdx[key] = subIdx[key] || []).push(f);
+  });
+  // chapter 순서 보존 (data 순)
+  const subOrder = [];
+  formulas.forEach(f => {
+    const ch = f.chapter || '';
+    const parts = ch.split('·');
+    const key = `${parts[0]||'?'} · ${parts[1]||'기타'}`;
+    if(!subOrder.includes(key)) subOrder.push(key);
+  });
+
+  // ③ scatter 좌표 산출 — 補瀉(x) × 寒熱(y)
+  // 補類: buqi/buxue/buyin/buyang → x −1; 瀉類: xiexia/qingre → x +1; 解表 → x +0.5; 和裏 → x 0
+  // 寒類: qingre → y −1; 溫類: wenli/buyang → y +1; 平 → y 0
+  const X_BU = new Set(['buqi','buxue','buyin','buyang']);
+  const X_XIE = new Set(['xiexia','qingre']);
+  const X_JIEBIAO = new Set(['jiebiao']);
+  const Y_RE = new Set(['wenli','buyang']);
+  const Y_HAN = new Set(['qingre']);
+  function scatterScore(fe){
+    let x = 0, y = 0;
+    fe.effs.forEach(e => {
+      if(X_BU.has(e)) x -= 1;
+      if(X_XIE.has(e)) x += 1;
+      if(X_JIEBIAO.has(e)) x += 0.6;
+      if(Y_RE.has(e)) y += 1;
+      if(Y_HAN.has(e)) y -= 1;
+    });
+    // chapter 보정 (溫裏劑 章은 강한 溫 가중)
+    const ch = fe.f.chapter || '';
+    if(ch.includes('溫裏劑')) y += 0.6;
+    if(ch.includes('溫經散寒')) y += 0.4;
+    if(ch.includes('表裏雙解')) x += 0.4;
+    if(ch.includes('補益劑')) x -= 0.4;
+    // clamp [-2, +2]
+    return { x: Math.max(-2, Math.min(2, x)), y: Math.max(-2, Math.min(2, y)) };
+  }
+  const scatter = formulaEffs.map(fe => ({...fe, ...scatterScore(fe)}));
+  function xPct(n){ return (8 + ((n+2)/4)*84).toFixed(2); }
+  function yPct(n){ return (88 - ((n+2)/4)*72).toFixed(2); }  // 위가 +熱
+
+  // ④ 구성 크기 distribution
+  const sizeBins = {};
+  formulas.forEach(f => {
+    const k = (f.composition || []).length;
+    const bin = k <= 3 ? '≤3' : k <= 5 ? '4–5' : k <= 7 ? '6–7' : k <= 10 ? '8–10' : '≥11';
+    sizeBins[bin] = (sizeBins[bin]||0) + 1;
+  });
+  const sizeOrder = ['≤3','4–5','6–7','8–10','≥11'];
+
+  // ⑤ 君藥 빈도
+  const junIdx = {};
+  formulas.forEach(f => {
+    const ms = f.monarch_minister || {};
+    const jun = ms['君'] || [];
+    (Array.isArray(jun) ? jun : [jun]).forEach(h => {
+      const name = (typeof h === 'string' ? h : (h && (h.han||h.ko)) || '?').replace(/\([^)]*\)/g,'').trim();
+      if(!name) return;
+      (junIdx[name] = junIdx[name] || []).push(f);
+    });
+  });
+  const junTop = Object.entries(junIdx).sort((a,b)=>b[1].length-a[1].length).slice(0, 12);
+  const junMax = junTop[0]?.[1].length || 1;
+
+  // 가감방 (FORMULAS 에 없는데 PAST_EXAMS 에 있는 처방)
+  const known = new Set(formulas.map(f => f.ko));
+  const extraFormulas = Array.from(new Set(exams.map(e => e.formula).filter(Boolean)))
+    .filter(name => !known.has(name));
+
+  // ── 처방 칩 (모든 시각화에서 공통)
+  const formulaChip = (fe, opts = {}) => {
+    const cls = opts.small ? 'fchip small' : 'fchip';
+    const wn = fe.wrongN || 0;
+    const en = fe.examN  || 0;
+    const heat = wn > 0 ? Math.min(1, wn/20) : 0;
+    return `<button class="${cls}" type="button" data-formula="${esc(fe.f.ko)}" style="--heat:${heat.toFixed(2)}">
+      <span class="han">${esc(fe.f.han)}</span>
+      <span class="ko">${esc(fe.f.ko)}</span>
+      ${en > 0 ? `<span class="badge q">問${en}</span>` : ''}
+      ${wn > 0 ? `<span class="badge w">錯${wn}</span>` : ''}
+    </button>`;
+  };
+
+  det.innerHTML = `
+    <div class="card fade-in">
+      <div class="card-title">
+        <span class="han">析</span> 처방별 심층 분석 (${formulas.length}처방)
+      </div>
+      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:8px">
+        효능별·章별·補瀉×寒熱 좌표로 시각화. 처방을 클릭하면 구성·기출·글로벌 오답률 모달이 열립니다.
+      </div>
+      <div class="subtab-row" id="fidx-subtab">
+        <button class="subtab-btn on" data-k="eff">効能 클러스터</button>
+        <button class="subtab-btn"    data-k="chapter">章·分類</button>
+        <button class="subtab-btn"    data-k="scatter">補瀉×寒熱</button>
+        <button class="subtab-btn"    data-k="size">구성 크기</button>
+        <button class="subtab-btn"    data-k="jun">君藥 빈도</button>
+      </div>
+      <div id="fidx-detail"></div>
+    </div>
+    ${extraFormulas.length ? `
+      <div class="card fade-in">
+        <div class="card-title"><span class="han">加</span> 가감방·기타 (PAST_EXAMS only, ${extraFormulas.length}처방)</div>
+        <div class="fchip-grid">
+          ${extraFormulas.map(name => {
+            const fe = {f:{ko:name, han:name}, examN: examCountFor(name), wrongN: totalWrongFor(name)};
+            return formulaChip(fe, {small:true});
+          }).join('')}
+        </div>
+      </div>
+    ` : ''}
+  `;
+
+  const detEl = $('#fidx-detail');
+
+  const viewEff = () => {
+    const cats = EFFICACY_CATS.filter(c => effIdx[c.id].length > 0);
+    return `
+      <div class="fidx-eff-grid">
+        ${cats.map(c => `
+          <div class="fidx-eff-cell" style="--cat-color:${c.color}">
+            <div class="fidx-eff-head">
+              <span class="han">${esc(c.han)}</span>
+              <span class="cnt">${effIdx[c.id].length}처방</span>
+            </div>
+            <div class="fchip-grid">
+              ${effIdx[c.id]
+                .sort((a,b) => (b.wrongN||0) - (a.wrongN||0))
+                .map(fe => formulaChip(fe, {small:true})).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <div style="font-size:10.5px;color:var(--gutong);margin-top:8px;font-style:italic">
+        ※ 한 처방이 여러 효능에 동시 매칭될 수 있습니다 (예: 보중익기탕 = 補氣 + 升陽).
+      </div>
+    `;
+  };
+
+  const viewChapter = () => `
+    <div class="fidx-ch-list">
+      ${subOrder.map(key => `
+        <div class="fidx-ch-cell">
+          <div class="fidx-ch-head">${esc(key)} <span class="cnt">${subIdx[key].length}처방</span></div>
+          <div class="fchip-grid">
+            ${subIdx[key].map(f => {
+              const fe = formulaEffs.find(x => x.f === f);
+              return formulaChip(fe || {f, examN:0, wrongN:0});
+            }).join('')}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  const viewScatter = () => `
+    <div class="fidx-scatter">
+      <div class="axis axis-x"></div>
+      <div class="axis axis-y"></div>
+      <span class="axis-tick t-left">補</span>
+      <span class="axis-tick t-right">瀉/解</span>
+      <span class="axis-tick t-top">熱·溫</span>
+      <span class="axis-tick t-bot">寒·涼</span>
+      <span class="axis-tick t-center">和裏·平</span>
+      ${scatter.map(fe => {
+        const ch = fe.f.chapter || '';
+        const grp = ch.includes('補益劑') ? 'bu' : ch.includes('溫裏劑') ? 'wen' : ch.includes('表裏雙解') ? 'biao' : 'other';
+        return `<button class="fidx-dot grp-${grp}" type="button"
+                  data-formula="${esc(fe.f.ko)}"
+                  style="left:${xPct(fe.x)}%;top:${yPct(fe.y)}%"
+                  title="${esc(fe.f.ko)} (${esc(fe.f.action||'')})">
+          <span class="han">${esc(fe.f.han.slice(0, 2))}</span>
+          <span class="lbl">${esc(fe.f.ko)}</span>
+        </button>`;
+      }).join('')}
+    </div>
+    <div class="fidx-scatter-legend">
+      <span class="lg-dot bu"></span>補益劑
+      <span class="lg-dot wen"></span>溫裏劑
+      <span class="lg-dot biao"></span>表裏雙解劑
+    </div>
+    <div style="font-size:10.5px;color:var(--gutong);margin-top:6px;font-style:italic">
+      ※ x = action 키워드 기반 補(−) ↔ 瀉/解(+), y = 寒(−) ↔ 熱(+). chapter 가중 포함.
+    </div>
+  `;
+
+  const viewSize = () => {
+    const max = Math.max(...Object.values(sizeBins), 1);
+    return `
+      <div style="margin-bottom:8px"><b style="font-size:13px;color:var(--zhusha-d)">구성 약재 수 분포</b>
+        <div style="font-size:11px;color:var(--gutong)">${formulas.length}처방의 軆方 크기. 4–7味가 中道.</div>
+      </div>
+      <div class="bar-chart">
+        ${sizeOrder.filter(k => sizeBins[k]).map(k => `
+          <div class="bar-row">
+            <span class="bar-label">${esc(k)} 味</span>
+            <div class="bar-track"><div class="bar-fill" style="width:${(sizeBins[k]/max)*100}%">${sizeBins[k]}</div></div>
+          </div>
+        `).join('')}
+      </div>
+      <div style="margin-top:14px"><b style="font-size:13px;color:var(--zhusha-d)">大方·小方</b></div>
+      <div class="fchip-grid">
+        ${[...formulaEffs].sort((a,b) => (b.f.composition?.length||0) - (a.f.composition?.length||0))
+          .slice(0, 10).map(fe => formulaChip({...fe, examN:0, wrongN: (fe.f.composition||[]).length}, {small:true})).join('')}
+      </div>
+      <div style="font-size:10.5px;color:var(--gutong);margin-top:6px;font-style:italic">
+        ※ 칩 우측 숫자 = 구성 약재 수.
+      </div>
+    `;
+  };
+
+  const viewJun = () => `
+    <div style="margin-bottom:8px"><b style="font-size:13px;color:var(--zhusha-d)">君藥 빈도 TOP ${junTop.length}</b>
+      <div style="font-size:11px;color:var(--gutong)">전체 처방에서 君으로 쓰인 약재. 君藥을 알면 처방의 主治가 보임.</div>
+    </div>
+    <div class="bar-chart">
+      ${junTop.map(([name, fs]) => `
+        <div class="bar-row clickable" data-jun="${esc(name)}">
+          <span class="bar-label">${esc(name)}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${(fs.length/junMax)*100}%">${fs.length}</div></div>
+        </div>
+      `).join('')}
+    </div>
+    <div id="fidx-jun-detail" style="margin-top:10px"></div>
+  `;
+
+  const renderers = { eff: viewEff, chapter: viewChapter, scatter: viewScatter, size: viewSize, jun: viewJun };
+
+  function show(k){
+    detEl.innerHTML = renderers[k]();
+    $$('#fidx-subtab .subtab-btn').forEach(b => b.classList.toggle('on', b.dataset.k === k));
+    // 클릭 핸들러 — 처방 칩·점 → openFormulaDeep
+    $$('#fidx-detail .fchip, #fidx-detail .fidx-dot').forEach(b => {
+      b.addEventListener('click', () => openFormulaDeep(b.dataset.formula));
+    });
+    // 君藥 막대 → 해당 君을 쓰는 처방 펼치기
+    if(k === 'jun'){
+      $$('#fidx-detail .bar-row[data-jun]').forEach(row => {
+        row.addEventListener('click', () => {
+          const name = row.dataset.jun;
+          const fs = junIdx[name] || [];
+          const target = $('#fidx-jun-detail');
+          target.innerHTML = `
+            <div style="font-size:12px;color:var(--mo);margin-bottom:6px"><b>${esc(name)}</b> 君藥인 처방 (${fs.length})</div>
+            <div class="fchip-grid">${fs.map(f => {
+              const fe = formulaEffs.find(x => x.f === f) || {f, examN:0, wrongN:0};
+              return formulaChip(fe, {small:true});
+            }).join('')}</div>
+          `;
+          $$('#fidx-jun-detail .fchip').forEach(b => {
+            b.addEventListener('click', () => openFormulaDeep(b.dataset.formula));
+          });
+        });
+      });
+    }
+  }
+  $$('#fidx-subtab .subtab-btn').forEach(b => b.addEventListener('click', () => show(b.dataset.k)));
+  show('eff');
+
+  // 가감방 카드의 칩 클릭
+  $$('.card .fchip-grid > .fchip').forEach(b => {
+    if(b.closest('#fidx-detail')) return;  // 본 카드 칩은 show() 가 바인딩
+    b.addEventListener('click', () => openFormulaDeep(b.dataset.formula));
+  });
+}
+
+// v2.2.2: 오답 빈도 분석 — qid lookup, 클릭 → 문제 모달
 async function renderWrongsRank(det){
   det.innerHTML = `<div class="card fade-in"><div class="card-title"><span class="han">難題</span> 전체 학습자 오답 랭킹</div><div style="text-align:center;padding:20px;color:var(--gutong)">불러오는 중…</div></div>`;
   if(!FB){ det.innerHTML = `<div class="card">Firebase 미연결</div>`; return; }
@@ -1605,26 +2204,111 @@ async function renderWrongsRank(det){
     det.innerHTML = `<div class="card"><div class="card-title"><span class="han">難題</span> 전체 오답 랭킹</div><div style="font-size:12.5px;color:var(--gutong);text-align:center;padding:16px">아직 데이터가 없습니다. 객관식 풀이를 시작하세요.</div></div>`;
     return;
   }
+  const exams = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const byId = new Map(exams.map(e => [e.id, e]));
   const list = Object.entries(wrongs)
-    .map(([qid, count]) => ({qid, count}))
+    .map(([qid, count]) => ({qid, count: Number(count)||0}))
+    .filter(x => x.count > 0)
     .sort((a,b) => b.count - a.count)
-    .slice(0, 20);
-  const max = list[0]?.count || 1;
+    .slice(0, 30);
+
+  // 카테고리: 기출(past_*) / 자동생성(auto:*) / 기타
+  const annotate = (it) => {
+    if(it.qid.startsWith('past_')){
+      const ex = byId.get(it.qid);
+      if(ex){
+        return {
+          ...it, kind:'past', exam: ex,
+          label: `${ex.formula || '?'} · ${ex.type || '?'}`,
+          sub:   `${ex.src || ''} · 난이도 ${ex.difficulty || '?'} · ${(ex.q||'').slice(0,40)}…`,
+        };
+      }
+      return {...it, kind:'past-missing', label: it.qid, sub:'(데이터에서 제거됨)'};
+    }
+    if(it.qid.startsWith('auto:')){
+      return {...it, kind:'auto', label:'자동 생성 문제', sub:'재현 불가 (즉석 생성, 콘텐츠 해시)'};
+    }
+    return {...it, kind:'other', label: it.qid, sub:''};
+  };
+  const rows = list.map(annotate);
+  const max = rows[0]?.count || 1;
+  const npast = rows.filter(r => r.kind==='past').length;
+  const nauto = rows.filter(r => r.kind==='auto').length;
+
   det.innerHTML = `
     <div class="card fade-in">
-      <div class="card-title"><span class="han">難題</span> 가장 많이 틀린 문제 TOP ${list.length}</div>
-      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:8px">모든 학습자의 누적 오답 횟수 기준</div>
-      <div class="bar-chart">
-        ${list.map((it, i) => {
-          const w = (it.count / max) * 100;
-          return `<div class="bar-row">
-            <span class="bar-label">${i+1}. ${esc(it.qid).slice(0,20)}</span>
-            <div class="bar-track"><div class="bar-fill" style="width:${w}%">${it.count}</div></div>
+      <div class="card-title"><span class="han">難題</span> 가장 많이 틀린 문제 TOP ${rows.length}</div>
+      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:8px">
+        기출 ${npast}건 · 자동생성 ${nauto}건 · 클릭 시 상세
+      </div>
+      <div class="wrong-list" id="wrong-list">
+        ${rows.map((r, i) => {
+          const w = (r.count / max) * 100;
+          const clickable = r.kind === 'past';
+          return `<div class="wrong-row ${clickable?'clickable':'dim'}" data-qid="${esc(r.qid)}" data-kind="${r.kind}">
+            <div class="rank">${i+1}</div>
+            <div class="meta">
+              <div class="lbl">${esc(r.label)}${clickable?' <span class="chev">›</span>':''}</div>
+              <div class="sub">${esc(r.sub)}</div>
+              <div class="bar-track"><div class="bar-fill" style="width:${w}%"></div></div>
+            </div>
+            <div class="cnt">${r.count}<span>회</span></div>
           </div>`;
         }).join('')}
       </div>
     </div>
   `;
+  // 클릭 핸들러
+  $$('#wrong-list .wrong-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const qid = row.dataset.qid;
+      const kind = row.dataset.kind;
+      if(kind === 'past'){
+        const ex = byId.get(qid);
+        if(ex) openWrongDetailModal(ex, Number(wrongs[qid])||0);
+      } else if(kind === 'auto'){
+        toast('자동 생성 문제는 즉석 생성되므로 원본 복원 불가','gold');
+      } else {
+        toast(`${qid} — 데이터 없음`);
+      }
+    });
+  });
+}
+
+// v2.2.2: 오답 문제 상세 모달 — 정답·해설·풀이 시작
+function openWrongDetailModal(ex, globalCount){
+  const correctIdx = ex.answer || 0;
+  const ch = ex.chapter || '?';
+  const html = `
+    <div class="modal-head">
+      <div class="modal-tag">${esc(ex.src||'')} · 난이도 ${ex.difficulty||1} · ${esc(ex.type||'기타')}</div>
+      <h3 class="modal-title"><span class="han" style="margin-right:6px">問</span>${esc(ex.formula||'?')}</h3>
+      <div class="modal-sub">${esc(ch)} · 전체 학습자 누적 오답 <b style="color:var(--zhusha-d)">${globalCount}</b>회</div>
+    </div>
+    <div class="modal-body">
+      <div class="wrong-q">${esc(ex.q||'')}</div>
+      <div class="wrong-opts">
+        ${(ex.options||[]).map((o, i) => `
+          <div class="wrong-opt ${i===correctIdx?'ok':''}">
+            <span class="oi">${'①②③④⑤⑥'[i]||(i+1)}</span>
+            <span class="ot">${esc(o)}</span>
+            ${i===correctIdx?'<span class="ob">정답</span>':''}
+          </div>
+        `).join('')}
+      </div>
+      <div class="wrong-expl">
+        <div class="lbl"><span class="han">解</span> 해설</div>
+        <div class="txt">${esc(ex.explanation||'(해설 없음)')}</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-sm" onclick="closeModal(); openFormulaDeep('${esc(ex.formula||'')}')">
+          <span class="han">析</span> ${esc(ex.formula||'')} 처방 심층 분석
+        </button>
+        <button class="btn btn-sm btn-o" onclick="closeModal()">닫기</button>
+      </div>
+    </div>
+  `;
+  openModal(html);
 }
 
 // ─── 기출 분석 v2.2 ──────────────────────────────────────────────────────
@@ -1700,7 +2384,19 @@ function renderExamAnalysis(det){
   const charts = {
     exam:       () => `<div><b style="font-size:13px;color:var(--zhusha-d)">시험 회차별 출제 수</b><div style="font-size:11px;color:var(--gutong);margin-bottom:6px">모든 년도 시험을 포함합니다 (${exams.length}문)</div>${bar(sort(byExam))}</div>`,
     year:       () => `<div><b style="font-size:13px;color:var(--zhusha-d)">년도별 출제 수</b>${bar(sort(byYear))}</div>`,
-    formula:    () => `<div><b style="font-size:13px;color:var(--zhusha-d)">처방별 출제 빈도 (전체 ${Object.keys(byFormula).length}처방)</b><div style="font-size:11px;color:var(--gutong);margin-bottom:6px">시험에서 자주 출제된 처방 순</div>${bar(sort(byFormula, 20))}</div>`,
+    formula:    () => `<div>
+        <b style="font-size:13px;color:var(--zhusha-d)">처방별 출제 빈도 (전체 ${Object.keys(byFormula).length}처방)</b>
+        <div style="font-size:11px;color:var(--gutong);margin-bottom:6px">처방을 클릭하면 심층 분석 (기출 문제·유형·오답률 등)</div>
+        <div class="bar-chart formula-bars">
+          ${sort(byFormula, 30).map(([k,v]) => {
+            const max = sort(byFormula)[0][1];
+            return `<div class="bar-row clickable" data-formula="${esc(k)}" role="button" tabindex="0">
+              <span class="bar-label">${esc(k)} <span class="chev">›</span></span>
+              <div class="bar-track"><div class="bar-fill" style="width:${v/max*100}%">${v}</div></div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`,
     type:       () => `<div><b style="font-size:13px;color:var(--zhusha-d)">유형별 분포</b>${bar(sort(byType))}</div>`,
     chapter:    () => `<div><b style="font-size:13px;color:var(--zhusha-d)">章별 분포</b><div style="font-size:11px;color:var(--gutong);margin-bottom:6px">6장 溫經散寒·7장 表裏雙解·8장 補益</div>${bar(sort(byChapter))}</div>`,
     difficulty: () => {
@@ -1712,10 +2408,145 @@ function renderExamAnalysis(det){
   function showChart(k){
     detEl.innerHTML = (charts[k] || charts.exam)();
     $$('#exam-subtab .subtab-btn').forEach(b => b.classList.toggle('on', b.dataset.k === k));
+    // v2.2.2: 처방별 차트의 막대 클릭 → 처방 심층 분석
+    if(k === 'formula'){
+      $$('#exam-detail .formula-bars .bar-row.clickable').forEach(row => {
+        const open = () => openFormulaDeep(row.dataset.formula);
+        row.addEventListener('click', open);
+        row.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+      });
+    }
   }
   $$('#exam-subtab .subtab-btn').forEach(b => b.addEventListener('click', () => showChart(b.dataset.k)));
   showChart('exam');
 }
+
+// v2.2.2: 처방별 심층 분석 — 모달 (구성·작용·기출 문제·유형 분포·글로벌 오답률)
+async function openFormulaDeep(formulaName){
+  const exams    = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const formulas = (typeof FORMULAS    !== 'undefined') ? FORMULAS    : [];
+  // 처방 데이터 (한글명 매칭 — 가감방은 ko 와 정확히 일치, 변형은 contains)
+  const f = formulas.find(x => x.ko === formulaName) ||
+            formulas.find(x => x.han === formulaName) ||
+            formulas.find(x => x.ko && formulaName.includes(x.ko));
+  const relExams = exams.filter(e => (e.formula || '').trim() === formulaName);
+  // 글로벌 오답 (해당 처방의 past_* qid 들만)
+  let wrongMap = {};
+  if(FB){
+    try{
+      const w = await FB.get('stats/wrongs');
+      if(w) wrongMap = w;
+    }catch(_){}
+  }
+  // 집계
+  const byType = {}, bySrc = {}, byDiff = {};
+  relExams.forEach(e => {
+    byType[e.type||'기타'] = (byType[e.type||'기타']||0)+1;
+    bySrc[e.src||'기타']   = (bySrc[e.src||'기타']||0)+1;
+    byDiff[e.difficulty||1] = (byDiff[e.difficulty||1]||0)+1;
+  });
+  const totalWrong = relExams.reduce((s, e) => s + (Number(wrongMap[e.id])||0), 0);
+  const examsRanked = relExams.slice().map(e => ({...e, _w: Number(wrongMap[e.id])||0}))
+    .sort((a,b) => b._w - a._w);
+
+  const sort = (o) => Object.entries(o).sort((a,b) => b[1]-a[1]);
+  const miniBar = (arr) => {
+    const max = arr[0]?.[1] || 1;
+    return `<div class="bar-chart mini">${arr.map(([k,v]) => `
+      <div class="bar-row">
+        <span class="bar-label">${esc(String(k))}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${v/max*100}%">${v}</div></div>
+      </div>`).join('')}</div>`;
+  };
+
+  const formulaCard = f ? `
+    <div class="fdeep-card">
+      <div class="fdeep-han">${esc(f.han)} <span class="fdeep-ko">${esc(f.ko)}</span></div>
+      <div class="fdeep-meta">${esc(f.chapter||'')} · ${esc(f.source||'')}</div>
+      <div class="fdeep-row"><span class="lbl">구성</span><span class="val">${(f.composition||[]).map(esc).join(' · ')}</span></div>
+      <div class="fdeep-row"><span class="lbl">작용</span><span class="val">${esc(f.action||'')}</span></div>
+      <div class="fdeep-row"><span class="lbl">적응증</span><span class="val">${esc(f.indication||'')}</span></div>
+      <div class="fdeep-row"><span class="lbl">君臣佐使</span><span class="val">${
+        f.monarch_minister
+          ? ['君','臣','佐','使'].map(r => {
+              const arr = f.monarch_minister[r];
+              if(!arr || !arr.length) return '';
+              return `<span class="ms-pill ms-${r==='君'?'j':r==='臣'?'s':r==='佐'?'z':'sh'}">${r} ${arr.map(esc).join('·')}</span>`;
+            }).filter(Boolean).join(' ')
+          : '(미정)'
+      }</span></div>
+      ${f.keyPoints && f.keyPoints.length ? `
+        <div class="fdeep-key">
+          <div class="lbl">핵심 포인트</div>
+          <ul>${f.keyPoints.map(k => `<li>${esc(k)}</li>`).join('')}</ul>
+        </div>
+      ` : ''}
+    </div>
+  ` : `<div class="fdeep-card" style="text-align:center;color:var(--gutong)">처방 데이터가 FORMULAS 에 없습니다 (가감방 가능성).</div>`;
+
+  const html = `
+    <div class="modal-head">
+      <div class="modal-tag">처방 심층 분석 v2.2.2</div>
+      <h3 class="modal-title"><span class="han" style="margin-right:6px">析</span>${esc(formulaName)}</h3>
+      <div class="modal-sub">
+        기출 <b>${relExams.length}</b>문 · 글로벌 누적 오답 <b style="color:var(--zhusha-d)">${totalWrong}</b>회 ·
+        시험 ${Object.keys(bySrc).length}회 · 유형 ${Object.keys(byType).length}종
+      </div>
+    </div>
+    <div class="modal-body fdeep-body">
+      ${formulaCard}
+
+      ${relExams.length ? `
+        <div class="fdeep-grid">
+          <div class="fdeep-block">
+            <div class="fdeep-blk-title"><span class="han">類</span> 자주 묻는 유형</div>
+            ${miniBar(sort(byType))}
+          </div>
+          <div class="fdeep-block">
+            <div class="fdeep-blk-title"><span class="han">期</span> 출제 시험</div>
+            ${miniBar(sort(bySrc))}
+          </div>
+        </div>
+
+        <div class="fdeep-block">
+          <div class="fdeep-blk-title"><span class="han">問</span> 실제 기출 — 글로벌 오답 많은 순</div>
+          <div style="font-size:11px;color:var(--gutong);margin-bottom:6px">클릭 시 정답·해설</div>
+          <div class="fdeep-exams">
+            ${examsRanked.map(e => `
+              <div class="fdeep-exam-row" data-qid="${esc(e.id)}">
+                <div class="ex-meta">
+                  <span class="ex-src">${esc(e.src||'')}</span>
+                  <span class="ex-type">${esc(e.type||'')}</span>
+                  <span class="ex-diff diff-${e.difficulty||1}">난이도 ${e.difficulty||1}</span>
+                  ${e._w > 0 ? `<span class="ex-w">오답 ${e._w}</span>` : ''}
+                </div>
+                <div class="ex-q">${esc(e.q||'').slice(0,90)}${(e.q||'').length>90?'…':''}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : `
+        <div class="fdeep-block" style="text-align:center;color:var(--gutong);padding:16px">
+          이 처방에 대한 기출 문제가 PAST_EXAMS 에 없습니다.
+        </div>
+      `}
+
+      <div class="modal-actions">
+        <button class="btn btn-sm btn-o" onclick="closeModal()">닫기</button>
+      </div>
+    </div>
+  `;
+  openModal(html);
+  // 기출 행 클릭 → 문제 상세 모달
+  $$('.fdeep-exam-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const qid = row.dataset.qid;
+      const ex = exams.find(e => e.id === qid);
+      if(ex) openWrongDetailModal(ex, Number(wrongMap[qid])||0);
+    });
+  });
+}
+window.openFormulaDeep = openFormulaDeep;
 
 // ─── 약재 분석 v2.2 ──────────────────────────────────────────────────────
 // 단순 君臣佐使가 아닌 — 性味·効能·처방내 쓰임으로 시각화
@@ -1781,28 +2612,10 @@ function renderHerbAnalysis(det){
     return tastes.reduce((a,b)=>a+b,0) / tastes.length;
   }
 
-  // 効能 카테고리 — meaning 키워드 매칭
-  const EFFICACY_CATS = [
-    { id:'buqi',   ko:'補氣',  han:'補氣',   keys:['補氣','益氣','補中','補脾','大補元氣'] },
-    { id:'buxue',  ko:'補血',  han:'補血',   keys:['補血','養血','生血'] },
-    { id:'buyin',  ko:'補陰',  han:'補陰',   keys:['滋陰','養陰','補陰','潤燥','生津'] },
-    { id:'buyang', ko:'補陽',  han:'補陽',   keys:['補陽','助陽','溫補','溫腎','補火'] },
-    { id:'jiebiao',ko:'解表',  han:'解表',   keys:['解表','發汗','解肌','疏散','疏風'] },
-    { id:'qingre', ko:'清熱',  han:'清熱',   keys:['清熱','瀉火','凉血','解毒','除煩'] },
-    { id:'wenli',  ko:'溫裏',  han:'溫裏',   keys:['溫中','溫裏','散寒','回陽','溫經'] },
-    { id:'xiexia', ko:'瀉下',  han:'瀉下',   keys:['瀉下','潤腸','通便','軟堅'] },
-    { id:'huatan', ko:'化痰',  han:'化痰',   keys:['化痰','止咳','平喘','宣肺','降逆'] },
-    { id:'xingqi', ko:'行氣',  han:'行氣',   keys:['行氣','理氣','降氣','破氣','疏肝'] },
-    { id:'huoxue', ko:'活血',  han:'活血',   keys:['活血','祛瘀','行血','通脈'] },
-    { id:'anshen', ko:'安神',  han:'安神',   keys:['安神','寧心','養心','鎮驚'] },
-    { id:'lishui', ko:'利水',  han:'利水',   keys:['利水','滲濕','利尿','燥濕'] },
-    { id:'guse',   ko:'固澁',  han:'固澁',   keys:['固表','止汗','澀精','收斂','止瀉'] },
-    { id:'kaiqiao',ko:'開竅',  han:'開竅',   keys:['開竅','醒神','豁痰開竅'] },
-  ];
+  // 効能 카테고리 — 모듈 스코프 EFFICACY_CATS 사용 (v2.2.2)
   // 약재별 효능 분류
   function efficacyOf(h){
-    const m = h.meaning || '';
-    return EFFICACY_CATS.filter(c => c.keys.some(k => m.includes(k))).map(c => c.id);
+    return efficaciesOfText(h.meaning || '');
   }
 
   // 君臣佐使 전체 분포 (모든 처방·약재)
@@ -2400,9 +3213,9 @@ window.startQuizSession = function(mode, diff, count){
         if(+x.dataset.i === i && !correct){ x.style.background='var(--zhusha)'; x.style.color='var(--mi-w)'; x.style.borderColor='transparent'; }
       });
       const expl = $('#expl'); if(expl) expl.style.display='block';
-      // 오답 기록
+      // 오답 기록 — v2.2.2: 콘텐츠 해시 qid
       if(!correct){
-        const qid = q.id || `auto:${cur}`;
+        const qid = qidOf(q);
         if(!S.wrongIds.includes(qid)) S.wrongIds.push(qid);
         saveState();
         if(FB){
@@ -2676,6 +3489,20 @@ function init(){
   setTab(S.lastTab || 'home');
   // presence 시작
   if(FB) recordPresence();
+  // v2.2.2: page unload 시 멀티 로비 잔여 정리 (keepalive DELETE)
+  const unloadCleanup = () => {
+    try{
+      if(FB && S.userId){
+        FB.delKeepalive(`lobby_idle/${S.userId}`);
+        // 큐에 있었다면 모든 level 에서 자기 entry 제거 시도
+        for(const lvl of BET_LEVELS){
+          FB.delKeepalive(`lobby/${lvl.id}/${S.userId}`);
+        }
+      }
+    }catch(_){}
+  };
+  window.addEventListener('pagehide', unloadCleanup);
+  window.addEventListener('beforeunload', unloadCleanup);
 }
 
 document.addEventListener('DOMContentLoaded', init);

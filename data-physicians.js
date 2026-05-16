@@ -753,7 +753,8 @@ const CHARACTER_IMAGES = {
   wangtao:      { url: _W('Wang_Tao.jpg'),         caption: '王燾 — 歷代名醫圖贊',                    license: 'PD-old' },
 
   // ═ 宋 (婦人科·脾胃·官修方) ═
-  chenziming:   { url: _W('Chen_Ziming.jpg'),      caption: '陳自明 — 歷代名醫圖贊',                  license: 'PD-old' },
+  // v2.2.2: chenziming(陳自明) — 동명 현대인 사진 충돌로 제거, SVG 메달리온 자동 폴백
+  // v2.2.2: zhanglu     (張璐)   — 同上
   yanyonghe:    { url: _W('Yan_Yonghe.jpg'),       caption: '嚴用和 — 歷代名醫圖贊',                  license: 'PD-old' },
   chenshiwen:   { url: _W('Chen_Shiwen.jpg'),      caption: '陳師文 — 歷代名醫圖贊',                  license: 'PD-old' },
 
@@ -768,7 +769,7 @@ const CHARACTER_IMAGES = {
 
   // ═ 清初~清中 (議病·三大家·溫病) ═
   yujiayan:     { url: _W('Yu_Chang.jpg'),         caption: '喻嘉言(喻昌) — 歷代名醫圖贊',            license: 'PD-old' },
-  zhanglu:      { url: _W('Zhang_Lu.jpg'),         caption: '張璐 (路玉) — 歷代名醫圖贊',             license: 'PD-old' },
+  // zhanglu(張璐): v2.2.2 동명인 충돌로 제거 (SVG 폴백)
   xuexue:       { url: _W('Xue_Xue.jpg'),          caption: '薛雪 (生白) — 歷代名醫圖贊',             license: 'PD-old' },
   wangmengying: { url: _W('Wang_Mengying.jpg'),    caption: '王孟英 (士雄) — 歷代名醫圖贊',           license: 'PD-old' },
 
