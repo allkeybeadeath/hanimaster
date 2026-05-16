@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v2.2.0';              // ★ 로비 표시용 (2026-05)
+const APP_VERSION = 'v2.2.1';              // ★ 로비 표시용 (2026-05)
 const APP_BUILD   = '2026.05.17';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
@@ -98,6 +98,32 @@ const FB = (() => {
         });
         return r.ok;
       }catch(_){ return false; }
+    },
+    // v2.2.1: 재시도 가능한 PUT — 큐 등록 등 결정적 작업용
+    // 반환: { ok: bool, status: number|null, retries: number, message: string }
+    putRetry: async (path, val, opts) => {
+      const o = Object.assign({tries:3, backoffMs:300}, opts||{});
+      let lastStatus = null, lastErr = '';
+      for(let i=0; i<o.tries; i++){
+        try{
+          const r = await fetch(`${base}/${path}.json`, {
+            method:'PUT', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(val),
+          });
+          if(r.ok) return { ok:true, status:r.status, retries:i, message:'' };
+          lastStatus = r.status;
+          // 401·403 (보안 룰 거부) — 재시도해도 의미 없음
+          if(r.status === 401 || r.status === 403){
+            return { ok:false, status:r.status, retries:i, message:'권한 거부(보안 룰)' };
+          }
+          // 5xx·기타 — 재시도
+          lastErr = `HTTP ${r.status}`;
+        }catch(e){
+          lastErr = (e && e.message) || '네트워크 오류';
+        }
+        if(i < o.tries-1) await new Promise(res => setTimeout(res, o.backoffMs * (i+1)));
+      }
+      return { ok:false, status:lastStatus, retries:o.tries, message:lastErr };
     },
     push: async (path, val) => {
       try{
@@ -1125,11 +1151,27 @@ async function joinBattleQueue(level){
     }
   };
 
-  const ok = await FB.put(`lobby/${level}/${S.userId}`, myEntry);
-  if(!ok){
+  const ok = await FB.putRetry(`lobby/${level}/${S.userId}`, myEntry, {tries:3, backoffMs:400});
+  if(!ok.ok){
     await cleanup(true);
-    toast('큐 등록 실패. 네트워크 확인 후 재시도');
-    setTab('hall');
+    // 무토스트로 환불 후 명시적 에러 카드 — 무엇이 잘못됐고 어떻게 복구할지 안내
+    const reason = ok.status === 401 || ok.status === 403
+      ? 'Firebase 보안 룰이 lobby 쓰기를 막고 있습니다. 관리자에게 룰 확인을 요청하세요.'
+      : (ok.message || '네트워크 오류 — 잠시 후 다시 시도하세요.');
+    view.innerHTML = `
+      <h2 class="view-title fade-in"><span class="han">阻</span>큐 등록 실패</h2>
+      <div class="card imperial fade-in" style="text-align:center;padding:22px">
+        <div style="font-size:14px;color:var(--mo-l);margin-bottom:6px">${esc(reason)}</div>
+        <div style="font-size:11.5px;color:var(--gutong);margin-bottom:14px">
+          ${ok.status ? 'HTTP ' + ok.status + ' · ' : ''}재시도 ${ok.retries}회
+        </div>
+        <div class="seal" style="font-size:16px;color:var(--feicui)">+${bet} 氣 환불 완료</div>
+        <div style="margin-top:14px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+          <button class="btn" onclick="openBattleLobby()">다시 시도</button>
+          <button class="btn btn-o" onclick="setTab('hall')">명예의 전당</button>
+        </div>
+      </div>
+    `;
     return;
   }
 
@@ -1227,9 +1269,10 @@ async function joinBattleQueue(level){
         questions: generateBattleQuestions(5),
         createdAt: Date.now()
       };
-      const created = await FB.put(`battles/${roomId}`, room);
-      if(!created){
-        // 방 생성 실패 → 다시 폴링
+      const created = await FB.putRetry(`battles/${roomId}`, room, {tries:3, backoffMs:300});
+      if(!created.ok){
+        // 방 생성 실패 → 다시 폴링 (자동 회복)
+        $('#queue-status') && ($('#queue-status').textContent = `방 생성 실패 (HTTP ${created.status||'?'}) — 재시도`);
         setTimeout(poll, POLL_INTERVAL_MS);
         return;
       }

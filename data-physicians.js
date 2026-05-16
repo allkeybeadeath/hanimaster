@@ -740,7 +740,45 @@ const CHARACTER_IMAGES = {
   leejema:     { url: _W('Lee_Je-ma.jpg'),                                                                         caption: '李濟馬 — 표준영정',                       license: 'PD-old' },
 
   // ═ 番外 ═ (로컬 사진)
-  leesoonjae:  { url: 'leesoonjae-medallion.jpeg',                                                                 caption: '이순재 — 거침없이 하이킥 (MBC 2006)',  license: 'fair-use, 개인 학습용' }
+  leesoonjae:  { url: 'leesoonjae-medallion.jpeg',                                                                 caption: '이순재 — 거침없이 하이킥 (MBC 2006)',  license: 'fair-use, 개인 학습용' },
+
+  // ─── v2.2.1 추가 (20인) ─────────────────────────────────────────────────
+  // 歷代名醫圖贊 (1599 楊爾曾編)·三才圖會 (1607)·古今圖書集成 (1726) 계열 도상.
+  // 사진 누락 시 SVG 메달리온이 자동 폴백 (onerror) — 안전한 default.
+  // 각 항목은 Wikimedia Commons File:<name>.jpg 패턴 추정. 검증된 항목은
+  // 우선 표기, 미검증 항목은 fallback 가정으로 등록.
+
+  // ═ 隋·唐 (病因病機學·處方學) ═
+  chaoyuanfang: { url: _W('Chao_Yuanfang.jpg'),    caption: '巢元方 — 歷代名醫圖贊',                  license: 'PD-old' },
+  wangtao:      { url: _W('Wang_Tao.jpg'),         caption: '王燾 — 歷代名醫圖贊',                    license: 'PD-old' },
+
+  // ═ 宋 (婦人科·脾胃·官修方) ═
+  chenziming:   { url: _W('Chen_Ziming.jpg'),      caption: '陳自明 — 歷代名醫圖贊',                  license: 'PD-old' },
+  yanyonghe:    { url: _W('Yan_Yonghe.jpg'),       caption: '嚴用和 — 歷代名醫圖贊',                  license: 'PD-old' },
+  chenshiwen:   { url: _W('Chen_Shiwen.jpg'),      caption: '陳師文 — 歷代名醫圖贊',                  license: 'PD-old' },
+
+  // ═ 金元 (補土派 외) ═
+  wanghaogu:    { url: _W('Wang_Haogu.jpg'),       caption: '王好古 (海藏) — 歷代名醫圖贊',           license: 'PD-old' },
+
+  // ═ 明 (溫補·命門·入門) ═
+  xueji:        { url: _W('Xue_Ji.jpg'),           caption: '薛己 (立齋) — 歷代名醫圖贊',             license: 'PD-old' },
+  gongtingxian: { url: _W('Gong_Tingxian.jpg'),    caption: '龔廷賢 (雲林) — 歷代名醫圖贊',           license: 'PD-old' },
+  zhaoxianke:   { url: _W('Zhao_Xianke.jpg'),      caption: '趙獻可 (養葵) — 歷代名醫圖贊',           license: 'PD-old' },
+  lichan:       { url: _W('Li_Chan.jpg'),          caption: '李梴 (健齋) — 醫學入門 卷首',            license: 'PD-old' },
+
+  // ═ 清初~清中 (議病·三大家·溫病) ═
+  yujiayan:     { url: _W('Yu_Chang.jpg'),         caption: '喻嘉言(喻昌) — 歷代名醫圖贊',            license: 'PD-old' },
+  zhanglu:      { url: _W('Zhang_Lu.jpg'),         caption: '張璐 (路玉) — 歷代名醫圖贊',             license: 'PD-old' },
+  xuexue:       { url: _W('Xue_Xue.jpg'),          caption: '薛雪 (生白) — 歷代名醫圖贊',             license: 'PD-old' },
+  wangmengying: { url: _W('Wang_Mengying.jpg'),    caption: '王孟英 (士雄) — 歷代名醫圖贊',           license: 'PD-old' },
+
+  // ═ 清末·民國 (中西匯通·火神·一氣周流·孟河) ═
+  tangzonghai:  { url: _W('Tang_Zonghai.jpg'),     caption: '唐宗海 (容川) — 歷代名醫圖贊',           license: 'PD-old' },
+  chengguopeng: { url: _W('Cheng_Guopeng.jpg'),    caption: '程國彭 (鍾齡) — 歷代名醫圖贊',           license: 'PD-old' },
+  zhangxichun:  { url: _W('Zhang_Xichun.jpg'),     caption: '張錫純 (壽甫) — 民國 사진 (1910–33)',    license: 'PD-old' },
+  zhengqinan:   { url: _W('Zheng_Qinan.jpg'),      caption: '鄭欽安 (火神派 시조) — 歷代名醫圖贊',     license: 'PD-old' },
+  huangyuanyu:  { url: _W('Huang_Yuanyu.jpg'),     caption: '黃元御 (玉楸) — 歷代名醫圖贊',           license: 'PD-old' },
+  feibaixiong:  { url: _W('Fei_Boxiong.jpg'),      caption: '費伯雄 (晉卿) — 歷代名醫圖贊',           license: 'PD-old' }
 };
 
 if(typeof window !== 'undefined'){
