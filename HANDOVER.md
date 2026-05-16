@@ -1,126 +1,163 @@
-# 方劑學 学習帳 — 인수인계 (CIM Lab)
+# 方劑學 PWA v2.0 — HANDOVER
 
-본 문서는 CIM Lab 의 방제학 2차 수시 대비 PWA 인수인계 자료다. 신규 합류 구성원이 별도 컨텍스트 없이 코드를 이해·확장할 수 있도록 작성. 최종 갱신 **v1.0 (2026-05-17)**.
+> CIM Lab 본과 2학년 방제학 학습 도구. Greek v60 패턴을 따른 단일-파일 PWA.
 
-## 0. 현재 상태 스냅샷 (v1.0)
+## 빠른 시작
 
-- **빌드 일자**: 2026-05-17 (D-3, 시험 5/20)
-- **CIM Lab Greek PWA (paideia v59)** 의 구조·UI 원칙을 차용하여 방제학 용도로 재작성. 단, Greek 의 형태분석·전집·BGM·캐릭터·멀티 배틀 모듈은 *방제학 시험 4일 학습 목적상 불필요*하므로 제외하고 핵심 학습 모듈(어휘카드↔처방카드, 객관식, 검색, SRS, 4일 계획)에 집중.
-- **사용자 정책 준수**:
-  - i18n 영구 제외 (Greek v49 세션 사용자 지시)
-  - HANDOVER 매 라운드 동봉 (Greek v53 세션 지시)
-  - 한자 표기는 번체 유지 (시험 표기와 일치)
+```bash
+# 1. 로컬 테스트 (Firebase 없이도 동작, 정적 데이터만 사용)
+python3 -m http.server 8080
+# → http://localhost:8080 에서 접속
 
-**산출물 (7 파일)**:
-- `index.html` (~12 KB) — 셸 + CSS + nav + view
-- `data-formulas.js` (~50 KB) — 24 처방·68 약재·23 기출·4일 계획 데이터
-- `app.js` (~50 KB, 통합) — 상태·라우팅·홈·함정·처방·암기카드·객관식·기출·비교·약재·SRS 의 모든 렌더러
-- `sw.js` — 서비스 워커 (network-first index.html, cache-first 나머지)
-- `manifest.json` — PWA 매니페스트 (PNG 192·512, SVG, apple-touch)
-- `icon.svg` + `icon-192.png` + `icon-512.png` + `apple-touch-icon.png` — 아이콘
-- `README.md` — 배포·사용 안내
-- `HANDOVER.md` (이 문서)
-- `NEXT_TASKS.md` — v2 작업 계획
+# 2. 배포 (기존 Firebase Hosting 프로젝트 hanimaster-245f6 활용)
+firebase deploy --only hosting
+```
 
-**구조 변경 노트 (v1.0 빌드 막바지)**:
-- 초기 분할안(`modules-1.js`, `modules-2.js`) 대신 **단일 `app.js`** 채택. 4 일짜리 단일 목적 PWA 라서 분할의 이득이 거의 없고, 통합본이 디버깅·검색·인수인계가 쉬움. v2 에서 기능 추가 시 분할 고려.
-- `manifest.json` · `icon.svg`
+## 파일 구조 (10 파일, 모두 같은 디렉토리)
 
-**총 ~113 KB** (Greek v59 의 920 KB 대비 매우 가볍게 — 시험 4일 단기 학습 용도라 군더더기 제거).
+```
+index.html              ← 셸 + 帝王風 CSS (제왕풍 디자인)
+app.js                  ← 메인 로직 (state·BGM·라우팅·로비·배틀·통계·…)
+data-ranks.js           ← 9 등급 (賓醫→眞人)
+data-physicians.js      ← 51 의가 + CHARACTER_IMAGES dict
+data-formulas.js        ← 처방·약재·기출 (※ v1 데이터 plug-in 필요)
+icon.svg                ← 黃帝 아이콘 (面旒 곤룡포)
+icon-192.png            ← PWA 아이콘
+icon-512.png            ← PWA 아이콘
+apple-touch-icon.png    ← iOS 홈화면 아이콘
+manifest.json           ← PWA 매니페스트
+sw.js                   ← 서비스 워커 (오프라인 캐시)
+leesoonjae.jpeg         ← 원본 (1280×720)
+leesoonjae-medallion.jpeg ← 메달리온용 크롭 (480×480)
+```
 
-**기능 카탈로그**:
-- 4일 단계별 학습 계획 (D-3 ~ D-day, 자동으로 오늘 단계 강조)
-- 시험까지 D-N 카운트다운 (분 단위 갱신)
-- 처방 24 (8장 보익제 16 + 6장 온리제 2 + 7장 표리쌍해제 6) 카드
-- 처방 상세: 작용·적응증·구성·군신좌사·기본방·핵심 포인트·가감법·파생방·관련 기출
-- 암기카드 3 모드: 작용 / 구성약물 / 적응증
-- 객관식 3 범위: 전체(자동생성 + 기출 80+ 문제) / 작년기출만(23문) / 오답함만
-- 객관식 자동 생성 3 유형: 작용 매칭 / 적응증→처방 / 구성에 들지 않는 것
-- 작년 기출 23문 처방별 묶음 + 해설
-- 처방 비교 10표 (사군자↔향사육군자, 보중↔귀비, 백호↔당귀보혈, 자감초↔생맥산, 시호제 3종 등)
-- 약재 68 효능 + 사용 처방 역인덱스
-- 오답함 (플래시 모름 + 기출 오답 + 자동 객관식 오답) 통합 SRS
-- D-day 함정 카드 19 항목
+## v1 데이터 이관 (★ 필수)
 
-## 1. 데이터 출처 및 추출 과정
+`data-formulas.js` 의 빈 배열에 v1.0 데이터를 붙여넣으세요:
+- `FORMULAS`: 24 처방
+- `HERBS`: 68 약재
+- `PAST_EXAMS`: 23 기출
 
-**시험 범위 PDF**:
-- `-59.pdf` (128p, Hwp 2020 변환) → 1~59 페이지가 시험 범위. 8장 보익제.
-- `127-.pdf` (174p, Hwp 2020 변환) → 127~174 페이지가 시험 범위. 6장 온경산한제 + 7장 표리쌍해제.
+스키마는 파일 상단 주석 참고. v1과 거의 동일 (`monarch_minister`, `keyPoints`, `chapter` 등).
 
-**작년 기출 HWP**:
-- `22학번_본과2학년_2학기_1차수시_방제학.hwp` — 보익제~고삽제 (올해 범위 일치 ↑)
-- `22학번_본과2학년_1학기_기말고사_방제학.hwp` — 4장 5절~7장 (올해 범위는 6·7장만)
+## 주요 기능
 
-**추출**: `pdftotext -layout` + 한글 발음첨자 줄 제거 + 정규식 마커 매칭 ([구성][작용][적응증][배오][가감법] 등).
+### 1. 9 등급 명예의 전당 (黃帝內經 上古天眞論 기반)
 
-23/23 처방의 자동 추출 검증 통과. 23 핵심 + 1 부속(황기계지오물탕) = 24 처방.
+| 단계 | 한자 | 한글 | 필요 氣 |
+|---|---|---|---|
+| 1 | 賓醫 | 빈의 | 0 |
+| 2 | 醫工 | 의공 | 200 |
+| 3 | 醫師 | 의사 | 500 |
+| 4 | 良醫 | 양의 | 1,000 |
+| 5 | 大醫 | 대의 | 2,000 |
+| 6 | 賢人 | 현인 | 3,500 |
+| 7 | 聖人 | 성인 | 5,500 |
+| 8 | 至人 | 지인 | 8,000 |
+| 9 | 眞人 | 진인 | 12,000 |
 
-**큐레이션 원칙**:
-- 한자(번체) 우선 표기 — 시험 표기와 일치
-- 작용은 짧은 어구로 (益氣健脾, 補血和血)
-- 적응증은 핵심 증상 위주
-- 군신좌사는 본문에 명시된 경우만
-- 기본방 합방 관계는 명시적으로 (사군자+사물=팔진 등)
-- 작년 기출은 *올해 시험 범위 처방*에 한정해서 매핑
+`data-ranks.js` 에서 임계값·璽印·색상 조정 가능.
 
-## 2. 코드 구조
+### 2. 51 의가 캐릭터
 
-**상태 관리** (`S` 객체, `bangje.state.v1` localStorage 키):
-```js
+- **神階 (5)**: 黃帝·神農·伏羲·女媧·岐伯 — 氣로 잠금 해제 (900~1,200)
+- **古代/唐/宋/金元/明/清/清末民國 (40)**: 카테고리별 팔레트
+- **朝鮮 (2)**: 許浚, 李濟馬
+- **番外 (1)**: 이순재 (거침없이 하이킥 시트콤 캡쳐, 18개 어록 랜덤 출력)
+
+15인은 실제 사진 (Wellcome Collection CC BY 4.0 + 李時珍 동상 + 이순재 시트콤 스틸). 나머지는 SVG 메달리온 (이름의 한자 1자 + 카테고리 팔레트).
+
+### 3. 멀티 對決 (氣博)
+
+- **4단계 베팅**: 小博(5%, ≥20氣) / 中博(15%, ≥50氣) / 大博(30%, ≥150氣) / 賭命(50%, ≥500氣)
+- **매칭**: Firebase `/lobby/{level}/{userId}` 폴링. userId 가 더 작은 쪽이 방 생성 (race 회피).
+- **인트로**: "對決開始" 한자가 큰 璽印으로 등장, 양쪽 캐릭터 명언 말풍선. 이순재는 18개 어록 중 랜덤 1개.
+- **5문제 객관식**: 작년 기출 + 처방 자동 생성. 60초 제한.
+- **정산**: 제로섬. 승자가 패자의 베팅액 전액 획득. 무승부면 환불.
+
+### 4. 大廳 (로비)
+
+- **D-N 카운트다운** (`EXAM_DATE_ISO = '2026-05-20T00:00:00+09:00'`)
+- **닉네임 시스템**: `S.name` 영구 저장, 헤더 + 홈 카드에 표시, 모달로 편집
+- **온라인 학습자**: Firebase RTDB `/presence/{userId}` 30초마다 갱신, 90초 이내 활성자만 표시. 메달리온 + 이름 칩 (최대 24명).
+- **건의사항 폼**: Firebase `/feedback` push, 최근 12개 표시
+- **학습 진행**: 마스터/북마크/오답 카운터
+
+### 5. 통계·분석
+
+- **전체 오답 랭킹**: 모든 사용자 누적 오답 (Firebase `/stats/wrongs/{qid}`)
+- **기출 분석**: 유형별 + 처방별 출제 빈도 (PAST_EXAMS 데이터 필요)
+- **약재 분석**: 빈출 약재 TOP 20 → 클릭 시 君臣佐使 위치 + 사용 처방 (FORMULAS 데이터 필요)
+
+### 6. BGM (五聲音階 古琴)
+
+Web Audio API 로 五聲音階 (宫商角徵羽 = C-D-E-G-A) 古琴 시뮬레이션. sine + triangle 옥타브 합성, soft attack-decay, delay reverb. 70 BPM, 4마디 무작위 패턴 반복.
+
+헤더 ♪/♫ 버튼으로 토글.
+
+## Firebase RTDB 데이터 구조
+
+```
+hanimaster-245f6-default-rtdb.asia-southeast1/
+├── presence/
+│   └── {userId}: {name, character, qi, ts}
+├── feedback/
+│   └── {pushId}: {name, msg, ts, userId}
+├── lobby/
+│   └── {level}/
+│       └── {userId}: {userId, name, character, bet, ts}
+├── battles/
+│   └── {roomId}: {level, bet, players, questions, status}
+└── stats/
+    └── wrongs/
+        └── {qid}: <count>
+```
+
+### 보안 규칙 권장
+
+```json
 {
-  bookmarks: [],      // (예약, 미사용)
-  wrongIds: [],       // 'past:N', 'auto-act:id', 'auto-ind:id', 'auto-comp:id', 'fc:id'
-  lastFcIdx: 0,       // 플래시카드 마지막 위치
-  fcMode: 'action',   // 'action' | 'composition' | 'indication'
-  quizScope: 'all',   // 'all' | 'past' | 'wrong'
-  lastTab: 'home',
-  knownIds: []        // 플래시카드에서 '안다' 표시한 처방
+  "rules": {
+    "presence":  { ".read": true, ".write": true },
+    "feedback":  { ".read": true, ".write": true },
+    "lobby":     { ".read": true, ".write": true },
+    "battles":   { ".read": true, ".write": true },
+    "stats":     { ".read": true, ".write": true }
+  }
 }
 ```
 
-**라우팅**: `setTab(name)` 단일 함수. View `<main id="view">` 의 innerHTML 교체.
+> ⚠️ 운영 환경에선 `.write` 에 검증 룰 추가 권장 (예: `newData.child('userId').val() === auth.uid`).
 
-**데이터 모델** (data-formulas.js):
-- `FORMULAS` 배열 (24) — 각 entry: `{id, ko, han, alias, chapter, section, order, composition[], action, indication, monarch_minister{}, baseFormula, keyPoints[], addRules[], derived{}, past[]}`
-- `HERBS` 배열 (68) — `{ko, han, meaning}`
-- `PAST_EXAMS` 배열 (23) — `{src, formula, type, q, options[], answer, explanation}`
-- `STUDY_PLAN` 배열 (4 일) — `{day, label, goals[], tasks[]}`
-- `EXAM_META` 객체
+## 디자인 시스템 (帝王風)
 
-**모듈 분담**:
-- `app.js` — STATE, util, countdown, routing, renderHome, renderPitfalls, init
-- `modules-1.js` — renderFormulas, showFormulaDetail, renderCompare
-- `modules-2.js` — renderFlashcard, buildQuestionPool, renderQuiz, renderPast, renderHerbs, renderSRS
+`index.html` 의 `:root` CSS 변수:
+- `--zhusha` (朱砂紅 #9C3030): 주 색상
+- `--huang` (帝王黃 #C9A227): 강조
+- `--mo` (墨黑 #1C140A): 텍스트
+- `--mi` (米色 #F5E6D3): 배경
+- `--feicui` (翡翠綠 #2A7060), `--gutong` (古銅 #876A36), `--xuan` (玄 #2C2E48): 보조
 
-## 3. 향후 작업 (v1.1+)
+폰트:
+- 디스플레이: ZCOOL XiaoWei, Ma Shan Zheng
+- 한문: Noto Serif SC
+- 한글: Noto Serif KR
 
-### 즉시 후보 (시험 전 D-2~D-1 안에 추가하면 학습 도움)
-- **가감법 표** 더 완전한 추출 — 현재 사군자탕·당귀사역탕 등 일부만 큐레이션. 나머지 처방의 가감법은 본문 표가 깨져서 누락.
-- **서술형 가이드** — 22학번 기출에 서술형이 많음(십전대보탕 합방 이유, 황기계지오물탕 효능 등). 서술 모범 답안 카드 추가.
-- **약재 빈도 시각화** — 어떤 약재가 어떤 처방군에 많이 쓰이는지 (예: 황기 = 황기계지오물탕·옥병풍산·당귀보혈탕·보중익기탕·십전대보탕 등 보기제군).
+## 알려진 한계
 
-### 장기 (시험 후, 다른 시험에 재활용 시)
-- 다른 범위(고삽제·청열제·해표제 등) 데이터 추가하여 본과 2학년 전 범위 커버
-- Greek v59 의 캐릭터·BGM·멀티 배틀 모듈 이식 (학습 동기 부여, 그룹 스터디 용도)
-- Anthropic API 통합 — 임의 처방의 서술형 모범답안 생성 (큐레이션 한계 보완)
-- AGDT 같은 본문 분석 데이터 — 한방 의서(상한론·금궤요략·온병조변·동의보감) 원문 lemma 인덱스
+- **Firebase 의존**: 멀티 배틀, presence, 글로벌 통계는 Firebase 가 있어야 동작. 없을 때 로컬-only 모드로 fallback.
+- **사진 라이선스**: Wellcome 시리즈 CC BY 4.0, 李時珍 PD-self. 이순재 시트콤 스틸은 fair-use (개인 학습용). 상업 배포 시 재검토 필요.
+- **BGM 무작위성**: 패턴 반복이라 길게 들으면 단조로울 수 있음. 사용자 토글 가능.
 
-## 4. 라이선스·출처
+## 인수자 체크리스트
 
-- 데이터: 강의 PDF + 작년 기출 (교내 CIM Lab 내부 학습 자료)
-- 코드: 자유 사용 (CIM Lab 내부)
-- 폰트: Google Fonts (Noto Serif KR, Noto Serif SC)
-- 외부 의존성 없음 (오프라인 동작)
+- [ ] v1.0 `data-formulas.js` 내용 복사해 채워넣기 (FORMULAS·HERBS·PAST_EXAMS)
+- [ ] `EXAM_DATE_ISO` 시험일 변경 (`app.js` 상단)
+- [ ] `EXAM_META.rangeKR`, `rangeHan` 시험 범위 변경
+- [ ] Firebase Hosting 에 배포 (`firebase deploy --only hosting`)
+- [ ] 모바일 PWA 설치 테스트 (홈화면 추가)
+- [ ] 멀티 배틀 2인 동시 테스트
 
-## 5. 알려진 한계
+---
 
-1. **자동 큐레이션의 데이터 정확도**: 처방의 [구성][작용][적응증] 같은 명시적 마커가 있는 필드는 정확하지만, [가감법] 표·[배오 분석] 본문은 줄바꿈·발음첨자 잔재로 일부 가독성 저하. 24 처방 모두 작용·구성·적응증·군신좌사는 수동 검증되었다.
-
-2. **객관식 자동 생성의 distractor 품질**: 작용을 묻는 자동 문제에서 distractor 가 같은 처방군에서 추출되므로, 한방 임상 경험이 부족한 학습자는 모든 선지가 비슷해 보일 수 있다. 작년 기출 23문은 실제 시험 패턴이라 신뢰도 ↑.
-
-3. **시험 출제 예측 불가**: 본 PWA 는 작년 기출과 강의 PDF 명시 빈출 표시를 토대로 함정·핵심 포인트를 정리했다. 그러나 출제는 매년 변동 가능. 학습자는 PDF 원문 자체도 한 번은 통독할 것 권장.
-
-4. **시험 당일 모바일 사용**: 한의대 시험장은 보통 휴대 디바이스 반입 금지. 본 PWA 는 시험 *전* 학습 도구.
-
-— *finis*
+작성: 2026-05-16 · CIM Lab

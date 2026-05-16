@@ -1,56 +1,59 @@
-// 방제학 PWA — Service Worker
-const CACHE_VERSION = 'bangje-v1';
-const CACHE_FILES = [
+/* sw.js — v2.0 서비스 워커
+ * network-first index.html / app.js (개발 편의),
+ * cache-first 나머지 정적 파일 (data, icons, manifest).
+ */
+const CACHE = 'bangje-pwa-v2-2026-05';
+const PRECACHE = [
   './',
   './index.html',
-  './data-formulas.js',
-  './modules-1.js',
-  './modules-2.js',
   './app.js',
+  './data-physicians.js',
+  './data-ranks.js',
+  './data-formulas.js',
   './manifest.json',
   './icon.svg',
   './icon-192.png',
   './icon-512.png',
-  './apple-touch-icon.png'
+  './apple-touch-icon.png',
+  './leesoonjae-medallion.jpeg'
 ];
 
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(CACHE_VERSION).then(c => c.addAll(CACHE_FILES))
-      .then(() => self.skipWaiting())
+    caches.open(CACHE).then(c => c.addAll(PRECACHE).catch(()=>{})).then(()=>self.skipWaiting())
   );
 });
 
 self.addEventListener('activate', e => {
   e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_VERSION).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    caches.keys().then(keys => Promise.all(
+      keys.filter(k => k !== CACHE).map(k => caches.delete(k))
+    )).then(()=>self.clients.claim())
   );
 });
 
 self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
-  // Network-first for index.html (so updates propagate fast)
-  if (url.pathname.endsWith('/') || url.pathname.endsWith('index.html')) {
+  const req = e.request;
+  if(req.method !== 'GET') return;
+  const url = new URL(req.url);
+  // network-first: index.html, app.js (변경이 잦음)
+  const networkFirst = url.pathname.endsWith('index.html') || url.pathname.endsWith('/') || url.pathname.endsWith('app.js');
+  if(networkFirst){
     e.respondWith(
-      fetch(e.request).then(r => {
-        const clone = r.clone();
-        caches.open(CACHE_VERSION).then(c => c.put(e.request, clone));
+      fetch(req).then(r => {
+        const copy = r.clone();
+        caches.open(CACHE).then(c => c.put(req, copy)).catch(()=>{});
         return r;
-      }).catch(() => caches.match(e.request))
+      }).catch(() => caches.match(req).then(r => r || caches.match('./index.html')))
     );
     return;
   }
-  // Cache-first for the rest
+  // cache-first: 나머지
   e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request).then(resp => {
-      // cache same-origin GETs
-      if (e.request.method === 'GET' && url.origin === self.location.origin) {
-        const clone = resp.clone();
-        caches.open(CACHE_VERSION).then(c => c.put(e.request, clone));
-      }
-      return resp;
+    caches.match(req).then(cached => cached || fetch(req).then(r => {
+      const copy = r.clone();
+      if(r.status === 200) caches.open(CACHE).then(c => c.put(req, copy)).catch(()=>{});
+      return r;
     }))
   );
 });

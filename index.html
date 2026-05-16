@@ -2,171 +2,469 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>方劑學 — 2차 수시 (5/20)</title>
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="theme-color" content="#7d4e2d">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#9C3030">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>方劑學 — 黃帝의 방</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700;800&family=Noto+Serif+KR:wght@400;500;700&family=Noto+Serif+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;500;600;700;900&family=Noto+Serif+SC:wght@400;500;600;700;900&family=ZCOOL+XiaoWei&family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
+
 <style>
-  :root {
-    --ink:#1a1411; --ink-soft:#4a3a30; --ink-mute:#7a6a60;
-    --paper:#faf6ef; --paper-d:#f3ece0; --paper-dd:#e8ddc8;
-    --terracotta:#b05030; --terracotta-d:#7d4e2d; --terracotta-l:#d8a08a;
-    --gold:#b8893a; --green:#5a7a3a; --green-d:#3d5826; --crimson:#9a2c2c;
-    --shadow:0 2px 8px rgba(58,40,30,.08); --shadow-l:0 1px 3px rgba(58,40,30,.06);
-    --radius:8px;
-  }
-  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{margin:0;padding:0;height:100%}
-  body{font-family:'Noto Serif KR','Nanum Myeongjo',serif;color:var(--ink);background:var(--paper);line-height:1.55;font-size:16px;overflow-x:hidden}
-  .han,.hanja{font-family:'Noto Serif SC','Noto Serif KR',serif}
-  header{position:sticky;top:0;z-index:50;background:var(--paper);border-bottom:1px solid var(--paper-dd);padding:10px 14px 0}
-  .hdr-row{display:flex;align-items:center;gap:10px;max-width:760px;margin:0 auto}
-  .hdr-title{font-weight:800;font-size:17px;color:var(--terracotta-d)}
-  .hdr-spacer{flex:1}
-  .countdown{font-size:12px;color:var(--terracotta);font-weight:700;padding:4px 10px;background:var(--paper-d);border-radius:12px}
-  .countdown.urgent{background:var(--terracotta);color:white}
-  nav.tabs{display:flex;gap:4px;padding:8px 8px 0;max-width:760px;margin:0 auto;overflow-x:auto;scrollbar-width:none}
-  nav.tabs::-webkit-scrollbar{display:none}
-  nav.tabs button{border:none;background:var(--paper-d);color:var(--ink-soft);padding:8px 14px;border-radius:18px 18px 0 0;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s}
-  nav.tabs button.active{background:white;color:var(--terracotta-d);box-shadow:var(--shadow);border:1px solid var(--paper-dd);border-bottom:none}
-  main{max-width:760px;margin:0 auto;padding:14px;min-height:calc(100vh - 130px)}
-  .card{background:white;border:1px solid var(--paper-dd);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow-l)}
-  .card.accent{border-left:4px solid var(--terracotta)}
-  .card.urgent{border-left:4px solid var(--crimson);background:#fff8f6}
-  .card.success{border-left:4px solid var(--green)}
-  .card.muted{background:var(--paper-d)}
-  .card h2{margin:0 0 8px;font-size:17px;color:var(--terracotta-d)}
-  .card h3{margin:0 0 6px;font-size:15px;color:var(--ink)}
-  .card p{margin:6px 0}
-  .card .meta{font-size:12px;color:var(--ink-mute);margin-bottom:8px}
-  .plan-day{background:white;border:1px solid var(--paper-dd);border-radius:var(--radius);padding:12px 14px;margin-bottom:10px}
-  .plan-day .day-tag{display:inline-block;padding:2px 10px;background:var(--terracotta);color:white;border-radius:10px;font-size:11px;font-weight:700;margin-bottom:6px}
-  .plan-day.today{border-color:var(--terracotta);box-shadow:0 0 0 3px rgba(176,80,48,.08)}
-  .plan-day.today .day-tag{background:var(--crimson);animation:pulse 2s ease infinite}
-  .plan-day.past{opacity:.55}
-  .plan-day .label{font-weight:700;font-size:15px;margin:4px 0}
-  .plan-day ul{margin:6px 0 8px;padding-left:18px;font-size:14px}
-  .plan-day li{margin:3px 0}
-  @keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(154,44,44,.18)}50%{box-shadow:0 0 0 6px rgba(154,44,44,.30)}}
-  button.btn,a.btn{border:1px solid var(--terracotta);background:white;color:var(--terracotta-d);padding:7px 14px;border-radius:18px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-block;transition:all .15s}
-  button.btn:hover,a.btn:hover{background:var(--terracotta);color:white}
-  button.btn.primary,a.btn.primary{background:var(--terracotta);color:white}
-  button.btn.primary:hover{background:var(--terracotta-d)}
-  button.btn.small{padding:4px 10px;font-size:12px}
-  button.btn.green{border-color:var(--green);color:var(--green-d)}
-  button.btn.green:hover{background:var(--green);color:white}
-  .chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
-  .chip{display:inline-block;padding:4px 10px;background:var(--paper-d);border-radius:12px;font-size:12px;color:var(--ink-soft);border:1px solid transparent;cursor:pointer}
-  .chip:hover{background:var(--paper-dd)}
-  .chip.active{background:var(--terracotta);color:white}
-  .formula-item{background:white;border:1px solid var(--paper-dd);border-radius:var(--radius);padding:10px 14px;margin-bottom:8px;cursor:pointer;transition:all .15s}
-  .formula-item:hover{border-color:var(--terracotta-l)}
-  .formula-item .ko{font-weight:700;font-size:16px;color:var(--ink)}
-  .formula-item .han{font-family:'Noto Serif SC',serif;color:var(--terracotta-d);margin-left:6px;font-size:14px}
-  .formula-item .sub{font-size:12px;color:var(--ink-mute);margin-top:2px}
-  .formula-item .action-mini{font-size:13px;color:var(--green-d);margin-top:4px}
-  .formula-detail .section{margin:14px 0}
-  .formula-detail .section h3{font-size:14px;color:var(--terracotta);margin:0 0 6px;padding-bottom:4px;border-bottom:1px dashed var(--paper-dd);text-transform:uppercase;letter-spacing:.5px}
-  .composition-list{display:flex;flex-wrap:wrap;gap:6px}
-  .herb-token{padding:4px 10px;background:var(--paper-d);border-radius:14px;font-size:13px;cursor:pointer}
-  .herb-token:hover{background:var(--paper-dd)}
-  .mm-grid{display:grid;grid-template-columns:max-content 1fr;gap:6px 12px;font-size:14px}
-  .mm-grid .role{font-weight:700;color:var(--terracotta-d);text-align:center}
-  .add-rules table{width:100%;border-collapse:collapse;font-size:13px}
-  .add-rules td{padding:6px 8px;border-bottom:1px dotted var(--paper-dd);vertical-align:top}
-  .add-rules td:first-child{font-weight:600;color:var(--ink-soft);white-space:nowrap}
-  .fc-container{perspective:1000px;height:380px;margin:14px 0}
-  .fc-card{width:100%;height:100%;position:relative;transform-style:preserve-3d;transition:transform .6s;cursor:pointer}
-  .fc-card.flipped{transform:rotateY(180deg)}
-  .fc-face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;background:white;border:1px solid var(--paper-dd);border-radius:var(--radius);padding:20px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;box-shadow:var(--shadow);overflow:auto}
-  .fc-back{transform:rotateY(180deg);justify-content:flex-start}
-  .fc-front .ko{font-size:28px;font-weight:700;margin-bottom:8px}
-  .fc-front .han{font-size:22px;color:var(--terracotta-d);font-family:'Noto Serif SC',serif;margin-bottom:14px}
-  .fc-front .hint{font-size:12px;color:var(--ink-mute);margin-top:16px}
-  .fc-back h3{color:var(--terracotta-d);font-size:18px;margin:0 0 10px;text-align:center;width:100%}
-  .fc-back .action{color:var(--green-d);font-weight:700;font-size:16px;margin-bottom:10px;text-align:center;width:100%}
-  .fc-back .indication{font-size:14px;color:var(--ink-soft);margin-bottom:8px;text-align:left;width:100%}
-  .fc-back .composition{font-size:13px;color:var(--ink);width:100%;text-align:left}
-  .fc-controls{display:flex;gap:6px;justify-content:space-between;margin-top:10px;flex-wrap:wrap}
-  .fc-progress{font-size:12px;color:var(--ink-mute);text-align:center;margin-bottom:8px}
-  .quiz-q{font-size:16px;font-weight:600;margin:14px 0;line-height:1.5}
-  .quiz-options button{display:block;width:100%;text-align:left;background:white;border:1px solid var(--paper-dd);padding:10px 14px;margin:6px 0;border-radius:6px;font-family:inherit;font-size:14px;cursor:pointer;color:var(--ink);transition:all .15s}
-  .quiz-options button:hover{border-color:var(--terracotta-l)}
-  .quiz-options button.correct{background:#e8f3dc;border-color:var(--green);color:var(--green-d);font-weight:600}
-  .quiz-options button.wrong{background:#fbe8e3;border-color:var(--crimson);color:var(--crimson)}
-  .quiz-options button.disabled{cursor:not-allowed}
-  .explanation{margin:14px 0;padding:12px 14px;background:var(--paper-d);border-left:3px solid var(--gold);border-radius:0 6px 6px 0;font-size:14px}
-  .quiz-progress{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-mute);margin-bottom:8px}
-  .quiz-progress .bar{flex:1;height:6px;background:var(--paper-dd);border-radius:3px;overflow:hidden}
-  .quiz-progress .bar > div{height:100%;background:var(--terracotta);transition:width .3s}
-  .search-input{width:100%;padding:10px 12px;font-size:15px;border:1px solid var(--paper-dd);border-radius:6px;background:white;font-family:inherit;color:var(--ink)}
-  .search-input:focus{outline:none;border-color:var(--terracotta)}
-  .compare-table{width:100%;border-collapse:collapse;font-size:13px}
-  .compare-table th{background:var(--paper-d);padding:8px;text-align:left;border-bottom:2px solid var(--terracotta);font-weight:700;color:var(--terracotta-d)}
-  .compare-table td{padding:8px;border-bottom:1px solid var(--paper-dd);vertical-align:top}
-  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:white;padding:10px 18px;border-radius:22px;font-size:14px;z-index:100;box-shadow:var(--shadow);animation:slideUp .3s}
-  .toast.success{background:var(--green-d)}
-  .toast.error{background:var(--crimson)}
-  @keyframes slideUp{from{transform:translateX(-50%) translateY(20px);opacity:0}to{transform:translateX(-50%) translateY(0);opacity:1}}
-  footer{text-align:center;color:var(--ink-mute);font-size:11px;padding:20px 14px;max-width:760px;margin:0 auto}
-  .row{display:flex;gap:8px;flex-wrap:wrap}
-  .text-small{font-size:12px;color:var(--ink-mute)}
-  .badge{display:inline-block;padding:2px 8px;background:var(--terracotta);color:white;border-radius:10px;font-size:11px;font-weight:700}
-  .badge.gold{background:var(--gold)}
-  details{margin:8px 0}
-  details summary{cursor:pointer;font-weight:600;color:var(--ink-soft);padding:6px 0;font-size:14px}
-  details summary:hover{color:var(--terracotta)}
-  @media (max-width:480px){
-    nav.tabs button{padding:7px 10px;font-size:12px}
-    .hdr-title{font-size:15px}
-    main{padding:10px}
-    .card{padding:12px}
-    .fc-container{height:340px}
-    .fc-front .ko{font-size:24px}
-    .fc-front .han{font-size:18px}
-  }
+/* ═══════════════════════════════════════════════════════════════════
+ * 方劑學 v2.0 — 中華 帝王風 디자인 시스템
+ * 색채: 朱砂紅 / 帝王黃 / 墨黑 / 米色 / 翡翠綠 / 古銅
+ * 文字: Noto Serif KR · SC + ZCOOL XiaoWei + Ma Shan Zheng
+ * 장식: 太極(陰陽圖)·八卦·雲紋·璽印
+ * ═══════════════════════════════════════════════════════════════════ */
+
+:root{
+  --zhusha:#9C3030; --zhusha-d:#6E1818; --zhusha-l:#C04848;
+  --huang:#C9A227;  --huang-d:#8C6818;  --huang-l:#FFE08A;
+  --mo:#1C140A;     --mo-l:#3A2A18;
+  --mi:#F5E6D3;     --mi-d:#E8D4B8;     --mi-w:#FCF4E5;
+  --feicui:#2A7060; --gutong:#876A36;   --xuan:#2C2E48;
+  --bone:#F0E0C0;
+
+  --font-display:'ZCOOL XiaoWei','Ma Shan Zheng','Noto Serif KR','Noto Serif SC',serif;
+  --font-body:'Noto Serif KR','Noto Serif SC',serif;
+  --font-han:'Noto Serif SC','Noto Serif KR',serif;
+
+  --r-sm:6px; --r:10px; --r-lg:14px;
+  --sh-sm:0 1px 3px rgba(28,20,10,.18);
+  --sh:0 3px 10px rgba(28,20,10,.22);
+  --sh-lg:0 8px 24px rgba(28,20,10,.32);
+}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;font-family:var(--font-body);color:var(--mo);background:var(--mi)}
+body{
+  min-height:100vh;
+  background:
+    radial-gradient(ellipse at top right, rgba(201,162,39,.12) 0%, transparent 55%),
+    radial-gradient(ellipse at bottom left, rgba(156,48,48,.08) 0%, transparent 60%),
+    repeating-linear-gradient(45deg, transparent 0 22px, rgba(135,106,54,.022) 22px 23px),
+    var(--mi);
+  background-attachment:fixed;
+  font-size:15px;line-height:1.55;padding:0 0 96px;
+  -webkit-text-size-adjust:100%;
+}
+.han{font-family:var(--font-han);letter-spacing:.02em}
+.seal{font-family:var(--font-display);letter-spacing:.04em}
+
+/* ─── 헤더 ───────────────────────────────────────────────────────── */
+.app-header{
+  position:sticky;top:0;z-index:50;
+  background:linear-gradient(180deg, var(--zhusha-d) 0%, var(--zhusha) 100%);
+  border-bottom:3px double var(--huang);
+  color:var(--huang-l);padding:10px 12px;box-shadow:0 3px 10px rgba(28,20,10,.32);
+}
+.app-header .row{display:flex;align-items:center;gap:8px;max-width:680px;margin:0 auto}
+.app-header .logo{
+  width:38px;height:38px;flex-shrink:0;border-radius:50%;background:var(--mi-w);
+  box-shadow:inset 0 0 0 2px var(--huang),0 1px 4px rgba(0,0,0,.4);
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
+}
+.app-header .logo img,.app-header .logo svg{width:100%;height:100%;display:block}
+.app-header .titlewrap{display:flex;flex-direction:column;line-height:1}
+.app-header .title{font-family:var(--font-display);font-size:19px;letter-spacing:.06em}
+.app-header .subtitle{font-size:9.5px;opacity:.88;letter-spacing:.18em;text-transform:uppercase;margin-top:1px}
+.app-header .head-chips{margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.head-chip{
+  display:inline-flex;align-items:center;gap:5px;background:rgba(0,0,0,.30);
+  padding:4px 9px;border-radius:14px;border:1px solid var(--huang-l);
+  font-size:11.5px;color:var(--huang-l);cursor:pointer;
+  font-family:var(--font-display);
+}
+.head-chip:hover{background:rgba(0,0,0,.45)}
+.head-chip .seal-mini{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:18px;height:18px;border-radius:3px;background:var(--huang-l);color:var(--zhusha-d);
+  font-family:var(--font-display);font-weight:700;font-size:12px;
+}
+.head-chip .amt{font-weight:700;font-family:var(--font-display)}
+
+/* ─── 太極 / 八卦 SVG 클래스 ───────────────────────────────────────── */
+.taiji{display:inline-block;vertical-align:middle}
+.taiji.spin{animation:taijiSpin 8s linear infinite}
+.taiji.spin-fast{animation:taijiSpin 2s linear infinite}
+@keyframes taijiSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+
+/* ─── 메인 ─────────────────────────────────────────────────────────── */
+#view{max-width:680px;margin:0 auto;padding:14px 14px 24px}
+
+/* ─── 뷰 타이틀 (양옆 璽印 라인) ───────────────────────────────────── */
+.view-title{
+  display:flex;align-items:center;justify-content:center;gap:12px;
+  margin:8px 0 12px;font-family:var(--font-display);font-weight:600;
+  color:var(--mo);font-size:24px;letter-spacing:.06em;
+}
+.view-title::before,.view-title::after{
+  content:'';height:1px;flex:1;
+  background:linear-gradient(90deg, transparent, var(--gutong) 40%, var(--gutong) 60%, transparent);
+}
+.view-title .han{color:var(--zhusha);font-size:.78em;letter-spacing:.12em;margin-right:4px}
+.view-sub{text-align:center;color:var(--mo-l);font-size:12.5px;margin-bottom:18px;letter-spacing:.04em}
+
+/* ─── 카드 ─────────────────────────────────────────────────────────── */
+.card{
+  background:var(--mi-w);border:1px solid var(--mi-d);border-radius:var(--r);
+  padding:14px;margin-bottom:10px;box-shadow:var(--sh-sm);position:relative;
+}
+.card.imperial{
+  border:1.5px solid var(--zhusha);
+  background:linear-gradient(180deg, var(--mi-w) 0%, var(--mi) 100%);
+}
+.card.imperial::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg, var(--huang) 0%, var(--zhusha) 50%, var(--huang) 100%);
+  border-radius:var(--r) 0 0 var(--r);
+}
+.card.gold{border:1.5px solid var(--huang-d);background:linear-gradient(180deg, #FFF8E0 0%, #FFEFC0 100%)}
+.card-title{font-family:var(--font-display);font-size:16px;color:var(--zhusha-d);margin-bottom:6px;letter-spacing:.04em}
+
+/* ─── 버튼 ─────────────────────────────────────────────────────────── */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  font-family:var(--font-body);font-weight:600;font-size:14px;
+  padding:9px 16px;border-radius:var(--r-sm);cursor:pointer;
+  border:1.5px solid var(--zhusha-d);background:var(--zhusha);color:var(--huang-l);
+  transition:transform .08s ease, box-shadow .08s ease, background .12s ease;
+  text-decoration:none;
+}
+.btn:hover{background:var(--zhusha-d);box-shadow:var(--sh-sm)}
+.btn:active{transform:translateY(1px)}
+.btn-o{background:transparent;color:var(--zhusha-d);border-color:var(--zhusha-d)}
+.btn-o:hover{background:rgba(156,48,48,.08)}
+.btn-gold{background:var(--huang);border-color:var(--huang-d);color:var(--mo)}
+.btn-gold:hover{background:var(--huang-d);color:var(--huang-l)}
+.btn-ghost{background:transparent;color:var(--mo-l);border-color:var(--mi-d)}
+.btn-ghost:hover{background:var(--mi)}
+.btn-sm{padding:6px 11px;font-size:12.5px}
+.btn-lg{padding:13px 22px;font-size:16px;letter-spacing:.06em}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ─── 입력 ─────────────────────────────────────────────────────────── */
+input,textarea,select{
+  font-family:var(--font-body);font-size:14px;color:var(--mo);
+  background:var(--mi-w);border:1.5px solid var(--mi-d);border-radius:var(--r-sm);
+  padding:8px 12px;outline:none;transition:border-color .15s ease;width:100%;
+}
+input:focus,textarea:focus,select:focus{border-color:var(--zhusha)}
+textarea{min-height:64px;resize:vertical;font-family:var(--font-body)}
+label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;display:block;margin-bottom:4px}
+
+/* ─── 하단 네비 ───────────────────────────────────────────────────── */
+.bottom-nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:50;
+  background:linear-gradient(180deg, #fcf4e5 0%, #f0dec0 100%);
+  border-top:2px solid var(--huang-d);
+  box-shadow:0 -4px 14px rgba(28,20,10,.18);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.bottom-nav-inner{display:flex;max-width:680px;margin:0 auto}
+.nav-btn{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  padding:8px 4px 7px;border:none;background:transparent;cursor:pointer;
+  font-family:var(--font-body);color:var(--mo-l);transition:color .12s, background .12s;
+  position:relative;
+}
+.nav-btn .ic{font-family:var(--font-display);font-size:18px;line-height:1;color:var(--gutong)}
+.nav-btn .lb{font-size:10px;letter-spacing:.04em;margin-top:1px}
+.nav-btn:hover{background:rgba(156,48,48,.05)}
+.nav-btn.active{color:var(--zhusha-d)}
+.nav-btn.active .ic{color:var(--zhusha)}
+.nav-btn.active::after{
+  content:'';position:absolute;left:50%;top:0;width:40%;height:3px;
+  background:var(--zhusha);transform:translateX(-50%);border-radius:0 0 3px 3px;
+}
+
+/* ─── 홈 타일 (게임감) ─────────────────────────────────────────────── */
+.tile-grid{display:grid;grid-template-columns:repeat(2, 1fr);gap:10px;margin:14px 0}
+.tile{
+  background:var(--mi-w);border:1.5px solid var(--zhusha);border-radius:var(--r);
+  padding:14px 12px;cursor:pointer;text-align:left;
+  display:flex;flex-direction:column;gap:3px;
+  font-family:var(--font-body);color:var(--mo);
+  transition:transform .12s ease, box-shadow .12s ease, background .15s ease;
+  position:relative;overflow:hidden;
+}
+.tile::before{
+  content:'';position:absolute;right:-12px;top:-12px;width:48px;height:48px;
+  border-radius:50%;background:rgba(201,162,39,.15);pointer-events:none;
+}
+.tile:hover{transform:translateY(-1px);box-shadow:var(--sh)}
+.tile:active{transform:translateY(0)}
+.tile .han{font-family:var(--font-display);font-size:18px;color:var(--zhusha);letter-spacing:.06em}
+.tile .ttl{font-size:14px;font-weight:700;color:var(--mo);margin-top:1px}
+.tile .desc{font-size:11.5px;color:var(--mo-l);margin-top:2px;line-height:1.35}
+.tile.wide{grid-column:span 2}
+.tile.gold{background:linear-gradient(180deg, #FFF8DC 0%, #FFE08A 100%);border-color:var(--huang-d)}
+.tile.gold .han{color:var(--zhusha-d)}
+
+/* ─── 카운트다운 (D-N) ────────────────────────────────────────────── */
+.dday-banner{
+  background:linear-gradient(135deg, var(--zhusha-d) 0%, var(--zhusha) 50%, var(--huang-d) 100%);
+  color:var(--huang-l);padding:18px 16px;border-radius:var(--r-lg);margin-bottom:14px;
+  box-shadow:var(--sh);position:relative;overflow:hidden;
+  border:1.5px solid var(--huang);
+}
+.dday-banner::before{
+  content:'';position:absolute;right:-30px;bottom:-30px;width:160px;height:160px;
+  background:radial-gradient(circle, rgba(255,224,138,.2) 0%, transparent 70%);
+  pointer-events:none;
+}
+.dday-banner .label{font-family:var(--font-display);font-size:12px;letter-spacing:.18em;opacity:.85;text-transform:uppercase}
+.dday-banner .big{font-family:var(--font-display);font-size:44px;font-weight:700;line-height:1;margin-top:2px;letter-spacing:.02em}
+.dday-banner .big .dash{font-size:.7em;margin:0 4px;opacity:.65}
+.dday-banner .meta{font-size:12px;opacity:.9;margin-top:8px;line-height:1.5}
+.dday-banner .meta .han{color:var(--huang-l);font-size:13px}
+
+/* ─── 메달리온 (캐릭터 사진+SVG 합성) ──────────────────────────────── */
+.medwrap{position:relative;display:inline-block;vertical-align:middle}
+.medwrap img{position:absolute;border-radius:50%;object-fit:cover;background:var(--mi-w);
+  box-shadow:0 1px 4px rgba(0,0,0,.25);}
+
+/* ─── 등급 진행 바 ────────────────────────────────────────────────── */
+.rank-bar{height:10px;background:var(--mi-d);border-radius:5px;overflow:hidden;position:relative;margin-top:8px}
+.rank-bar-fill{height:100%;background:linear-gradient(90deg, var(--huang) 0%, var(--zhusha) 100%);transition:width .4s ease}
+
+/* ─── 璽印 (등급 표시) ──────────────────────────────────────────────── */
+.seal-stamp{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:42px;height:42px;background:var(--zhusha);color:var(--huang-l);
+  font-family:var(--font-display);font-weight:700;font-size:24px;
+  border:2px solid var(--huang);border-radius:6px;
+  box-shadow:0 2px 6px rgba(28,20,10,.3),inset 0 0 0 1px rgba(255,224,138,.2);
+  letter-spacing:0;
+}
+.seal-stamp.big{width:64px;height:64px;font-size:38px;border-width:3px}
+.seal-stamp.tiny{width:22px;height:22px;font-size:14px;border-width:1.5px;border-radius:3px}
+
+/* ─── 사용자 리스트 (presence) ─────────────────────────────────────── */
+.presence-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.presence-chip{
+  display:flex;align-items:center;gap:5px;padding:4px 8px;
+  background:var(--mi-w);border:1px solid var(--mi-d);border-radius:14px;
+  font-size:11.5px;color:var(--mo-l);
+}
+.presence-chip .dot{width:7px;height:7px;background:var(--feicui);border-radius:50%;box-shadow:0 0 4px rgba(42,112,96,.6)}
+.presence-chip .nm{font-weight:600;color:var(--mo);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ─── 피드백 박스 ─────────────────────────────────────────────────── */
+.feedback-form{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.feedback-list{margin-top:10px;display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto}
+.feedback-item{
+  background:var(--mi-w);border-left:3px solid var(--gutong);
+  padding:7px 10px;border-radius:4px;font-size:12.5px;color:var(--mo-l);
+}
+.feedback-item .who{font-weight:600;color:var(--zhusha-d);font-size:11px;margin-right:6px}
+.feedback-item .when{font-size:10px;color:#999;margin-left:6px}
+
+/* ─── 토스트 ─────────────────────────────────────────────────────── */
+#toast{position:fixed;bottom:84px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:var(--mo);color:var(--huang-l);padding:9px 16px;border-radius:var(--r);
+  font-size:13px;font-family:var(--font-display);letter-spacing:.04em;
+  border:1.5px solid var(--huang);box-shadow:var(--sh-lg);
+  opacity:0;transition:opacity .2s, transform .2s;pointer-events:none;z-index:200;
+  max-width:90%;text-align:center;
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.gold{background:var(--huang);color:var(--mo);border-color:var(--zhusha)}
+
+/* ─── 모달 ─────────────────────────────────────────────────────────── */
+.modal-back{
+  position:fixed;inset:0;background:rgba(28,20,10,.65);z-index:300;
+  display:flex;align-items:center;justify-content:center;padding:14px;
+}
+.modal{
+  background:var(--mi-w);border:2px solid var(--zhusha);border-radius:var(--r-lg);
+  max-width:480px;width:100%;max-height:90vh;overflow-y:auto;
+  box-shadow:var(--sh-lg);padding:20px;position:relative;
+}
+.modal .x{position:absolute;top:8px;right:10px;cursor:pointer;font-size:22px;color:var(--mo-l);
+  background:none;border:none;line-height:1;padding:4px 8px}
+
+/* ─── 페이드 ─────────────────────────────────────────────────────── */
+.fade-in{animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* ─── 캐릭터 picker 그리드 ────────────────────────────────────────── */
+.char-grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;margin-top:10px}
+.char-cell{
+  background:var(--mi-w);border:1.5px solid var(--mi-d);border-radius:var(--r);
+  padding:10px 6px 8px;text-align:center;cursor:pointer;
+  transition:transform .1s, border-color .1s, box-shadow .1s;
+  display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;
+}
+.char-cell:hover{transform:translateY(-1px);border-color:var(--zhusha);box-shadow:var(--sh-sm)}
+.char-cell.selected{border-color:var(--zhusha);background:#FFF8E8;box-shadow:0 0 0 2px var(--huang-l) inset}
+.char-cell.locked{opacity:.55;cursor:not-allowed}
+.char-cell.locked .lock-badge{
+  position:absolute;top:4px;right:4px;background:var(--zhusha-d);color:var(--huang-l);
+  font-size:9.5px;padding:1px 5px;border-radius:8px;font-family:var(--font-display);
+  border:1px solid var(--huang);
+}
+.char-cell .nm{font-size:12px;font-weight:600;color:var(--mo);margin-top:2px}
+.char-cell .han{font-family:var(--font-han);font-size:10.5px;color:var(--zhusha-d);margin-top:1px}
+.char-cell .work{font-size:9.5px;color:var(--gutong);margin-top:1px;line-height:1.25}
+
+/* ─── 배틀 인트로 ─────────────────────────────────────────────────── */
+.intro-stage{padding:6px 0;text-align:center;animation:introFade .45s ease-out}
+@keyframes introFade{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+.intro-side{display:flex;flex-direction:column;align-items:center;margin:6px 0}
+.intro-charwrap{position:relative;display:inline-flex;flex-direction:column;align-items:center}
+.intro-bubble{
+  position:relative;max-width:340px;background:var(--mi-w);border:1.5px solid var(--zhusha);
+  border-radius:14px;padding:10px 14px;margin:8px;text-align:center;box-shadow:var(--sh-sm);
+}
+.intro-bubble.bubble-top{margin-bottom:14px}
+.intro-bubble.bubble-bottom{margin-top:14px}
+.intro-bubble.bubble-top::before{content:'';position:absolute;left:50%;transform:translateX(-50%);
+  bottom:-10px;width:0;height:0;border:10px solid transparent;border-top-color:var(--zhusha);border-bottom:0}
+.intro-bubble.bubble-top::after{content:'';position:absolute;left:50%;transform:translateX(-50%);
+  bottom:-7px;width:0;height:0;border:8px solid transparent;border-top-color:var(--mi-w);border-bottom:0}
+.intro-bubble.bubble-bottom::before{content:'';position:absolute;left:50%;transform:translateX(-50%);
+  top:-10px;width:0;height:0;border:10px solid transparent;border-bottom-color:var(--zhusha);border-top:0}
+.intro-bubble.bubble-bottom::after{content:'';position:absolute;left:50%;transform:translateX(-50%);
+  top:-7px;width:0;height:0;border:8px solid transparent;border-bottom-color:var(--mi-w);border-top:0}
+.intro-han{font-size:17px;color:var(--zhusha-d);line-height:1.45;font-weight:600;font-family:var(--font-han)}
+.intro-ko{font-size:12px;color:var(--mo-l);margin-top:4px;line-height:1.4}
+.intro-src{font-size:10px;color:var(--gutong);font-style:italic;margin-top:4px;letter-spacing:.04em}
+.intro-name{font-family:var(--font-display);font-size:16px;font-weight:600;color:var(--mo);margin-top:4px}
+.intro-charname{font-size:11px;color:var(--gutong);margin-top:2px}
+
+/* 對決開始 — VS 자리 (큰 한자) */
+.intro-vs{position:relative;margin:14px auto;width:100%;text-align:center;
+  animation:vsZoom .65s cubic-bezier(.34,1.6,.5,1);}
+.intro-vs-text{
+  display:inline-block;font-family:var(--font-display);font-size:32px;font-weight:700;
+  color:var(--huang-l);letter-spacing:.16em;
+  background:linear-gradient(180deg, var(--zhusha) 0%, var(--zhusha-d) 100%);
+  border:2.5px solid var(--huang);
+  padding:10px 22px;border-radius:14px;
+  box-shadow:0 6px 18px rgba(110,24,24,.55), inset 0 0 0 1px rgba(255,224,138,.3);
+}
+.intro-vs-line{position:absolute;top:50%;left:0;right:0;height:2px;
+  background:linear-gradient(90deg, transparent 0%, var(--huang) 30%, var(--huang) 70%, transparent 100%);
+  z-index:-1}
+@keyframes vsZoom{0%{opacity:0;transform:scale(.3) rotate(-20deg)}60%{transform:scale(1.12) rotate(3deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
+
+/* ─── 베팅 다이얼 ─────────────────────────────────────────────────── */
+.bet-grid{display:grid;grid-template-columns:repeat(2, 1fr);gap:8px;margin-top:10px}
+.bet-cell{
+  border:1.5px solid var(--mi-d);background:var(--mi-w);
+  border-radius:var(--r);padding:10px;cursor:pointer;text-align:center;
+  font-family:var(--font-body);color:var(--mo);transition:all .12s;
+}
+.bet-cell:hover{border-color:var(--zhusha);transform:translateY(-1px)}
+.bet-cell.selected{border-color:var(--zhusha);background:#FFF8E8;box-shadow:0 0 0 2px var(--huang) inset}
+.bet-cell .han{font-family:var(--font-display);font-size:18px;color:var(--zhusha-d);letter-spacing:.04em}
+.bet-cell .pct{font-size:14px;font-weight:700;color:var(--huang-d);margin-top:2px;font-family:var(--font-display)}
+.bet-cell .min{font-size:10.5px;color:var(--gutong);margin-top:1px}
+
+/* ─── 통계 차트 (SVG) ─────────────────────────────────────────────── */
+.bar-chart{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.bar-row{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.bar-row .bar-label{width:90px;color:var(--mo);font-weight:600;text-align:right;font-size:12px}
+.bar-row .bar-track{flex:1;height:14px;background:var(--mi-d);border-radius:7px;overflow:hidden;position:relative}
+.bar-row .bar-fill{height:100%;background:linear-gradient(90deg, var(--huang) 0%, var(--zhusha) 100%);
+  border-radius:7px;display:flex;align-items:center;justify-content:flex-end;
+  padding-right:6px;color:var(--huang-l);font-size:10.5px;font-weight:700;font-family:var(--font-display)}
+.bar-row .bar-val{width:48px;text-align:left;color:var(--mo-l);font-size:11.5px;font-family:var(--font-display)}
+
+/* ─── 메달 (등급 변경 알림 등) ──────────────────────────────────────── */
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+.pulse{animation:pulse 1.5s ease infinite}
+
+/* ─── 작은 화면 ────────────────────────────────────────────────────── */
+@media (max-width:380px){
+  .app-header .title{font-size:16.5px}
+  .app-header .subtitle{font-size:8.5px}
+  .head-chip{font-size:10.5px;padding:3px 7px}
+  .dday-banner .big{font-size:36px}
+  .view-title{font-size:21px}
+  .char-grid{grid-template-columns:repeat(2, 1fr)}
+}
+
+/* ─── 스크롤바 ─────────────────────────────────────────────────────── */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--gutong);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--zhusha)}
+
+/* ─── 太極 회전 인디케이터 (로딩) ───────────────────────────────────── */
+.loading-overlay{
+  position:fixed;inset:0;background:rgba(245,230,211,.85);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  z-index:1000;backdrop-filter:blur(2px);
+}
+.loading-overlay .label{margin-top:14px;font-family:var(--font-display);color:var(--zhusha-d);font-size:14px;letter-spacing:.12em}
+
 </style>
 </head>
 <body>
 
-<header>
-  <div class="hdr-row">
-    <div class="hdr-title">方劑學 · 2차 수시</div>
-    <div class="hdr-spacer"></div>
-    <div id="countdown" class="countdown">계산중…</div>
+<!-- 헤더 -->
+<header class="app-header">
+  <div class="row">
+    <div class="logo"><img src="icon.svg" alt="黃帝" id="logo-img"></div>
+    <div class="titlewrap">
+      <div class="title">方劑學</div>
+      <div class="subtitle" id="user-name-mini">黃帝의 방</div>
+    </div>
+    <div class="head-chips">
+      <div class="head-chip" id="rank-chip" title="현재 등급">
+        <span class="seal-mini" id="rank-seal">賓</span>
+        <span id="rank-name">빈의</span>
+      </div>
+      <div class="head-chip" id="qi-chip" title="누적 氣">
+        <span class="amt" id="qi-amt">0</span>
+        <span>氣</span>
+      </div>
+      <div class="head-chip" id="bgm-chip" title="BGM 토글" style="font-size:14px">
+        <span id="bgm-icon">♪</span>
+      </div>
+    </div>
   </div>
-  <nav class="tabs" id="tabs">
-    <button data-tab="home">홈·계획</button>
-    <button data-tab="formulas">처방 24</button>
-    <button data-tab="flashcard">암기카드</button>
-    <button data-tab="quiz">객관식</button>
-    <button data-tab="past">작년 기출</button>
-    <button data-tab="compare">처방 비교</button>
-    <button data-tab="herbs">약재</button>
-    <button data-tab="srs">오답함</button>
-  </nav>
 </header>
 
+<!-- 메인 뷰 -->
 <main id="view"></main>
 
-<footer>
-  方劑學 学習帳 v1.0 · 2026-05-20 시험 대비 · CIM Lab<br>
-  데이터: 시험 범위 PDF + 22학번 기출 (범위 일치 항목만)
-</footer>
+<!-- 하단 네비 -->
+<nav class="bottom-nav">
+  <div class="bottom-nav-inner">
+    <button class="nav-btn active" data-tab="home"><span class="ic">家</span><span class="lb">대청</span></button>
+    <button class="nav-btn" data-tab="formula"><span class="ic">方</span><span class="lb">처방</span></button>
+    <button class="nav-btn" data-tab="herb"><span class="ic">藥</span><span class="lb">약재</span></button>
+    <button class="nav-btn" data-tab="quiz"><span class="ic">問</span><span class="lb">기출</span></button>
+    <button class="nav-btn" data-tab="stats"><span class="ic">析</span><span class="lb">통계</span></button>
+    <button class="nav-btn" data-tab="hall"><span class="ic">譽</span><span class="lb">명예</span></button>
+  </div>
+</nav>
 
+<!-- 토스트 -->
+<div id="toast"></div>
+
+<!-- 모달 슬롯 -->
+<div id="modal-slot"></div>
+
+<!-- 데이터 + 앱 스크립트 -->
+<script src="data-ranks.js"></script>
+<script src="data-physicians.js"></script>
 <script src="data-formulas.js"></script>
 <script src="app.js"></script>
+
+<!-- 서비스 워커 -->
 <script>
-if ('serviceWorker' in navigator) {
+if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
   });
 }
 </script>

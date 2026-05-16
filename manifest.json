@@ -1,30 +1,17 @@
 {
-  "name": "方劑學 — 2차 수시 (5/20)",
-  "short_name": "방제학",
-  "description": "방제학 2차 수시 대비 (8장 보익제, 6장 온경산한제, 7장 표리쌍해제)",
+  "name": "方劑學 — 黃帝의 방",
+  "short_name": "方劑",
+  "description": "中華 帝王風 방제학 학습 PWA — 51의가·9등급·멀티 對決",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#faf6ef",
-  "theme_color": "#7d4e2d",
   "orientation": "portrait",
+  "background_color": "#F5E6D3",
+  "theme_color": "#9C3030",
   "icons": [
-    {
-      "src": "icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
-    }
-  ]
+    { "src": "icon-192.png",        "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png",        "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon.svg",            "sizes": "any",     "type": "image/svg+xml" }
+  ],
+  "lang": "ko"
 }
