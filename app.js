@@ -28,8 +28,8 @@ const EXAM_DATE_ISO = '2026-05-20T00:00:00+09:00';
 const EXAM_META = {
   course: '方劑學',
   examTitle: '2차 수시',
-  rangeKR: '8장 보익제 · 6장 온경산한제 · 7장 표리쌍해제',
-  rangeHan: '補益 · 溫經 · 表裏雙解',
+  rangeKR: '6장 온경산한제 · 7장 표리쌍해제 · 8장 보익제',
+  rangeHan: '溫經散寒 · 表裏雙解 · 補益(補氣血·陰陽幷補)',
 };
 
 const PRESENCE_REFRESH_MS = 30 * 1000;     // 30초마다 presence 갱신
@@ -178,6 +178,7 @@ function ago(ts){
 // charOrId: 객체 또는 id 문자열
 // size: 픽셀
 // 사진 있으면 위에 덮고 onerror 시 SVG 폴백
+// 시대별 고유 외곽 모티프 + 이중 ring + 인장 배경으로 풍부하게
 function _charMedallion(charOrId, size){
   const c = (typeof charOrId === 'string') ? PHYSICIAN_BY_ID[charOrId] : charOrId;
   if(!c){
@@ -185,21 +186,54 @@ function _charMedallion(charOrId, size){
   }
   const p = CHAR_PALETTES[c.cat] || CHAR_PALETTES.ancient;
   const showName = size >= 80;
+  const showOrnaments = size >= 60;
   const gradId = '_g_' + c.id + '_' + size + '_' + Math.floor(Math.random()*100000).toString(36);
-  const initY = showName ? 55 : 64;
-  const initSize = showName ? 40 : 50;
+  const initY = showName ? 55 : 62;
+  const initSize = showName ? 38 : 48;
+
+  // 8 방위 위치
+  const ornDots = [0,45,90,135,180,225,270,315].map(deg=>{
+    const rad=(deg-90)*Math.PI/180;
+    return {x:(50+Math.cos(rad)*43).toFixed(1), y:(50+Math.sin(rad)*43).toFixed(1)};
+  });
+
+  // 카테고리별 외곽 모티프
+  let ornaments;
+  if(showOrnaments){
+    const M = {
+      divine:  (x,y)=>`<circle cx="${x}" cy="${y}" r="2.2" fill="${p.ring}"/><circle cx="${x}" cy="${y}" r="1.1" fill="${p.initFg}" opacity=".85"/>`,
+      ancient: (x,y)=>`<rect x="${+x-1.8}" y="${+y-1.8}" width="3.6" height="3.6" fill="${p.ring}" transform="rotate(45 ${x} ${y})"/>`,
+      tang:    (x,y)=>`<path d="M ${x},${+y-2.5} L ${+x+2},${+y-0.5} L ${+x+1.2},${+y+2} L ${+x-1.2},${+y+2} L ${+x-2},${+y-0.5} Z" fill="${p.ring}"/>`,
+      song:    (x,y)=>`<circle cx="${x}" cy="${y}" r="2" fill="none" stroke="${p.ring}" stroke-width="1"/><circle cx="${x}" cy="${y}" r="0.7" fill="${p.ring}"/>`,
+      jinyuan: (x,y)=>`<path d="M ${+x-2},${y} A 2,2 0 0 1 ${+x+2},${y} A 2,2 0 0 0 ${+x-2},${y}" fill="${p.ring}"/>`,
+      ming:    (x,y)=>`<polygon points="${x},${+y-2.3} ${+x+2},${+y+1.5} ${+x-2},${+y+1.5}" fill="${p.ring}"/>`,
+      qing:    (x,y)=>`<path d="M ${x},${+y-2.5} C ${+x+2.3},${+y-1} ${+x+2.3},${+y+1} ${x},${+y+2.5} C ${+x-2.3},${+y+1} ${+x-2.3},${+y-1} ${x},${+y-2.5} Z" fill="${p.ring}"/>`,
+      late:    (x,y)=>`<rect x="${+x-1.8}" y="${+y-2}" width="3.6" height="4" rx="0.6" fill="${p.ring}"/>`,
+      korean:  (x,y)=>`<circle cx="${x}" cy="${y}" r="2.2" fill="${p.ring}"/>`,
+      gag:     (x,y)=>`<path d="M ${x},${+y-2.5} L ${+x+0.7},${+y-0.7} L ${+x+2.5},${+y-0.4} L ${+x+1.2},${+y+0.9} L ${+x+1.5},${+y+2.5} L ${x},${+y+1.6} L ${+x-1.5},${+y+2.5} L ${+x-1.2},${+y+0.9} L ${+x-2.5},${+y-0.4} L ${+x-0.7},${+y-0.7} Z" fill="${p.ring}"/>`
+    };
+    const fn = M[c.cat] || M.ancient;
+    ornaments = `<g>${ornDots.map(d=>fn(d.x,d.y)).join('')}</g>`;
+  } else {
+    ornaments = `<g fill="${p.ring}" opacity="0.5">${ornDots.map(d=>`<circle cx="${d.x}" cy="${d.y}" r="1.2"/>`).join('')}</g>`;
+  }
+
+  // 중앙 篆書 인장 배경
+  const sealBg = showOrnaments
+    ? `<rect x="32" y="${initY-32}" width="36" height="40" rx="2" fill="${p.initBg}" fill-opacity="0.12" stroke="${p.initBg}" stroke-width="0.5" stroke-opacity="0.32"/>`
+    : '';
+
   return `<svg viewBox="0 0 100 100" width="${size}" height="${size}" role="img" aria-label="${esc(c.ko)} (${esc(c.han)})" style="display:inline-block;vertical-align:middle">
-    <defs><radialGradient id="${gradId}" cx="50%" cy="40%" r="65%">
+    <defs><radialGradient id="${gradId}" cx="50%" cy="38%" r="70%">
       <stop offset="0%" stop-color="${p.bg1}"/><stop offset="100%" stop-color="${p.bg2}"/>
     </radialGradient></defs>
     <circle cx="50" cy="50" r="49" fill="${p.ring}"/>
-    <circle cx="50" cy="50" r="46" fill="url(#${gradId})"/>
-    <g fill="${p.ring}" opacity="0.6">${[0,45,90,135,180,225,270,315].map(deg=>{
-      const rad=(deg-90)*Math.PI/180; const x=50+Math.cos(rad)*43; const y=50+Math.sin(rad)*43;
-      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="1.5"/>`;
-    }).join('')}</g>
-    <text x="50" y="${initY}" text-anchor="middle" font-family="'ZCOOL XiaoWei',serif" font-size="${initSize}" font-weight="700" fill="${p.fg}">${c.init||c.han[0]||'?'}</text>
-    ${showName?`<path d="M 14,82 Q 50,90 86,82 L 86,90 Q 50,98 14,90 Z" fill="${p.initBg}" opacity="0.92"/><text x="50" y="91" text-anchor="middle" font-family="serif" font-size="9" font-weight="600" letter-spacing="0.5" fill="${p.initFg}">${esc(c.ko)}</text>`:''}
+    <circle cx="50" cy="50" r="46.5" fill="url(#${gradId})"/>
+    <circle cx="50" cy="50" r="44.5" fill="none" stroke="${p.ring}" stroke-width="0.5" stroke-opacity="0.55"/>
+    ${ornaments}
+    ${sealBg}
+    <text x="50" y="${initY}" text-anchor="middle" font-family="'ZCOOL XiaoWei','Ma Shan Zheng',serif" font-size="${initSize}" font-weight="700" fill="${p.fg}">${c.init||c.han[0]||'?'}</text>
+    ${showName?`<path d="M 14,82 Q 50,90 86,82 L 86,90 Q 50,98 14,90 Z" fill="${p.initBg}" opacity="0.92"/><text x="50" y="91" text-anchor="middle" font-family="'Noto Serif KR',serif" font-size="9" font-weight="600" letter-spacing="0.5" fill="${p.initFg}">${esc(c.ko)}</text>`:''}
   </svg>`;
 }
 window._charMedallion = _charMedallion;
@@ -952,43 +986,7 @@ async function joinBattleQueue(level){
 }
 
 // 배틀 문제 생성 (기출/자동) — 데이터가 있으면 사용, 없으면 placeholder
-function generateBattleQuestions(n){
-  const pool = [];
-  if(typeof PAST_EXAMS !== 'undefined' && PAST_EXAMS.length){
-    pool.push(...PAST_EXAMS.slice(0, 30));
-  }
-  if(typeof FORMULAS !== 'undefined' && FORMULAS.length){
-    // 자동 생성: "이 처방의 작용은?"
-    FORMULAS.slice(0, 10).forEach(f => {
-      const distractors = FORMULAS.filter(x => x.id !== f.id).slice(0,3).map(x => x.action);
-      pool.push({
-        q: `${f.han} (${f.ko}) 의 작용은?`,
-        options: [f.action, ...distractors].filter(Boolean),
-        answer: 0,
-        type: 'auto-action'
-      });
-    });
-  }
-  // 폴백: 일반 의가 명언 매칭 문제
-  while(pool.length < n){
-    const p = PHYSICIANS[Math.floor(Math.random()*PHYSICIANS.length)];
-    if(!p.quote) continue;
-    const others = PHYSICIANS.filter(x => x.id !== p.id).slice(0,3);
-    pool.push({
-      q: `다음 명언의 저자는? "${p.quote.han}"`,
-      options: [p.han, ...others.map(o => o.han)],
-      answer: 0,
-      type: 'auto-quote'
-    });
-  }
-  // 셔플 후 각 문제 옵션도 셔플
-  const out = pool.sort(() => Math.random()-0.5).slice(0, n);
-  return out.map(p => {
-    const correctTxt = p.options[p.answer||0];
-    const shuffled = p.options.slice().sort(() => Math.random()-0.5);
-    return {...p, options: shuffled, answer: shuffled.indexOf(correctTxt)};
-  });
-}
+
 
 async function startBattle(roomId, isCreator){
   const room = await FB.get(`battles/${roomId}`);
@@ -1480,94 +1478,498 @@ function renderHerbs(){
   `;
 }
 
+// ─── 난이도 4단계 메타 ──────────────────────────────────────────────────
+const DIFFICULTY_META = {
+  1: { ko:'초급', han:'初級', color:'#4A8F40', desc:'빈출·구성·작용 매칭',     icon:'初' },
+  2: { ko:'중급', han:'中級', color:'#3068A0', desc:'적응증·가감·기본 응용',   icon:'中' },
+  3: { ko:'고급', han:'高級', color:'#8C5028', desc:'헷갈리는 비교·약재 의의', icon:'高' },
+  4: { ko:'지옥', han:'地獄', color:'#6E1818', desc:'기출 외 심화·약재 단위',  icon:'獄' },
+};
+window.DIFFICULTY_META = DIFFICULTY_META;
+
 function renderQuiz(){
   const exams = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
   const formulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
+  if(!exams.length && !formulas.length){
+    view.innerHTML = `
+      <h2 class="view-title"><span class="han">問</span>기출·암기</h2>
+      <div class="card"><div style="text-align:center;color:var(--gutong);padding:24px;font-size:13px">
+        <div class="han" style="font-size:24px;color:var(--zhusha-d);margin-bottom:8px">未充</div>
+        data-formulas.js 의 PAST_EXAMS·FORMULAS 가 필요합니다
+      </div></div>`;
+    return;
+  }
+  // 난이도별 기출 카운트
+  const byDiff = {1:0,2:0,3:0,4:0};
+  exams.forEach(e => { byDiff[e.difficulty||1] = (byDiff[e.difficulty||1]||0)+1; });
+  // 4 단계는 기출이 없으면 자동생성으로 채워짐 — UI 표시는 "∞" (생성)
+  const totalAuto = formulas.length;  // 자동 생성 가능 풀
+
+  // 현재 선택 상태 (localStorage 캐시)
+  const sel = JSON.parse(localStorage.getItem('quiz.sel.v1')||'{}');
+  if(!sel.diff) sel.diff = 1;
+  if(!sel.count) sel.count = 5;
+  if(!sel.mode) sel.mode = 'mixed';   // mixed | past | auto | wrong
+
   view.innerHTML = `
     <h2 class="view-title"><span class="han">問</span>기출·암기</h2>
-    <div class="view-sub">작년 기출 ${exams.length}문 · 자동 객관식 · 오답함</div>
-    <div class="tile-grid">
-      <button class="tile" type="button" onclick="startQuizSession('past')">
-        <span class="han">舊問</span><span class="ttl">작년 기출</span>
-        <span class="desc">${exams.length}문제 · 해설 포함</span>
-      </button>
-      <button class="tile" type="button" onclick="startQuizSession('auto')">
-        <span class="han">自題</span><span class="ttl">자동 객관식</span>
-        <span class="desc">처방 ${formulas.length}개에서 자동 생성</span>
-      </button>
-      <button class="tile wide" type="button" onclick="startQuizSession('wrong')">
-        <span class="han">錯題</span><span class="ttl">오답함 (${S.wrongIds.length})</span>
-        <span class="desc">틀린 문제만 다시 풀기</span>
+    <div class="view-sub">난이도·문제수를 골라 시작하세요</div>
+
+    <!-- 난이도 선택 -->
+    <div class="card imperial fade-in">
+      <div class="card-title"><span class="han">難度</span> 난이도 선택</div>
+      <div class="diff-grid">
+        ${[1,2,3,4].map(d => {
+          const m = DIFFICULTY_META[d];
+          const n = byDiff[d];
+          const supplyText = d === 4
+            ? `<span style="color:var(--gutong);font-size:10.5px">자동生 ${totalAuto}+</span>`
+            : (n > 0
+                ? `<span style="color:var(--feicui);font-size:10.5px">기출 ${n}문</span>`
+                : `<span style="color:var(--gutong);font-size:10.5px">자동생성</span>`);
+          return `<button class="diff-btn" type="button" data-d="${d}"
+            style="border-color:${m.color};${sel.diff===d?`background:${m.color};color:var(--mi-w)`:''}">
+            <div class="diff-icon han" style="color:${sel.diff===d?'var(--mi-w)':m.color}">${m.icon}</div>
+            <div class="diff-ttl"><span class="han">${m.han}</span> ${m.ko}</div>
+            <div class="diff-desc">${m.desc}</div>
+            <div class="diff-supply">${supplyText}</div>
+          </button>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <!-- 문제수 선택 -->
+    <div class="card fade-in">
+      <div class="card-title"><span class="han">數</span> 문제수</div>
+      <div class="count-grid">
+        ${[3,5,10,20].map(n => `
+          <button class="count-btn ${sel.count===n?'on':''}" type="button" data-n="${n}">
+            ${n}<span style="font-size:10px;color:var(--gutong);margin-left:2px">문</span>
+          </button>
+        `).join('')}
+      </div>
+    </div>
+
+    <!-- 출제 풀 선택 -->
+    <div class="card fade-in">
+      <div class="card-title"><span class="han">源</span> 출제 풀</div>
+      <div class="mode-grid">
+        <button class="mode-btn ${sel.mode==='mixed'?'on':''}" type="button" data-m="mixed">
+          <span class="han">混合</span> 혼합 <span class="hint">기출+자동 (권장)</span>
+        </button>
+        <button class="mode-btn ${sel.mode==='past'?'on':''}" type="button" data-m="past">
+          <span class="han">舊問</span> 기출만 <span class="hint">22학번 1·2차 복원본</span>
+        </button>
+        <button class="mode-btn ${sel.mode==='auto'?'on':''}" type="button" data-m="auto">
+          <span class="han">自題</span> 자동만 <span class="hint">26 처방 데이터 기반</span>
+        </button>
+        <button class="mode-btn ${sel.mode==='wrong'?'on':''}" type="button" data-m="wrong">
+          <span class="han">錯題</span> 오답함 <span class="hint">${S.wrongIds.length}개</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 시작 -->
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn btn-lg" type="button" id="quiz-start-btn" style="flex:1;font-size:15px;padding:12px">
+        <span class="han" style="font-size:16px;margin-right:4px">始</span>시작
       </button>
     </div>
-    ${(!exams.length && !formulas.length)?`<div class="card"><div style="text-align:center;color:var(--gutong);padding:16px;font-size:13px">data-formulas.js 의 PAST_EXAMS·FORMULAS 가 필요합니다</div></div>`:''}
   `;
+
+  // 동적 스타일 (한 번만 주입)
+  if(!document.getElementById('quiz-style')){
+    const st = document.createElement('style');
+    st.id = 'quiz-style';
+    st.textContent = `
+      .diff-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:4px}
+      .diff-btn{background:var(--mi-w);border:2px solid;border-radius:10px;padding:10px 8px;cursor:pointer;text-align:center;transition:all .15s;color:var(--mo)}
+      .diff-btn:hover{transform:translateY(-1px);box-shadow:0 2px 6px rgba(0,0,0,.15)}
+      .diff-icon{font-size:24px;font-weight:700;line-height:1}
+      .diff-ttl{font-size:13px;font-weight:600;margin-top:4px}
+      .diff-desc{font-size:10.5px;color:var(--gutong);margin-top:2px;line-height:1.3;min-height:28px}
+      .diff-btn[style*="background:#"] .diff-desc{color:rgba(252,244,229,.85)}
+      .diff-supply{margin-top:3px;font-weight:600}
+      .count-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:4px}
+      .count-btn{background:var(--mi-w);border:1.5px solid var(--gutong);border-radius:8px;padding:10px 0;font-size:18px;font-weight:700;cursor:pointer;color:var(--mo);font-family:var(--font-display);transition:all .15s}
+      .count-btn:hover{transform:translateY(-1px)}
+      .count-btn.on{background:var(--zhusha);color:var(--mi-w);border-color:var(--zhusha)}
+      .mode-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:4px}
+      .mode-btn{background:var(--mi-w);border:1.5px solid var(--gutong);border-radius:8px;padding:8px 10px;text-align:left;cursor:pointer;color:var(--mo);font-size:13px;transition:all .15s;display:flex;flex-direction:column;gap:2px}
+      .mode-btn:hover{transform:translateY(-1px)}
+      .mode-btn.on{background:var(--feicui);color:var(--mi-w);border-color:var(--feicui)}
+      .mode-btn .hint{font-size:10.5px;opacity:.7;font-weight:400}
+    `;
+    document.head.appendChild(st);
+  }
+
+  // 이벤트
+  $$('.diff-btn').forEach(b => b.addEventListener('click', () => {
+    sel.diff = +b.dataset.d; localStorage.setItem('quiz.sel.v1', JSON.stringify(sel)); renderQuiz();
+  }));
+  $$('.count-btn').forEach(b => b.addEventListener('click', () => {
+    sel.count = +b.dataset.n; localStorage.setItem('quiz.sel.v1', JSON.stringify(sel)); renderQuiz();
+  }));
+  $$('.mode-btn').forEach(b => b.addEventListener('click', () => {
+    sel.mode = b.dataset.m; localStorage.setItem('quiz.sel.v1', JSON.stringify(sel)); renderQuiz();
+  }));
+  $('#quiz-start-btn').addEventListener('click', () => {
+    startQuizSession(sel.mode, sel.diff, sel.count);
+  });
 }
 
-window.startQuizSession = function(mode){
-  // 간단 구현: 5문제 풀이 후 결과
+window.startQuizSession = function(mode, diff, count){
+  mode  = mode  || 'mixed';
+  diff  = diff  || 1;
+  count = count || 5;
+  const exams = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+
+  // 풀 빌드
   let pool = [];
-  if(mode === 'past') pool = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS.slice() : [];
-  else if(mode === 'wrong') pool = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS.filter((_,i)=>S.wrongIds.includes('past:'+i)) : [];
-  else pool = generateBattleQuestions(5);
-  pool = pool.sort(()=>Math.random()-0.5).slice(0, 5);
-  if(!pool.length){ toast('문제가 없습니다'); return; }
+  if(mode === 'past'){
+    pool = exams.filter(e => (e.difficulty||1) === diff);
+    if(!pool.length){
+      toast(`${DIFFICULTY_META[diff].ko} 기출이 없습니다. 자동생성으로 전환`);
+      pool = generateQuizQuestions(count*2, diff);
+    }
+  } else if(mode === 'wrong'){
+    pool = exams.filter((_,i) => S.wrongIds.includes(exams[i].id || 'past_'+(i+1).toString().padStart(3,'0')));
+    pool = pool.filter(e => (e.difficulty||1) === diff);
+    if(!pool.length){ toast('해당 난이도 오답이 없습니다'); return; }
+  } else if(mode === 'auto'){
+    pool = generateQuizQuestions(count*2, diff);
+  } else {  // mixed
+    const pastFiltered = exams.filter(e => (e.difficulty||1) === diff);
+    const autoNeeded = Math.max(count - pastFiltered.length, Math.ceil(count/2));
+    pool = pastFiltered.concat(generateQuizQuestions(autoNeeded, diff));
+  }
+  pool = pool.sort(()=>Math.random()-0.5).slice(0, count);
+  if(!pool.length){ toast('문제를 만들 수 없습니다'); return; }
+
+  // 옵션 셔플
+  pool = pool.map(q => {
+    const correctTxt = q.options[q.answer||0];
+    const shuffled = q.options.slice().sort(() => Math.random()-0.5);
+    return {...q, options: shuffled, answer: shuffled.indexOf(correctTxt)};
+  });
+
   let cur = 0, score = 0;
+  const startedAt = Date.now();
+  const dm = DIFFICULTY_META[diff];
+
   function show(){
     if(cur >= pool.length){
-      // 풀이 결과 + 氣 보상
-      const earned = score * 10;
+      // 결과 + 氣 보상 (난이도 보너스)
+      const baseReward = score * 10;
+      const diffMult = [1, 1.5, 2, 3][diff-1] || 1;
+      const earned = Math.round(baseReward * diffMult);
       S.qi += earned; saveState(); refreshHeader();
       view.innerHTML = `
         <h2 class="view-title fade-in"><span class="han">畢</span>완료</h2>
-        <div class="card imperial" style="text-align:center;padding:24px">
-          <div class="seal" style="font-size:36px;color:var(--zhusha-d)">${score}/${pool.length}</div>
-          <div style="margin-top:10px;font-size:14px;color:var(--feicui)">+${earned} 氣</div>
+        <div class="card imperial" style="text-align:center;padding:22px">
+          <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:6px">
+            <span class="seal-stamp" style="background:${dm.color};font-size:13px">${dm.icon}</span>
+            <span class="han" style="font-size:14px;color:${dm.color}">${dm.han}·${dm.ko}</span>
+          </div>
+          <div class="seal" style="font-size:42px;color:var(--zhusha-d);line-height:1">${score}<span style="font-size:24px;opacity:.6">/${pool.length}</span></div>
+          <div style="margin-top:8px;font-size:14px;color:var(--feicui);font-weight:600">+${earned} 氣 ${diff>1?`<span style="font-size:11px;color:var(--gutong)">(×${diffMult} 난이도 보너스)</span>`:''}</div>
+          <div style="margin-top:6px;font-size:11px;color:var(--gutong)">${Math.round((Date.now()-startedAt)/1000)}초 소요</div>
         </div>
         <div style="display:flex;gap:6px;justify-content:center;margin-top:14px">
-          <button class="btn" onclick="setTab('quiz')">기출로</button>
-          <button class="btn btn-o" onclick="setTab('home')">대청으로</button>
+          <button class="btn" type="button" onclick="setTab('quiz')">다시 풀기</button>
+          <button class="btn btn-o" type="button" onclick="setTab('home')">대청으로</button>
         </div>
       `;
       return;
     }
     const q = pool[cur];
     view.innerHTML = `
-      <h2 class="view-title fade-in"><span class="han">問</span>${cur+1}/${pool.length}</h2>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span class="seal-stamp tiny" style="background:${dm.color}">${dm.icon}</span>
+        <span class="han" style="font-size:13px;color:${dm.color}">${dm.han}·${dm.ko}</span>
+        <span style="margin-left:auto;font-size:12px;color:var(--gutong)">${cur+1} / ${pool.length}</span>
+      </div>
       <div class="card imperial fade-in">
-        <div style="font-size:14.5px;line-height:1.6;margin-bottom:12px">${esc(q.q||q.question||'?')}</div>
+        <div style="font-size:14.5px;line-height:1.65;margin-bottom:12px">${esc(q.q||q.question||'?')}</div>
         ${(q.options||[]).map((opt, i) => `
-          <button class="btn btn-o" type="button" style="display:block;width:100%;margin:6px 0;text-align:left;justify-content:flex-start" data-i="${i}">
-            <span class="han" style="color:var(--zhusha-d);margin-right:8px">${'甲乙丙丁戊'[i]||(i+1)}</span>${esc(opt)}
+          <button class="btn btn-o quiz-opt" type="button" style="display:block;width:100%;margin:6px 0;text-align:left;padding:10px 12px;white-space:normal;line-height:1.45" data-i="${i}">
+            <span class="han" style="color:var(--zhusha-d);margin-right:8px;font-weight:700">${'甲乙丙丁戊'[i]||(i+1)}</span>${esc(opt)}
           </button>
         `).join('')}
-        ${q.explanation?`<div id="expl" style="display:none;margin-top:14px;padding:10px;background:var(--mi);border-radius:6px;font-size:12.5px;color:var(--mo)"><b style="color:var(--zhusha-d)">해설</b><br>${esc(q.explanation)}</div>`:''}
+        ${q.explanation?`<div id="expl" style="display:none;margin-top:14px;padding:10px;background:var(--mi);border-radius:6px;font-size:12.5px;color:var(--mo);line-height:1.5"><b style="color:var(--zhusha-d)">해설</b><br>${esc(q.explanation)}</div>`:''}
       </div>
     `;
-    $$('.btn[data-i]').forEach(b => b.addEventListener('click', () => {
+    $$('.quiz-opt').forEach(b => b.addEventListener('click', () => {
       const i = +b.dataset.i;
       const correct = i === (q.answer||0);
       if(correct) score++;
-      $$('.btn[data-i]').forEach(x => {
+      $$('.quiz-opt').forEach(x => {
         x.disabled = true;
         if(+x.dataset.i === (q.answer||0)){ x.style.background='var(--feicui)'; x.style.color='var(--mi-w)'; x.style.borderColor='transparent'; }
         if(+x.dataset.i === i && !correct){ x.style.background='var(--zhusha)'; x.style.color='var(--mi-w)'; x.style.borderColor='transparent'; }
       });
       const expl = $('#expl'); if(expl) expl.style.display='block';
-      // 오답 기록 (개인 + 글로벌)
+      // 오답 기록
       if(!correct){
-        const qid = q.id || `past:${cur}`;
+        const qid = q.id || `auto:${cur}`;
         if(!S.wrongIds.includes(qid)) S.wrongIds.push(qid);
         saveState();
         if(FB){
           FB.get(`stats/wrongs/${qid}`).then(c => FB.put(`stats/wrongs/${qid}`, (c||0)+1));
         }
       }
-      setTimeout(() => { cur++; show(); }, 1500);
+      // 다음 버튼
+      setTimeout(() => {
+        const next = document.createElement('button');
+        next.className = 'btn';
+        next.style = 'display:block;width:100%;margin-top:10px;padding:10px';
+        next.textContent = cur+1 >= pool.length ? '결과 보기 →' : '다음 문제 →';
+        next.onclick = () => { cur++; show(); };
+        $('.card.imperial').appendChild(next);
+      }, 400);
     }));
   }
   show();
 };
+
+// ─── 난이도별 자동 문제 생성 ─────────────────────────────────────────────
+// difficulty 1: 작용·구성 단순 매칭 (빈출 위주)
+// difficulty 2: 적응증·가감·君藥 (중간)
+// difficulty 3: 약재 단위 의의·감별·함정 선지 (어려움)
+// difficulty 4: 처방 깊은 이해·약재 4-5개 모두 알아야 (지옥)
+function generateQuizQuestions(n, diff){
+  diff = diff || 1;
+  const formulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
+  const herbs    = (typeof HERBS    !== 'undefined') ? HERBS    : [];
+  if(!formulas.length) return [];
+
+  const out = [];
+  const rand = (a) => a[Math.floor(Math.random()*a.length)];
+  const shuf = (a) => a.slice().sort(()=>Math.random()-0.5);
+
+  const generators = {
+    // === 1단계: 빈출 ===
+    1: [
+      // 작용 매칭
+      () => {
+        const f = rand(formulas);
+        const distractors = shuf(formulas.filter(x => x.id !== f.id)).slice(0,4).map(x => x.action);
+        return {
+          q: `${f.han} (${f.ko})의 작용으로 가장 옳은 것은?`,
+          options: [f.action, ...distractors.slice(0,4)].filter(Boolean),
+          answer: 0,
+          explanation: `${f.han}의 작용은 「${f.action}」. ${f.indication.slice(0,60)}…`,
+          type: 'auto-action', difficulty: 1
+        };
+      },
+      // 한자 → 한글
+      () => {
+        const f = rand(formulas);
+        const distractors = shuf(formulas.filter(x => x.id !== f.id)).slice(0,4).map(x => x.ko);
+        return {
+          q: `「${f.han}」의 한글 이름은?`,
+          options: [f.ko, ...distractors],
+          answer: 0,
+          explanation: `${f.han} = ${f.ko}. 출처: ${f.source||'?'}`,
+          type: 'auto-ko', difficulty: 1
+        };
+      },
+    ],
+    // === 2단계: 중급 ===
+    2: [
+      // 君藥 매칭
+      () => {
+        const candidates = formulas.filter(f => f.monarch_minister && (f.monarch_minister['君']||[]).length);
+        if(!candidates.length) return null;
+        const f = rand(candidates);
+        const monarchs = f.monarch_minister['君'];
+        const ans = monarchs[0];
+        const allHerbs = formulas.flatMap(x => x.composition).filter(h => !monarchs.includes(h));
+        const distractors = shuf(Array.from(new Set(allHerbs))).slice(0,4);
+        return {
+          q: `${f.han} (${f.ko})의 君藥으로 가장 옳은 것은?`,
+          options: [ans, ...distractors],
+          answer: 0,
+          explanation: `${f.han}의 君藥은 ${monarchs.join('·')}. ${(f.keyPoints||[]).find(k => k.includes('君'))||''}`,
+          type: 'auto-monarch', difficulty: 2
+        };
+      },
+      // 적응증 매칭
+      () => {
+        const f = rand(formulas);
+        const distractors = shuf(formulas.filter(x => x.id !== f.id)).slice(0,4).map(x => x.indication.slice(0, 80));
+        return {
+          q: `다음 적응증에 가장 적합한 처방은?\n「${f.indication.slice(0,140)}…」`,
+          options: [f.han, ...shuf(formulas.filter(x => x.id !== f.id)).slice(0,4).map(x => x.han)],
+          answer: 0,
+          explanation: `${f.han} (${f.ko}) — ${f.action}`,
+          type: 'auto-indication', difficulty: 2
+        };
+      },
+    ],
+    // === 3단계: 고급 ===
+    3: [
+      // 구성에 없는 약재
+      () => {
+        const f = rand(formulas.filter(x => x.composition.length >= 4));
+        const inComp = f.composition;
+        const allHerbs = Array.from(new Set(formulas.flatMap(x => x.composition))).filter(h => !inComp.includes(h));
+        const odd = rand(allHerbs);
+        // 4개 정답(구성에 있는) + 1개 함정
+        const correct = shuf(inComp).slice(0, 4);
+        const options = shuf([...correct, odd]);
+        return {
+          q: `${f.han} (${f.ko})의 구성 약물이 아닌 것은?`,
+          options: options,
+          answer: options.indexOf(odd),
+          explanation: `${f.han}의 구성: ${inComp.join('·')}. 「${odd}」은 들어가지 않음.`,
+          type: 'auto-not-in', difficulty: 3
+        };
+      },
+      // 감별: 비슷한 작용 두 처방
+      () => {
+        // 작용이 비슷한 두 처방 (같은 chapter prefix)
+        const groups = {};
+        formulas.forEach(f => {
+          const key = (f.chapter||'').split('·')[0];
+          (groups[key] = groups[key] || []).push(f);
+        });
+        const group = Object.values(groups).find(g => g.length >= 2);
+        if(!group) return null;
+        const [a, b] = shuf(group).slice(0,2);
+        const distractors = shuf(formulas.filter(x => ![a.id,b.id].includes(x.id))).slice(0,3).map(x => x.han);
+        return {
+          q: `「${a.action}」의 작용을 가진 처방은? (「${b.action}」과 감별)`,
+          options: [a.han, b.han, ...distractors],
+          answer: 0,
+          explanation: `${a.han} = ${a.action}. ${b.han} = ${b.action}. 적응증으로 감별.`,
+          type: 'auto-compare', difficulty: 3
+        };
+      },
+      // 약재 작용 단독
+      () => {
+        if(!herbs.length) return null;
+        const h = rand(herbs);
+        const distractors = shuf(herbs.filter(x => x.han !== h.han)).slice(0,4).map(x => x.meaning);
+        return {
+          q: `약재 「${h.han}(${h.ko})」의 주된 작용·효능은?`,
+          options: [h.meaning, ...distractors],
+          answer: 0,
+          explanation: `${h.han} (${h.ko}) — 性味: ${h.sm}. 작용: ${h.meaning}`,
+          type: 'auto-herb', difficulty: 3
+        };
+      },
+    ],
+    // === 4단계: 지옥 ===
+    4: [
+      // 君臣佐使 위치 매칭
+      () => {
+        const candidates = formulas.filter(f => f.monarch_minister && ['君','臣','佐','使'].every(r => f.monarch_minister[r]||f.monarch_minister[r+'使']));
+        if(!candidates.length){
+          // 완전한 君臣佐使 아니더라도 시도
+          const f = rand(formulas.filter(x => x.monarch_minister));
+          const roles = Object.keys(f.monarch_minister);
+          const role = rand(roles);
+          const herbs = f.monarch_minister[role];
+          if(!herbs || !herbs.length) return null;
+          const otherInComp = f.composition.filter(h => !herbs.some(hh => hh.replace(/\([^)]+\)/,'').trim() === h.replace(/\([^)]+\)/,'').trim()));
+          if(otherInComp.length < 3) return null;
+          return {
+            q: `${f.han}에서 「${role}」의 위치에 해당하는 약물은?`,
+            options: [herbs[0], ...shuf(otherInComp).slice(0,4)],
+            answer: 0,
+            explanation: `${f.han}의 君臣佐使: ${Object.entries(f.monarch_minister).map(([k,v])=>k+'='+v.join('·')).join(' / ')}`,
+            type: 'auto-role', difficulty: 4
+          };
+        }
+        const f = rand(candidates);
+        const role = rand(['君','臣','佐']);
+        const correct = f.monarch_minister[role][0];
+        const other = ['君','臣','佐','使'].filter(r => r !== role).map(r => (f.monarch_minister[r]||f.monarch_minister[r+'使']||[])[0]).filter(Boolean);
+        return {
+          q: `${f.han}에서 「${role}藥」의 역할을 하는 약물은?`,
+          options: [correct, ...other].slice(0,5),
+          answer: 0,
+          explanation: `${f.han} 君臣佐使: ${Object.entries(f.monarch_minister).map(([k,v])=>k+'='+v.join('·')).join(' / ')}`,
+          type: 'auto-role-strict', difficulty: 4
+        };
+      },
+      // 출처 매칭 (어려운 서지)
+      () => {
+        const candidates = formulas.filter(f => f.source);
+        if(candidates.length < 5) return null;
+        const f = rand(candidates);
+        const distractors = shuf(candidates.filter(x => x.source !== f.source)).slice(0,4).map(x => x.source);
+        return {
+          q: `${f.han} (${f.ko})의 출전(出處)은?`,
+          options: [f.source, ...distractors],
+          answer: 0,
+          explanation: `${f.han}은 「${f.source}」에 수록.`,
+          type: 'auto-source', difficulty: 4
+        };
+      },
+      // 가감/keyPoint 함정
+      () => {
+        const candidates = formulas.filter(f => (f.keyPoints||[]).length >= 3);
+        if(!candidates.length) return null;
+        const f = rand(candidates);
+        const kp = rand(f.keyPoints);
+        const others = shuf(candidates.filter(x => x.id !== f.id)).slice(0,4);
+        return {
+          q: `다음 설명에 해당하는 처방은?\n「${kp.replace(/★+기?출[:(]?[^)]*\)?:?\s?/g,'').slice(0,140)}」`,
+          options: [f.han, ...others.map(x => x.han)],
+          answer: 0,
+          explanation: `${f.han} (${f.ko}) — 핵심: ${kp}`,
+          type: 'auto-keypoint', difficulty: 4
+        };
+      },
+      // 처방 vs 처방의 약재 차이
+      () => {
+        if(formulas.length < 3) return null;
+        const [a, b] = shuf(formulas).slice(0,2);
+        if(!a || !b) return null;
+        const aOnly = a.composition.filter(h => !b.composition.includes(h));
+        const bOnly = b.composition.filter(h => !a.composition.includes(h));
+        if(!aOnly.length || !bOnly.length) return null;
+        const ans = aOnly[0];
+        const distractors = shuf([...bOnly, ...Array.from(new Set(formulas.flatMap(x => x.composition))).filter(h => !aOnly.includes(h))]).slice(0,4);
+        return {
+          q: `${a.han}에는 있고 ${b.han}에는 없는 약물은?`,
+          options: [ans, ...distractors],
+          answer: 0,
+          explanation: `${a.han} 구성: ${a.composition.join('·')}\n${b.han} 구성: ${b.composition.join('·')}`,
+          type: 'auto-diff', difficulty: 4
+        };
+      },
+    ]
+  };
+
+  const gens = generators[diff] || generators[1];
+  const tries = n * 5;  // 실패 가능하므로 충분한 시도
+  let attempts = 0;
+  while(out.length < n && attempts < tries){
+    const g = rand(gens);
+    const q = g();
+    if(q && q.options && q.options.length >= 2){
+      out.push(q);
+    }
+    attempts++;
+  }
+  return out;
+}
+
+// 배틀용 (기존 호환)
+function generateBattleQuestions(n){
+  const exams = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  // 배틀은 중급 위주 + 일부 기출
+  const out = generateQuizQuestions(Math.ceil(n/2), 2);
+  const past = (exams.filter(e => (e.difficulty||1) <= 2)).sort(()=>Math.random()-0.5).slice(0, Math.floor(n/2));
+  return [...past, ...out].sort(()=>Math.random()-0.5).slice(0, n).map(p => {
+    const correctTxt = p.options[p.answer||0];
+    const shuffled = p.options.slice().sort(() => Math.random()-0.5);
+    return {...p, options: shuffled, answer: shuffled.indexOf(correctTxt)};
+  });
+}
 
 // ───── 14. 초기화 ───────────────────────────────────────────────────────────
 function init(){

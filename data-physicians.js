@@ -615,7 +615,7 @@ const PHYSICIANS = [
   {
     id: 'leesoonjae', ko: '이순재', han: '李純載', py: 'Lee Soon-jae',
     era: '시트콤', cat: 'gag', init: '純',
-    work_han: '이순재여성전문한병원', work_ko: '이순재여성전문한병원',
+    work_han: '이순재여성전문한방병원', work_ko: '이순재여성전문한방병원',
     ep: '하이킥의 원장 · 야동순재',
     quote: {  // 폴백 (quotes_pool 없을 때 쓰임)
       han: '이 자식들을 그냥!',
