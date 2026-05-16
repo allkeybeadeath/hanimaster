@@ -1,0 +1,30 @@
+{
+  "name": "方劑學 — 2차 수시 (5/20)",
+  "short_name": "방제학",
+  "description": "방제학 2차 수시 대비 (8장 보익제, 6장 온경산한제, 7장 표리쌍해제)",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#faf6ef",
+  "theme_color": "#7d4e2d",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
