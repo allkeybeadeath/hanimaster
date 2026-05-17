@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v8.5';                  // ★ 로비 표시용 (2026-05) — v8.5: 카드 對決 무한로딩 픽스 + 랜덤 초기 캐릭터
-const APP_BUILD   = '2026.05.17p';
+const APP_VERSION = 'v8.6';                  // ★ 로비 표시용 (2026-05) — v8.6: fetch 5s timeout + forfeit 양측 win 픽스 + 결과 대기 25s + 카드 watchdog 4s
+const APP_BUILD   = '2026.05.17s';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -114,33 +114,45 @@ const FB = (() => {
   const base = FIREBASE_URL.replace(/\/$/, '');
   return {
     base,
-    get: async (path) => {
+    // v8.6: fetch 무한 hang 픽스. 모든 fetch 에 AbortController 5초 timeout.
+    //       응답 없는 네트워크 환경에서 await 가 영원히 멈추던 버그 회복.
+    get: async (path, timeoutMs) => {
+      const ctl = new AbortController();
+      const tm = setTimeout(() => { try{ ctl.abort(); }catch(_){} }, timeoutMs || 5000);
       try{
-        const r = await fetch(`${base}/${path}.json`);
+        const r = await fetch(`${base}/${path}.json`, {signal: ctl.signal});
+        clearTimeout(tm);
         if(!r.ok) return null;
         return await r.json();
-      }catch(_){ return null; }
+      }catch(_){ clearTimeout(tm); return null; }
     },
-    put: async (path, val) => {
+    put: async (path, val, timeoutMs) => {
+      const ctl = new AbortController();
+      const tm = setTimeout(() => { try{ ctl.abort(); }catch(_){} }, timeoutMs || 5000);
       try{
         const r = await fetch(`${base}/${path}.json`, {
           method:'PUT', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(val),
+          body: JSON.stringify(val), signal: ctl.signal,
         });
+        clearTimeout(tm);
         return r.ok;
-      }catch(_){ return false; }
+      }catch(_){ clearTimeout(tm); return false; }
     },
     // v2.2.1: 재시도 가능한 PUT — 큐 등록 등 결정적 작업용
     // 반환: { ok: bool, status: number|null, retries: number, message: string }
+    // v8.6: 각 시도에 5초 timeout
     putRetry: async (path, val, opts) => {
-      const o = Object.assign({tries:3, backoffMs:300}, opts||{});
+      const o = Object.assign({tries:3, backoffMs:300, timeoutMs:5000}, opts||{});
       let lastStatus = null, lastErr = '';
       for(let i=0; i<o.tries; i++){
+        const ctl = new AbortController();
+        const tm = setTimeout(() => { try{ ctl.abort(); }catch(_){} }, o.timeoutMs);
         try{
           const r = await fetch(`${base}/${path}.json`, {
             method:'PUT', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify(val),
+            body: JSON.stringify(val), signal: ctl.signal,
           });
+          clearTimeout(tm);
           if(r.ok) return { ok:true, status:r.status, retries:i, message:'' };
           lastStatus = r.status;
           // 401·403 (보안 룰 거부) — 재시도해도 의미 없음
@@ -150,7 +162,8 @@ const FB = (() => {
           // 5xx·기타 — 재시도
           lastErr = `HTTP ${r.status}`;
         }catch(e){
-          lastErr = (e && e.message) || '네트워크 오류';
+          clearTimeout(tm);
+          lastErr = (e && e.name === 'AbortError') ? `timeout ${o.timeoutMs}ms` : ((e && e.message) || '네트워크 오류');
         }
         if(i < o.tries-1) await new Promise(res => setTimeout(res, o.backoffMs * (i+1)));
       }
@@ -2948,16 +2961,49 @@ async function renderBattleGame(roomId){
       setTab('hall');
       return;
     }
-    // v3: 폴링 50 × 1500ms = 75초 (handover 명시)
-    // 추가: FB.get 3회 연속 실패 → 5초 내 disconnect 간주, 부전승 처리
-    const POLL_MS = 1500;
-    const MAX_TRIES = 50;
-    const DISCONNECT_FAILS = 3;       // 연속 FB.get 실패 임계
+    // v8.6: 결과 대기 단축 + SSE 즉시 감지 — "무한 상대 결과 대기" 픽스
+    //   기존 v8.5: 1500ms × 50회 = 75초 폴링만. 양측 done 감지가 평균 0.75초 지연.
+    //   v8.6: SSE 구독으로 done 변화 즉시 감지 (지연 0) + 폴링 800ms × 31회 = ~25초 백오프 (forfeit 임계 단축)
+    //         양측 정상 종료 시 SSE 가 거의 즉시 결과 화면 전이.
+    const POLL_MS = 800;
+    const MAX_TRIES = 31;             // 800ms × 31 ≈ 25초 (75초 → 25초)
+    const DISCONNECT_FAILS = 3;
     const FORFEIT_AFTER_FAIL_MS = 5000;
     let tries = 0;
     let consecutiveFails = 0;
     let firstFailTs = 0;
+    let _resultShown = false;
+    let _resultStream = null;
+
+    // v8.6: SSE 구독 — 양측 done 즉시 감지 (폴링 대기 없음)
+    const tryFinish = (r, forfeit) => {
+      if(_resultShown) return;
+      _resultShown = true;
+      try{ if(_resultStream){ _resultStream.close(); _resultStream = null; } }catch(_){}
+      showResult(r, forfeit);
+    };
+    if(FB && typeof FB.subscribe === 'function'){
+      _resultStream = FB.subscribe(`battles/${roomId}`, (r) => {
+        if(_resultShown) return;
+        if(!r){
+          // 방 사라짐 → 환불 (에스크로 복구)
+          _resultShown = true;
+          try{ if(_resultStream){ _resultStream.close(); _resultStream = null; } }catch(_){}
+          S.qi += room.bet; saveState(); refreshHeader();
+          bgm.stopBattle();
+          toast('방이 사라졌습니다 — 베팅 환불','gold');
+          setTab('hall');
+          return;
+        }
+        const players = r.players || {};
+        const allDone = Object.keys(players).length >= 2
+                     && Object.values(players).every(p => p && p.done);
+        if(allDone) tryFinish(r, false);
+      });
+    }
+
     async function pollEnd(){
+      if(_resultShown) return;  // v8.6: SSE 가 먼저 처리하면 polling 종료
       tries++;
       let r = null;
       try{
@@ -2969,6 +3015,8 @@ async function renderBattleGame(roomId){
         if(firstFailTs === 0) firstFailTs = Date.now();
         if(consecutiveFails >= DISCONNECT_FAILS && Date.now() - firstFailTs >= FORFEIT_AFTER_FAIL_MS){
           // 네트워크 부재 → 로컬 환불 (안전한 fallback, 패배 처리 안 함)
+          _resultShown = true;
+          try{ if(_resultStream){ _resultStream.close(); _resultStream = null; } }catch(_){}
           S.qi += room.bet;
           saveState(); refreshHeader();
           bgm.stopBattle();
@@ -2982,6 +3030,8 @@ async function renderBattleGame(roomId){
       }
       if(!r){
         // 방이 사라짐 → 환불 (에스크로 복구)
+        _resultShown = true;
+        try{ if(_resultStream){ _resultStream.close(); _resultStream = null; } }catch(_){}
         S.qi += room.bet;
         saveState(); refreshHeader();
         bgm.stopBattle();
@@ -2990,21 +3040,23 @@ async function renderBattleGame(roomId){
         return;
       }
       const players = r.players || {};
-      const allDone = Object.values(players).every(p => p.done);
+      const allDone = Object.keys(players).length >= 2
+                   && Object.values(players).every(p => p && p.done);
       if(allDone){
-        showResult(r, false);
+        tryFinish(r, false);
         return;
       }
       if(tries > MAX_TRIES){
-        // 75초 경과 — 상대 응답 없음 → 부전승 (forfeit)
-        showResult(r, true);
+        // v8.6: 25초 경과 — 상대 응답 없음 → 부전승 (75초 → 25초로 단축)
+        tryFinish(r, true);
         return;
       }
       const elapsed = tries * POLL_MS / 1000;
+      const total = MAX_TRIES * POLL_MS / 1000;
       const st = $('#judging-status');
       const sub = $('#judging-sub');
-      if(st) st.textContent = `상대 결과 대기… (${elapsed.toFixed(0)}/${(MAX_TRIES*POLL_MS/1000).toFixed(0)}초)`;
-      if(sub) sub.textContent = `${MAX_TRIES*POLL_MS/1000-elapsed}초 후 자동 부전승 처리`;
+      if(st) st.textContent = `상대 결과 대기… (${elapsed.toFixed(1)}/${total.toFixed(0)}초)`;
+      if(sub) sub.textContent = `${(total - elapsed).toFixed(0)}초 후 자동 부전승 처리`;
       setTimeout(pollEnd, POLL_MS);
     }
     pollEnd();
@@ -3025,10 +3077,29 @@ async function renderBattleGame(roomId){
     let qiAdjust = 0;          // 에스크로 후 추가 조정량
     let factionBonus = 0;     // v5: 진영 패시브 보너스 (별도 추적·UI 노출)
 
-    if(forfeit && (!opp.done)){
-      outcome = 'win';
-      deltaQi = bet;
-      qiAdjust = bet * 2;       // 에스크로 환불 + 상대 베팅 흡수
+    // v8.6 critical 픽스: 양측 모두 timeout 시 양쪽 화면이 각자 상대를 forfeit 으로 보고
+    //                     양쪽 다 win 처리 → 氣 부풀림. 정산 무결성 유지를 위해
+    //                     done 플래그를 양측 다 검사 + 미완료 시 score 비교.
+    if(forfeit){
+      const meDone  = !!me.done;
+      const oppDone = !!(opp && opp.done);
+      if(meDone && !oppDone){
+        // 정상 forfeit — 나만 완료, 상대 미응답
+        outcome = 'win';  deltaQi = bet;  qiAdjust = bet * 2;
+      } else if(!meDone && oppDone){
+        // 상대만 완료 — 내가 forfeit 한 셈
+        outcome = 'lose'; deltaQi = -bet; qiAdjust = 0;
+      } else if(!meDone && !oppDone){
+        // ★ 양측 모두 미완료 — score 부분 진행도 비교 (사용자 신고 픽스)
+        if(me.score > (opp.score||0)){       outcome='win';  deltaQi=bet;  qiAdjust=bet*2; }
+        else if(me.score < (opp.score||0)){  outcome='lose'; deltaQi=-bet; qiAdjust=0; }
+        else {                                outcome='draw'; deltaQi=0;   qiAdjust=bet; }
+      } else {
+        // 양측 모두 완료 — 정상 종료 케이스 (forfeit=true 인데 SSE 가 늦게 잡힌 경우)
+        if(me.score > (opp.score||0)){       outcome='win';  deltaQi=bet;  qiAdjust=bet*2; }
+        else if(me.score < (opp.score||0)){  outcome='lose'; deltaQi=-bet; qiAdjust=0; }
+        else {                                outcome='draw'; deltaQi=0;   qiAdjust=bet; }
+      }
     } else if(me.score > (opp.score||0)){
       outcome = 'win';  deltaQi = bet;  qiAdjust = bet * 2;
     } else if(me.score < (opp.score||0)){
@@ -5915,9 +5986,11 @@ async function startCardBattle(roomId, isCreator){
       try{ console.error('renderCardBattle error', e); }catch(_){}
       const d = $('#cb-diag'); if(d) d.textContent = '렌더 오류: ' + (e && e.message || e);
     }
+    // v8.6 inactivity watchdog 은 정의 미완 → 다음 세션. 호출 제거됨 (ReferenceError 회귀 픽스).
   });
 
-  // v8.5: 8초 watchdog — 첫 렌더가 안 됐으면 진단 + 수동 새로고침 옵션
+  // v8.6: 4초 watchdog (8초 → 4초, 더 빠른 피드백). FB.get 자체에 5초 timeout 이 있어
+  //       이 watchdog 가 FB.get 실패 전에 발화할 수도 있으나 그것은 의도 (사용자에게 즉시 진단 노출).
   if(_cardLoadWatchdog){ clearTimeout(_cardLoadWatchdog); }
   _cardLoadWatchdog = setTimeout(() => {
     if(_cardFirstRenderDone) return;
@@ -5926,7 +5999,7 @@ async function startCardBattle(roomId, isCreator){
       stg.innerHTML = `
         <div style="text-align:center;padding:14px 8px">
           <div style="color:var(--zhusha-d);font-size:14px;margin-bottom:8px">진입이 지연됩니다</div>
-          <div style="font-size:12px;color:var(--mo-l);margin-bottom:10px">방 ${esc(roomId)} 데이터 패치가 8초 내 완료되지 않았습니다. 네트워크/Firebase 권한 또는 SSE 차단 가능성.</div>
+          <div style="font-size:12px;color:var(--mo-l);margin-bottom:10px">방 ${esc(roomId)} 데이터 패치가 4초 내 완료되지 않았습니다. 네트워크/Firebase 권한/SSE 차단 가능성.</div>
           <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
             <button class="btn btn-gold" onclick="(async()=>{const r=await FB.get('card_battles/${esc(roomId)}');if(r){_cardRoomState=r;renderCardBattle('${esc(roomId)}',r);_cardFirstRenderDone=true;}else{toast('방을 찾을 수 없음','red');}})()">수동 패치 시도</button>
             <button class="btn btn-o" onclick="(async()=>{try{await FB.put('card_battles/${esc(roomId)}/status','done');}catch(_){};_inBattleSession=false;_battleSessionMeta=null;stopCardStreams();setTab('hall');})()">포기 (방 폐쇄)</button>
@@ -5938,7 +6011,7 @@ async function startCardBattle(roomId, isCreator){
       const errStr = _lastSubError ? `· SSE 에러: ${esc(_lastSubError.err||'?')} (${esc(_lastSubError.path||'?')})` : '';
       d.innerHTML = `watchdog 진단 — 첫 렌더 미완료 ${errStr}`;
     }
-  }, 8000);
+  }, 4000);
 }
 
 // 화면 렌더링 — status 별로 분기

@@ -515,3 +515,28 @@ character: null,         // ← 'qibo' 기본값 제거 → loadState 에서 랜
 8. 카드 對決 친선전 (방 코드 공유)
 
 작성: 2026-05-17 · CIM Lab
+
+## v8.6 — 2026-05-17 추가 패치 (CIM Lab)
+
+> v8.5 → v8.6. 사용자 신고 3건 반응 패치.
+
+### Critical 변경
+
+1. **5지선다 forfeit 양측 win 픽스** — 양측 timeout 도달 시 두 클라이언트가 각자 자기 입장에서 상대를 forfeit 로 인식 → 양쪽 다 win 처리 → 氣 부풀림 (제로섬 깨짐). 4분기 정산 로직으로 픽스. 양측 미완료 동점 = draw 환불.
+2. **fetch 무한 hang 픽스** — `FB.get/put/putRetry` 에 `AbortController` 5초 timeout. 응답 안 오는 네트워크에서 await 가 무한 멈추던 모든 path 해소.
+3. **결과 대기 75초 → 25초** + SSE `_resultStream` 으로 양측 done 즉시 감지.
+4. **카드 watchdog 8초 → 4초** + FB.get 4회 재시도 (v8.5 유지).
+
+### 캐시 키
+
+`bangje-pwa-v8-5-2026-05` → `bangje-pwa-v8-6-2026-05`. SW 자동 갱신.
+
+### 인수 체크리스트
+
+- [ ] 2인 동시 5지선다 對決: A·B 모두 답 안 풀고 25초 대기 → **양측 draw 처리 + 환불** (이전: 양측 win + 氣 부풀림)
+- [ ] 한쪽만 미완료: 정상 forfeit win/lose 처리
+- [ ] 양측 정상 종료: SSE 즉시 결과 화면 전이 (폴링 25초 대기 안 함)
+- [ ] 카드 對決 진입: 4초 안에 첫 렌더 OR watchdog 진단 노출
+- [ ] 네트워크 음영 환경: fetch 가 5초 안에 abort, 재시도 루프 진행
+
+작성: 2026-05-17 · CIM Lab

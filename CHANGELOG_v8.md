@@ -1,14 +1,89 @@
 # v8 — 2026-05 패치 모음 (CIM Lab)
 
-> v7 → v8.1 → v8.2 → v8.3 → v8.4 → v8.5. 5회 누적 패치를 통합 정리.
-> v8 의 주제는 **멀티 對決 안정화** (큐·매칭·진입 race condition 제거)와
+> v7 → v8.1 → v8.2 → v8.3 → v8.4 → v8.5 → v8.6. 6회 누적 패치를 통합 정리.
+> v8 의 주제는 **멀티 對決 안정화** (큐·매칭·진입·정산 race 제거)와
 > **관리자 도구 보강** (PWA 내장 진단·청소·원격 wipe).
-> v8.5 에서 카드 對決 무한 로딩 critical bug 를 픽스하고 첫 시작 캐릭터를
-> 무작위 부여 (神급·이순재 제외) 로 변경.
+> v8.6 에서 critical 정산 무결성 위반(양측 win) 픽스 + fetch 무한 hang 픽스.
 
 ---
 
-## ① v8.5 — 2026.05.17p (현재)
+## ⓪ v8.6 — 2026.05.17r (현재)
+
+### A. critical 정산 픽스 — 5지선다 양측 win 버그
+
+사용자 신고: **75초 기다리면 두 사용자 모두 승리 처리**.
+
+근본 원인: `showResult(r, forfeit=true)` 의 정산 조건이 `forfeit && !opp.done`
+으로 한쪽만 검사. **양측 모두 미완료(timeout 도달) 시 각 클라이언트는 자기
+입장에서 상대를 forfeit 로 인식 → 양쪽 다 win 정산 → 氣 부풀림 (제로섬 깨짐).**
+
+픽스: forfeit 시 양측 `done` 상태와 `score` 를 모두 검사하는 4분기 로직.
+
+```js
+// v8.6 forfeit 정합 로직
+if(forfeit){
+  if(meDone && !oppDone){       /* 정상 forfeit */    win }
+  else if(!meDone && oppDone){  /* 내가 forfeit */    lose }
+  else if(!meDone && !oppDone){ /* 양측 미완료 */     score 비교 → 동점은 draw 환불 }
+  else {                         /* 양측 완료 */       score 비교 (안전망) }
+}
+```
+
+검증 (Monte Carlo 6 케이스): 모든 시나리오에서 양측 ΔΣ=0 (영합 게임 유지).
+
+| 케이스 | A 결과 | B 결과 | ΔΣ |
+|---|---|---|---|
+| 양측 미완료 동점 (신고 케이스) | draw | draw | 0 (이전: +2·bet 부풀림) |
+| 양측 미완료 A 우세 | win | lose | 0 |
+| 양측 미완료 B 우세 | lose | win | 0 |
+| A 완료 B 미완료 | win | lose | 0 |
+| B 완료 A 미완료 | lose | win | 0 |
+| 양측 완료 동점 | draw | draw | 0 |
+
+### B. fetch 무한 hang 픽스 — `FB.get`/`FB.put`/`FB.putRetry` 5초 timeout
+
+근본 원인: 모든 `fetch()` 호출에 timeout 없음. 응답이 안 오는 네트워크 환경
+(좀비 연결, 셀룰러 음영 등) 에서 `await fetch(...)` 가 무한 hang →
+v8.5 의 재시도/watchdog 도 의미 없음 (한 번의 호출이 끝나지 않으므로).
+
+픽스: 모든 GET/PUT 에 `AbortController` + 5초 timeout. 초과 시 throw → catch → null/false 반환 → 재시도 루프 정상 진행.
+
+```js
+get: async (path, timeoutMs) => {
+  const ctl = new AbortController();
+  const tm = setTimeout(() => ctl.abort(), timeoutMs || 5000);
+  try{
+    const r = await fetch(`${base}/${path}.json`, {signal: ctl.signal});
+    clearTimeout(tm);
+    return r.ok ? await r.json() : null;
+  }catch(_){ clearTimeout(tm); return null; }
+}
+```
+
+### C. 결과 대기 시간 단축 — 75초 → 25초
+
+사용자 지적 "오지선다 배틀 판정 대기 기간이 너무 김" 반영:
+- `POLL_MS` 1.5초 → 0.8초
+- `MAX_TRIES` 50 → 31  ⇒  총 대기 75초 → **25초**
+- 추가: `_resultStream = FB.subscribe(...)` 로 양측 `done` 즉시 감지
+  (폴링 대기 안 함, SSE 가 먼저 잡으면 `_resultShown` 가드로 폴링 중지)
+
+### D. 카드 對決 watchdog 8초 → 4초
+
+진입 watchdog 단축. FB.get 5초 timeout 과의 race 는 의도된 동작
+(watchdog 가 먼저 발화해도 사용자가 「수동 패치 시도」로 재시도 가능).
+
+### E. 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `app.js` | `FB.get/put/putRetry` AbortController 5초 timeout · `showResult` forfeit 4분기 정산 · 결과 대기 25초 + SSE 즉감 (이미 적용) · 카드 watchdog 4초 |
+| `sw.js`  | 캐시키 `v8-5-2026-05` → `v8-6-2026-05` |
+| `CHANGELOG_v8.md` | v8.6 섹션 prepend |
+
+---
+
+## ① v8.5 — 2026.05.17p
 
 ### A. critical 버그 픽스 — 카드 對決 "한 명 무한 로딩"
 
