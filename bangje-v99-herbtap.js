@@ -1,13 +1,18 @@
-/* bangje-v99-herbtap.js — v10.0.3
+/* bangje-v99-herbtap.js — v10.0.4
  * ============================================================================
  * 본초 단탭 + 하단 드로어 popup + 大廳 학습 토글
  *
  *   v98-herbpop 의 전체화면 overlay 가 게임을 가려서 진행 불가 → 화면 하단
  *   드로어 (최대 38vh) 로 대체. 위쪽 62vh 는 게임 화면 그대로 사용 가능.
  *
+ *   v10.0.4 핵심 수정 — 카드 탭이 학습 측 capture-listener 에서
+ *     stopPropagation/preventDefault 로 막혀 큐브 손패 선택이 안 되던 버그.
+ *     이제 capture 에서 드로어만 열고 클릭은 bubble 시켜 .bc-card 의 카드별
+ *     리스너 (onHandCardClick) 가 정상 발동. 드로어 표시 ∥ 카드 선택 동시.
+ *
  *   동작:
- *     • 학습 ON: .cb-herb-card / .bc-card 클릭 → 하단 드로어 (게임 클릭 가능)
- *     • 학습 OFF: 본초 카드 클릭은 게임 기본 동작
+ *     • 학습 ON: .cb-herb-card / .bc-card 클릭 → 하단 드로어 (게임 클릭도 진행)
+ *     • 학습 OFF: 본초 카드 클릭은 게임 기본 동작만
  *
  *   영속: S.herbTapEnabled (default true)
  *   부수: V98HerbPop.setMode('off') — long-press 비활성
@@ -152,8 +157,9 @@ function _onClickCapture(e){
   if(!card) return;
   const han = (card.dataset && (card.dataset.han || card.dataset.herb)) || '';
   if(!han) return;
-  e.stopPropagation();
-  e.preventDefault();
+  // v10.0.4: stopPropagation/preventDefault 제거 — capture-phase 에서 드로어만
+  //          열고 클릭은 그대로 bubble 시켜 게임 카드 선택 핸들러
+  //          (.bc-card → onHandCardClick) 가 정상 발동되도록 함. 두 동작 동시.
   openFor(han);
 }
 

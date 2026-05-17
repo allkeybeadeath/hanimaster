@@ -17,10 +17,14 @@ const V96_CSS = `
   order:9999;  /* flex/grid 부모에서 가장 마지막 */
 }
 /* 채팅이 들어있는 board 영역이 flex 면 채팅이 자동으로 맨 아래로 */
-.cb-board, .bc-board, #view, #card-battle-view, #cube-view {
+/* v10.0.4: .cb-board 제거 — index.html 의 native (flex-wrap:wrap 가로 흐름) 보존.
+            카드對決의 .chat-card 는 .cb-board 자식이 아닌 #cb-chat-host 안에
+            mount 되므로 .cb-board 를 flex-column 으로 만들 이유가 없었음 (v10.0.3 회귀).
+            .bc-board 는 큐브 native 가 이미 flex-column 이므로 유지(중복 무해). */
+.bc-board, #view, #card-battle-view, #cube-view {
   display: flex; flex-direction: column;
 }
-.cb-board > .chat-card, .bc-board > .chat-card,
+.bc-board > .chat-card,
 #view > .chat-card, [id$="-view"] > .chat-card { order: 9999; }
 .chat-card.collapsed .chat-body{ display:none; }
 .chat-head{
