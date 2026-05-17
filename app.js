@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v8.6';                  // ★ 로비 표시용 (2026-05) — v8.6: fetch 5s timeout + forfeit 양측 win 픽스 + 결과 대기 25s + 카드 watchdog 4s
-const APP_BUILD   = '2026.05.17s';
+const APP_VERSION = 'v8.8';                  // ★ 로비 표시용 (2026-05) — v8.8 critical: FB.subscribe active polling (iOS Safari SSE 비회복 픽스)
+const APP_BUILD   = '2026.05.17u';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -373,11 +373,43 @@ const FB = (() => {
 
       startSSE();
 
+      // v8.8 critical 픽스: SSE 와 병행하는 active polling (5초 주기).
+      // ─────────────────────────────────────────────────────────────────
+      //   iOS Safari (iPad/iPhone) 의 EventSource 는 첫 메시지 후 끊기면
+      //   onerror 가 발화해도 자동 재연결이 실패하는 케이스가 흔함.
+      //   v8.7 까지의 폴백은 onerror + !gotFirst 조건 → 첫 메시지 후
+      //   끊기면 polling 발화 안 함 → cross-client 변경 안 보임.
+      //   해결: 5초마다 무조건 GET 으로 snapshot 강제 동기화.
+      //   SSE 가 정상이면 같은 데이터 → emit 중복 (render 멱등성 의존).
+      //   SSE 가 끊겨도 5초 안에 cross-client 변경 감지 → "상대 결과 대기"
+      //   무한 멈춤 + 카드 방 진입 안 됨 + 매칭 실패 모두 동시 해결.
+      let activePollTimer = null;
+      const ACTIVE_POLL_MS = 3000;  // v8.8: 3초 주기 (critical path 응답성)
+      const activePoll = async () => {
+        if(closed) return;
+        try{
+          const ctl = new AbortController();
+          const tm = setTimeout(() => { try{ ctl.abort(); }catch(_){} }, 4500);
+          const r = await fetch(`${base}/${path}.json`, {signal: ctl.signal});
+          clearTimeout(tm);
+          if(r.ok){
+            const v = await r.json();
+            // 깊은 diff 없이 직접 갱신 → emit. 같은 데이터면 onUpdate 가 멱등이므로 무해.
+            snapshot = v;
+            emit();
+          }
+        }catch(_){}
+        if(!closed) activePollTimer = setTimeout(activePoll, ACTIVE_POLL_MS);
+      };
+      // 첫 활성 폴링은 5초 후 시작 (SSE 가 빠르게 자리 잡을 시간 줌)
+      activePollTimer = setTimeout(activePoll, ACTIVE_POLL_MS);
+
       return {
         close: () => {
           closed = true;
           if(es){ try{ es.close(); }catch(_){} es = null; }
           if(pollTimer){ clearTimeout(pollTimer); pollTimer = null; }
+          if(activePollTimer){ clearTimeout(activePollTimer); activePollTimer = null; }
         },
         get snapshot(){ return snapshot; },
       };
@@ -1958,7 +1990,7 @@ function renderHall(){
     <!-- 최근 對決 기록 -->
     ${(S.battleHistory && S.battleHistory.length > 0) ? `
     <div class="card fade-in" style="margin-top:14px">
-      <div class="card-title"><span class="han">戰績</span> 최근 對決 (${S.battleHistory.length}/20)</div>
+      <div class="card-title"><span class="han">戰績</span> 최근 5지선다 對決 (${S.battleHistory.length}/20)</div>
       <div style="display:flex;flex-direction:column;gap:4px;font-size:11.5px">
         ${S.battleHistory.slice(0, 10).map(h => `
           <div style="display:flex;justify-content:space-between;padding:5px 6px;background:var(--mi-w);border-radius:4px">
@@ -1967,6 +1999,34 @@ function renderHall(){
             <span style="color:var(--gutong)">${ago(h.ts||0)}</span>
           </div>
         `).join('')}
+      </div>
+    </div>` : ''}
+
+    <!-- v8.7 F5: 카드 對決 별도 전적 -->
+    ${(S.cardBattleHistory && S.cardBattleHistory.length > 0) ? `
+    <div class="card fade-in" style="margin-top:14px">
+      <div class="card-title"><span class="han">匕</span> 최근 카드 對決 (${S.cardBattleHistory.length}/20)</div>
+      <div style="display:flex;flex-direction:column;gap:4px;font-size:11.5px">
+        ${S.cardBattleHistory.slice(0, 10).map(h => {
+          const winLossHan = h.draw ? '和' : (h.win?'勝':'敗');
+          const reasonKo = h.by==='attack'?'전탕 一致':(h.by==='forfeit'?'부전승':(h.by==='inactivity'?'상대 잠수':(h.by==='turn_limit'?'무승부':h.by||'?')));
+          return `
+          <div style="display:flex;justify-content:space-between;padding:5px 6px;background:var(--mi-w);border-radius:4px">
+            <span><span class="han">${winLossHan}</span> vs ${esc(h.opponentName||'?')} <span style="color:var(--gutong);font-size:10.5px">· ${esc(reasonKo)}</span></span>
+            <span style="color:${(h.deltaQi||0)>=0?'var(--feicui)':'var(--zhusha)'}">${(h.deltaQi||0)>=0?'+':''}${h.deltaQi||0} 氣</span>
+            <span style="color:var(--gutong)">${ago(h.ts||0)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="margin-top:6px;font-size:10.5px;color:var(--gutong);text-align:center">
+        ${(() => {
+          const ch = S.cardBattleHistory;
+          const w = ch.filter(h=>h.win).length;
+          const l = ch.filter(h=>!h.win && !h.draw).length;
+          const d = ch.filter(h=>h.draw).length;
+          const fft = ch.filter(h=>h.forfeit).length;
+          return `${w}勝 ${l}敗 ${d}和 · forfeit ${fft}회`;
+        })()}
       </div>
     </div>` : ''}
   `;
@@ -2965,8 +3025,9 @@ async function renderBattleGame(roomId){
     //   기존 v8.5: 1500ms × 50회 = 75초 폴링만. 양측 done 감지가 평균 0.75초 지연.
     //   v8.6: SSE 구독으로 done 변화 즉시 감지 (지연 0) + 폴링 800ms × 31회 = ~25초 백오프 (forfeit 임계 단축)
     //         양측 정상 종료 시 SSE 가 거의 즉시 결과 화면 전이.
-    const POLL_MS = 800;
-    const MAX_TRIES = 31;             // 800ms × 31 ≈ 25초 (75초 → 25초)
+    //   v8.8: active polling (FB.subscribe 3초 주기) 가 SSE 끊겨도 cross-client 변경 감지 → forfeit 30초로 여유.
+    const POLL_MS = 1000;
+    const MAX_TRIES = 30;             // 1000ms × 30 = 30초 (v8.8: 25초 → 30초, active polling 백업 활용)
     const DISCONNECT_FAILS = 3;
     const FORFEIT_AFTER_FAIL_MS = 5000;
     let tries = 0;
@@ -5921,6 +5982,40 @@ async function createCardBattleRoom(roomId, me, opp, bet){
   return room;
 }
 
+// v8.7: 카드 對決 inactivity timeout — lastActionAt 갱신 없이 60초 경과 시 자동 정산.
+//       자기 턴이 아닐 때 (= 상대 응답 없는 경우) 만 자기가 책임지고 트리거하여
+//       양측 동시 트리거 회피. 자기 턴이면서 무액션은 의도적 게임 진행 — 트리거 안 함.
+const CARD_INACTIVITY_MS = 60 * 1000;
+let _cardInactivityTimer = null;
+function armCardInactivityWatchdog(roomId, room){
+  if(_cardInactivityTimer){ clearTimeout(_cardInactivityTimer); _cardInactivityTimer = null; }
+  if(!room || !room.players || !room.players[S.userId]) return;
+  if(room.status !== 'playing') return;        // choosing/done 은 별도 흐름
+  if(room.turn === S.userId) return;           // 자기 턴 무액션은 자기 의도
+  const last = room.lastActionAt || room.startedAt || room.createdAt || Date.now();
+  const remain = CARD_INACTIVITY_MS - (Date.now() - last);
+  if(remain <= 0){ triggerCardInactivityForfeit(roomId, room); return; }
+  _cardInactivityTimer = setTimeout(() => {
+    if(!_cardRoomState || _cardRoomState.status !== 'playing') return;
+    if(_cardRoomState.turn === S.userId) return;
+    triggerCardInactivityForfeit(roomId, _cardRoomState);
+  }, remain + 250);  // 250ms 여유 — SSE 가 갱신을 가져올 시간
+}
+async function triggerCardInactivityForfeit(roomId, room){
+  if(!room || !room.players || room.status === 'done') return;
+  try{
+    const oppId = Object.keys(room.players).find(k => k !== S.userId);
+    if(!oppId) return;
+    // 멱등성: status='done' 으로 transition 가능한 경우에만 (다른 클라이언트가 먼저 처리했으면 skip)
+    const fresh = await FB.get(`card_battles/${roomId}`);
+    if(!fresh || fresh.status === 'done') return;
+    const result = { winner: S.userId, by: 'inactivity', inactiveSide: oppId, finishedAt: Date.now() };
+    await FB.put(`card_battles/${roomId}/result`, result);
+    await FB.put(`card_battles/${roomId}/status`, 'done');
+    toast('상대 응답 없음 — 부전승 처리', 'gold');
+  }catch(e){ try{ console.error('inactivity forfeit error', e); }catch(_){} }
+}
+
 // 카드 對決 시작 (양측이 동시에 진입)
 let _cardRoomStream = null;
 let _cardRoomState  = null;
@@ -5986,7 +6081,8 @@ async function startCardBattle(roomId, isCreator){
       try{ console.error('renderCardBattle error', e); }catch(_){}
       const d = $('#cb-diag'); if(d) d.textContent = '렌더 오류: ' + (e && e.message || e);
     }
-    // v8.6 inactivity watchdog 은 정의 미완 → 다음 세션. 호출 제거됨 (ReferenceError 회귀 픽스).
+    // v8.7: inactivity watchdog 갱신 — lastActionAt 기반 60초 무액션 자동 forfeit
+    armCardInactivityWatchdog(roomId, room);
   });
 
   // v8.6: 4초 watchdog (8초 → 4초, 더 빠른 피드백). FB.get 자체에 5초 timeout 이 있어
@@ -6184,6 +6280,7 @@ function renderCardPlaying(roomId, room, me, opp){
       <div class="cb-board-meta">
         턴 ${room.turnIdx+1}/${CARD_TURN_MAX} · 덱 ${room.deck.length}장${deckEmpty?' <span style="color:var(--zhusha-d);font-size:11px">[증상 공개 단계]</span>':''} ·
         ${isMyTurn ? '<b style="color:var(--feicui)">나의 턴</b>' : '<b style="color:var(--gutong)">상대 턴</b>'}
+        <button class="cb-lang-toggle" onclick="toggleHerbLang()" title="본초 한자↔한글 토글" style="margin-left:8px;padding:1px 8px;font-size:10.5px;border:1px solid var(--gutong);background:transparent;border-radius:10px;cursor:pointer;color:var(--mo);font-family:var(--font-display)">${S.herbLang==='ko'?'韓→漢':'漢→韓'}</button>
       </div>
       <!-- v7.5: 五味 색 범례 -->
       <div class="cb-taste-legend" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;margin:4px 0 6px;font-size:10.5px;font-family:var(--font-display)">
@@ -6331,14 +6428,33 @@ function renderHerbCardHTML(herb, opts){
   const ko    = (h && h.ko) ? h.ko : '';
   const click = opts.click ? `data-herb="${esc(herb)}" style="cursor:pointer"` : '';
   const klass = opts.selected ? 'cb-card-selected' : '';
+  // v8.7 F4: 한자↔한글 토글 — S.herbLang='ko' 시 한글 우선, 한자 보조
+  const koMode = (S && S.herbLang === 'ko' && ko);
+  const main   = koMode ? ko   : herb;          // 큰 글자
+  const sub    = koMode ? herb : ko;            // 보조 글자
   return `
     <div class="cb-herb-card ${klass}" ${click} style="background:${c.bg};border-color:${c.bd};color:${c.accent}">
-      <div class="cb-herb-han">${esc(herb)}</div>
-      ${ko ? `<div class="cb-herb-ko">${esc(ko)}</div>` : ''}
+      <div class="cb-herb-han">${esc(main)}</div>
+      ${sub ? `<div class="cb-herb-ko">${esc(sub)}</div>` : ''}
       <div class="cb-herb-taste" style="font-size:9px;letter-spacing:.08em;opacity:.65;margin-top:2px;font-family:var(--font-display)">${esc(c.taste)}</div>
     </div>
   `;
 }
+
+// v8.7 F4: 본초 언어 토글 — 헤더 또는 카드 對決 UI 에서 호출
+window.toggleHerbLang = function toggleHerbLang(){
+  S.herbLang = (S.herbLang === 'ko') ? 'han' : 'ko';
+  saveState();
+  toast(S.herbLang === 'ko' ? '본초 한글 우선' : '본초 한자 우선', 'gold');
+  // 현재 카드 對決 진행 중이면 즉시 리렌더
+  try{
+    if(_cardRoomState && _battleSessionMeta && _battleSessionMeta.mode === 'card'){
+      renderCardBattle(_battleSessionMeta.roomId, _cardRoomState);
+    }
+  }catch(_){}
+  // 헤더에 토글 상태 반영
+  try{ refreshHeader(); }catch(_){}
+};
 
 // 증상 공개 모달 (자기 증상 1개 → 공개 OR 황제 스킬 fake 적용)
 function openSymptomRevealModal(roomId, room, me, mySyn){
@@ -6410,10 +6526,19 @@ function openSkillModal(roomId, room, me, opp, skillMeta){
       </div>
     `;
   } else if(skillMeta.id === 'summon_herb'){
-    // 신농: 텍스트 입력으로 본초 호출
+    // 신농: 텍스트 입력으로 본초 호출. v8.7 F1: datalist 자동완성 (덱 본초의 한자명 + 한글 alias)
+    const deckHerbs = (room.deck||[]).slice();
+    const datalistOpts = deckHerbs.map(h => {
+      const meta = (typeof HERBS !== 'undefined') ? HERBS.find(x => x.han === h || x.han_alt === h) : null;
+      const ko = meta && meta.ko ? meta.ko : '';
+      return `<option value="${esc(h)}">${esc(h)}${ko?' ('+esc(ko)+')':''}</option>`;
+    }).join('');
     bodyHtml = `
-      <div style="font-size:12px;color:var(--mo-l);margin-bottom:8px">덱에 있는 본초의 한자명 1개를 입력하면 보드로 호출됩니다.</div>
-      <input type="text" id="cb-summon-input" placeholder="예: 人蔘" style="width:100%;padding:8px;font-size:14px;border:1px solid var(--gutong);border-radius:6px;font-family:var(--font-display)">
+      <div style="font-size:12px;color:var(--mo-l);margin-bottom:8px">덱에 있는 본초의 한자명 1개를 입력하면 보드로 호출됩니다. <b>입력란을 클릭하면 덱 본초 목록이 자동완성</b> 됩니다 (한글로 검색해 한자 자동 선택 가능).</div>
+      <input type="text" id="cb-summon-input" list="cb-summon-list" autocomplete="off"
+             placeholder="예: 人蔘 (또는 인삼)" inputmode="text"
+             style="width:100%;padding:8px;font-size:14px;border:1px solid var(--gutong);border-radius:6px;font-family:var(--font-display)">
+      <datalist id="cb-summon-list">${datalistOpts}</datalist>
       <div style="font-size:11px;color:var(--gutong);margin-top:6px">덱 잔여: ${room.deck.length}장 (덱 본초만 호출 가능)</div>
       <div style="margin-top:8px"><button class="btn btn-gold" id="cb-summon-go">召喚</button></div>
     `;
@@ -6464,6 +6589,7 @@ function openSkillModal(roomId, room, me, opp, skillMeta){
       btn.addEventListener('click', async () => {
         const fk = btn.dataset.fake;
         m.remove();
+        playSkillFX('huangdi', '欺');  // v8.7 F2
         try{
           await FB.put(`card_battles/${roomId}/players/${S.userId}/fakeSymptomNext`, fk);
           await FB.put(`card_battles/${roomId}/players/${S.userId}/skillUsed`, true);
@@ -6474,11 +6600,17 @@ function openSkillModal(roomId, room, me, opp, skillMeta){
     });
   } else if(skillMeta.id === 'summon_herb'){
     $('#cb-summon-go').addEventListener('click', async () => {
-      const v = ($('#cb-summon-input').value||'').trim();
+      let v = ($('#cb-summon-input').value||'').trim();
       if(!v){ toast('본초 한자를 입력하세요','gold'); return; }
+      // v8.7 F1: 한글 입력 → 한자 매핑 (HERBS.ko 로 검색)
+      if(!/[\u4e00-\u9fff]/.test(v) && typeof HERBS !== 'undefined'){
+        const m = HERBS.find(x => x.ko === v || (x.ko && x.ko.replace(/\s/g,'') === v.replace(/\s/g,'')));
+        if(m) v = m.han;
+      }
       const idx = (room.deck||[]).indexOf(v);
-      if(idx < 0){ toast('덱에 없는 본초입니다','red'); return; }
+      if(idx < 0){ toast('덱에 없는 본초입니다 (입력: '+v+')','red'); return; }
       m.remove();
+      playSkillFX('shennong', '草');  // v8.7 F2
       try{
         const newDeck = room.deck.slice(); newDeck.splice(idx, 1);
         const newBoard = (room.board||[]).slice(); newBoard.push(v);
@@ -6492,6 +6624,7 @@ function openSkillModal(roomId, room, me, opp, skillMeta){
   } else if(skillMeta.id === 'foresee_deck'){
     $('#cb-foresee-go').addEventListener('click', async () => {
       m.remove();
+      playSkillFX('fuxi', '卦');  // v8.7 F2
       try{
         await FB.put(`card_battles/${roomId}/players/${S.userId}/skillUsed`, true);
         appendCardLog(roomId, room, `${me.name}: 伏羲 卦知 — 덱 預知`);
@@ -6504,6 +6637,7 @@ function openSkillModal(roomId, room, me, opp, skillMeta){
         const h = el.dataset.herb;
         if(!room.deck.length){ toast('덱이 비어 교체 불가','gold'); return; }
         m.remove();
+        playSkillFX('nvwa', '化');  // v8.7 F2
         try{
           const newDeck = room.deck.slice();
           const dIdx = Math.floor(Math.random()*newDeck.length);
@@ -6525,6 +6659,7 @@ function openSkillModal(roomId, room, me, opp, skillMeta){
       el.addEventListener('click', async () => {
         const h = el.dataset.herb;
         m.remove();
+        playSkillFX('qibo', '問');  // v8.7 F2
         try{
           // 보드에 이미 있으면 효과 없이 스킬만 소진
           let logMsg = `${me.name}: 岐伯 問難 — ${h}`;
@@ -6713,6 +6848,31 @@ async function endCardTurn(roomId, room){
   }catch(e){ toast('턴 종료 실패: '+e.message, 'red'); }
 }
 
+// v8.7 F2: 神급 스킬 발동 시 풀스크린 시각 이펙트 (1.5초)
+//   char: 'huangdi'·'shennong'·'fuxi'·'nvwa'·'qibo'
+//   han: 표시할 한자 1글자 (스킬의 han)
+function playSkillFX(char, han){
+  try{
+    const fx = document.createElement('div');
+    fx.className = 'skill-fx fx-' + (char||'qibo');
+    let particles = '';
+    for(let i=0; i<24; i++){
+      const ang = (Math.PI * 2 * i) / 24;
+      const r = 40 + Math.random() * 30;
+      const dx = Math.cos(ang) * r;
+      const dy = Math.sin(ang) * r;
+      const delay = Math.random() * 0.2;
+      particles += `<span style="left:50%;top:50%;--dx:${dx}px;--dy:${dy}px;animation-delay:${delay}s"></span>`;
+    }
+    fx.innerHTML = `
+      <div class="skill-fx-particles">${particles}</div>
+      <div class="skill-fx-han">${esc(han||'神')}</div>
+    `;
+    document.body.appendChild(fx);
+    setTimeout(() => { try{ fx.remove(); }catch(_){} }, 1700);
+  }catch(_){}
+}
+
 // 게임 로그 추가
 async function appendCardLog(roomId, room, msg){
   try{
@@ -6762,9 +6922,26 @@ async function renderCardResult(roomId, room, me, opp){
       if(outcome === 'win'){ S.qi += bet * 2; }
       else if(outcome === 'draw'){ S.qi += bet; }
       // loss 는 추가 없음 (이미 베팅 차감됨)
+      // v8.7 F5: 카드 對決 별도 전적 기록 (5지선다 battleHistory 와 분리)
+      S.cardBattleHistory = S.cardBattleHistory || [];
+      S.cardBattleHistory.unshift({
+        ts: Date.now(),
+        win: outcome === 'win',
+        draw: outcome === 'draw',
+        forfeit: res.by === 'forfeit' || res.by === 'inactivity',
+        bet,
+        deltaQi: outcome==='win' ? bet : (outcome==='loss' ? -bet : 0),
+        opponentName: opp.name,
+        opponentChar: opp.character,
+        opponentSyn: opp.syndromeChosen || null,
+        mySyn: me.syndromeChosen || null,
+        by: res.by || 'unknown',
+        attackedFormula: res.attackedFormula || null
+      });
+      if(S.cardBattleHistory.length > 20) S.cardBattleHistory = S.cardBattleHistory.slice(0, 20);
       saveState();
       await FB.put(`card_battles/${roomId}/_settled/${S.userId}`, true);
-      // record 갱신
+      // record 갱신 (5지선다와 통합 W/L — 기존 동작 유지)
       if(FB && S.userId){
         const rec = (await FB.get(`stats/records/${S.userId}`)) || {w:0, l:0, d:0};
         if(outcome === 'win') rec.w = (rec.w||0)+1;
@@ -6815,6 +6992,7 @@ function stopCardStreams(){
     if(_cardRoomStream){ _cardRoomStream.close(); _cardRoomStream=null; }
     if(_cardChooseTimer){ clearInterval(_cardChooseTimer); _cardChooseTimer=null; }
     if(_cardLoadWatchdog){ clearTimeout(_cardLoadWatchdog); _cardLoadWatchdog=null; }  // v8.5
+    if(_cardInactivityTimer){ clearTimeout(_cardInactivityTimer); _cardInactivityTimer=null; }  // v8.7
   }catch(_){}
 }
 

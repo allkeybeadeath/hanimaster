@@ -1121,6 +1121,52 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
   padding:6px 8px;border-radius:6px;font-size:12px;color:var(--zhusha-d);margin-bottom:8px
 }
 
+/* ─── v8.7 F2: 神급 스킬 시각 효과 ───────────────────────────────────── */
+/* 화면 전체에 1.5초 풀스크린 오버레이 → 스킬마다 다른 색·문자·애니메이션 */
+.skill-fx{
+  position:fixed; inset:0; z-index:9999; pointer-events:none;
+  display:flex; align-items:center; justify-content:center;
+  background:radial-gradient(circle, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0) 70%);
+  animation: skill-fx-fade 1.5s ease-out forwards;
+}
+.skill-fx-han{
+  font-family:var(--font-display); font-size:140px; font-weight:700;
+  text-shadow:0 0 30px currentColor, 0 0 60px currentColor;
+  animation: skill-fx-han 1.5s cubic-bezier(.2,1.4,.4,1) forwards;
+}
+.skill-fx-particles{
+  position:absolute; inset:0; pointer-events:none; overflow:hidden;
+}
+.skill-fx-particles span{
+  position:absolute; width:6px; height:6px; border-radius:50%;
+  background:currentColor; box-shadow:0 0 8px currentColor;
+  animation: skill-fx-particle 1.4s ease-out forwards;
+}
+@keyframes skill-fx-fade{
+  0%{opacity:0} 12%{opacity:1} 70%{opacity:1} 100%{opacity:0}
+}
+@keyframes skill-fx-han{
+  0%{opacity:0; transform:scale(.3) rotate(-15deg)}
+  35%{opacity:1; transform:scale(1.15) rotate(2deg)}
+  55%{transform:scale(1) rotate(0)}
+  100%{opacity:0; transform:scale(1.05) translateY(-8px)}
+}
+@keyframes skill-fx-particle{
+  0%{opacity:0; transform:translate(0,0) scale(0)}
+  20%{opacity:1; transform:translate(var(--dx,30px), var(--dy,-30px)) scale(1)}
+  100%{opacity:0; transform:translate(calc(var(--dx,30px)*4), calc(var(--dy,-30px)*4)) scale(.2)}
+}
+/* 스킬별 색 */
+.skill-fx.fx-huangdi  { color:#F8C547 }   /* 黃帝 — 황금 */
+.skill-fx.fx-shennong { color:#7CA85F }   /* 神農 — 청록 (본초) */
+.skill-fx.fx-fuxi     { color:#6B7FB8 }   /* 伏羲 — 청남 (卦象) */
+.skill-fx.fx-nvwa     { color:#D88BB0 }   /* 女媧 — 연홍 (補天) */
+.skill-fx.fx-qibo     { color:#9C3030 }   /* 岐伯 — 朱砂 (雷公問難) */
+
+@media (max-width:480px){
+  .skill-fx-han{ font-size:96px }
+}
+
 @media (max-width:480px){
   .cb-herb-card{width:54px;min-height:72px}
   .cb-herb-han{font-size:14px}

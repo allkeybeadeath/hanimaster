@@ -1,234 +1,118 @@
 # v8 — 2026-05 패치 모음 (CIM Lab)
 
-> v7 → v8.1 → v8.2 → v8.3 → v8.4 → v8.5 → v8.6. 6회 누적 패치를 통합 정리.
-> v8 의 주제는 **멀티 對決 안정화** (큐·매칭·진입·정산 race 제거)와
-> **관리자 도구 보강** (PWA 내장 진단·청소·원격 wipe).
-> v8.6 에서 critical 정산 무결성 위반(양측 win) 픽스 + fetch 무한 hang 픽스.
+> v7 → v8.1 → v8.2 → v8.3 → v8.4 → v8.5 → v8.6 → v8.7. 7회 누적.
+> 상세 v8.5 까지는 별도 commit 메시지. 본 문서는 v8.6 + v8.7 중심.
 
----
+## v8.7 — 2026.05.17t (현재)
 
-## ⓪ v8.6 — 2026.05.17r (현재)
+이번 세션 작업: **inactivity watchdog + 4개 기능 일괄**.
 
-### A. critical 정산 픽스 — 5지선다 양측 win 버그
+### A. 카드 對決 inactivity watchdog (60초)
 
-사용자 신고: **75초 기다리면 두 사용자 모두 승리 처리**.
+이전 세션에서 시도하다 함수 정의 미완으로 v8.6 회귀를 유발했던 항목. 완전 구현:
 
-근본 원인: `showResult(r, forfeit=true)` 의 정산 조건이 `forfeit && !opp.done`
-으로 한쪽만 검사. **양측 모두 미완료(timeout 도달) 시 각 클라이언트는 자기
-입장에서 상대를 forfeit 로 인식 → 양쪽 다 win 정산 → 氣 부풀림 (제로섬 깨짐).**
+- `lastActionAt` 이 갱신 안 된 채 60초 경과 시 자동 정산
+- **책임 클라이언트** = "현재 턴이 자기가 아닌 쪽" — 즉 상대가 응답 없는 상태에서 자기가 forfeit 트리거. 자기 턴이면서 무액션은 자기 의도이므로 트리거 안 함 (게임이론적 격합)
+- 멱등성: `status='done'` transition 직전 fresh GET 으로 다른 클라이언트가 먼저 처리했는지 확인
+- 결과 화면에서 `by:'inactivity'` 로 표시. 통계 카드에서 "상대 잠수" 로 ko 라벨링
 
-픽스: forfeit 시 양측 `done` 상태와 `score` 를 모두 검사하는 4분기 로직.
+### B. F4 — 본초 한자↔한글 토글
 
-```js
-// v8.6 forfeit 정합 로직
-if(forfeit){
-  if(meDone && !oppDone){       /* 정상 forfeit */    win }
-  else if(!meDone && oppDone){  /* 내가 forfeit */    lose }
-  else if(!meDone && !oppDone){ /* 양측 미완료 */     score 비교 → 동점은 draw 환불 }
-  else {                         /* 양측 완료 */       score 비교 (안전망) }
-}
-```
+- `S.herbLang` (`'han'` | `'ko'`) 필드 활용
+- `renderHerbCardHTML` 에서 주 표시·보조 표시 자리 바꿈
+- 카드 對決 보드 헤더에 작은 토글 버튼 (`漢→韓` ↔ `韓→漢`)
+- 클릭 시 `toggleHerbLang()` 호출 → 상태 저장 + 즉시 리렌더
 
-검증 (Monte Carlo 6 케이스): 모든 시나리오에서 양측 ΔΣ=0 (영합 게임 유지).
+### C. F5 — 카드 對決 별도 전적 통계
 
-| 케이스 | A 결과 | B 결과 | ΔΣ |
-|---|---|---|---|
-| 양측 미완료 동점 (신고 케이스) | draw | draw | 0 (이전: +2·bet 부풀림) |
-| 양측 미완료 A 우세 | win | lose | 0 |
-| 양측 미완료 B 우세 | lose | win | 0 |
-| A 완료 B 미완료 | win | lose | 0 |
-| B 완료 A 미완료 | lose | win | 0 |
-| 양측 완료 동점 | draw | draw | 0 |
+- 정산 시 `S.cardBattleHistory` 에 1 항목 추가 (`ts`, `win`, `draw`, `forfeit`, `bet`, `deltaQi`, `opponentName`, `opponentSyn`, `mySyn`, `by`, `attackedFormula`)
+- 명예의 전당 (hall) 에 별도 카드 — "최근 카드 對決" 섹션
+- 종료 사유 ko 라벨: 전탕 一致 · 부전승 · 상대 잠수 · 무승부
+- 하단 요약: `W勝 L敗 D和 · forfeit N회`
+- W/L/D 기존 `stats/records` 는 카드+5지선다 통합 유지
 
-### B. fetch 무한 hang 픽스 — `FB.get`/`FB.put`/`FB.putRetry` 5초 timeout
+### D. F1 — 神農 召草 자동완성
 
-근본 원인: 모든 `fetch()` 호출에 timeout 없음. 응답이 안 오는 네트워크 환경
-(좀비 연결, 셀룰러 음영 등) 에서 `await fetch(...)` 가 무한 hang →
-v8.5 의 재시도/watchdog 도 의미 없음 (한 번의 호출이 끝나지 않으므로).
+- `<input list="cb-summon-list">` + `<datalist>` 로 덱 본초 한자명 자동완성
+- datalist 항목 표기: `人蔘 (인삼)` 형식 — 한글 검색으로 한자 자동 선택 가능
+- 핸들러: 한글 입력도 `HERBS.ko` 매핑으로 한자 변환 (`v` 가 한자 미포함이면 ko 검색)
 
-픽스: 모든 GET/PUT 에 `AbortController` + 5초 timeout. 초과 시 throw → catch → null/false 반환 → 재시도 루프 정상 진행.
+### E. F2 — 神급 스킬 5종 시각 효과
 
-```js
-get: async (path, timeoutMs) => {
-  const ctl = new AbortController();
-  const tm = setTimeout(() => ctl.abort(), timeoutMs || 5000);
-  try{
-    const r = await fetch(`${base}/${path}.json`, {signal: ctl.signal});
-    clearTimeout(tm);
-    return r.ok ? await r.json() : null;
-  }catch(_){ clearTimeout(tm); return null; }
-}
-```
+- 풀스크린 1.5초 오버레이 — 한자 1글자 (스케일·회전 cubic-bezier) + 24 입자 방사형 발사 + 색 별 발광
+- 캐릭터별 색 톤:
+  - 黃帝 欺 → `#F8C547` (황금)
+  - 神農 草 → `#7CA85F` (청록·본초)
+  - 伏羲 卦 → `#6B7FB8` (청남·卦象)
+  - 女媧 化 → `#D88BB0` (연홍·補天)
+  - 岐伯 問 → `#9C3030` (朱砂)
+- 모바일 `(<480px)` 한자 크기 자동 축소 (`140px → 96px`)
+- 5개 스킬 핸들러 모두에 `playSkillFX(char, han)` 후크
 
-### C. 결과 대기 시간 단축 — 75초 → 25초
-
-사용자 지적 "오지선다 배틀 판정 대기 기간이 너무 김" 반영:
-- `POLL_MS` 1.5초 → 0.8초
-- `MAX_TRIES` 50 → 31  ⇒  총 대기 75초 → **25초**
-- 추가: `_resultStream = FB.subscribe(...)` 로 양측 `done` 즉시 감지
-  (폴링 대기 안 함, SSE 가 먼저 잡으면 `_resultShown` 가드로 폴링 중지)
-
-### D. 카드 對決 watchdog 8초 → 4초
-
-진입 watchdog 단축. FB.get 5초 timeout 과의 race 는 의도된 동작
-(watchdog 가 먼저 발화해도 사용자가 「수동 패치 시도」로 재시도 가능).
-
-### E. 변경 파일
+### 변경 파일
 
 | 파일 | 변경 |
 |---|---|
-| `app.js` | `FB.get/put/putRetry` AbortController 5초 timeout · `showResult` forfeit 4분기 정산 · 결과 대기 25초 + SSE 즉감 (이미 적용) · 카드 watchdog 4초 |
-| `sw.js`  | 캐시키 `v8-5-2026-05` → `v8-6-2026-05` |
-| `CHANGELOG_v8.md` | v8.6 섹션 prepend |
+| `app.js` | inactivity watchdog 구현 · `renderHerbCardHTML` 토글 · `toggleHerbLang` · `cardBattleHistory` 정산·hall 카드 · 召草 datalist + 한글→한자 매핑 · `playSkillFX` 함수 + 5개 스킬 후크 |
+| `index.html` | 神급 스킬 시각 효과 CSS (`@keyframes skill-fx-*`, `.skill-fx`, `.skill-fx-han`, `.skill-fx-particles`) |
+| `sw.js` | 캐시키 `v8-6-2026-05` → `v8-7-2026-05` |
+| `CHANGELOG_v8.md` | v8.7 섹션 추가 |
 
 ---
 
-## ① v8.5 — 2026.05.17p
+## v8.6 — 2026.05.17s
 
-### A. critical 버그 픽스 — 카드 對決 "한 명 무한 로딩"
+### 회귀 픽스 + 결과 대기 안정화
 
-v8 카드 對決의 가장 큰 결함. 양측 매칭 후 한 명은 게임에 진입하지만 다른 한 명은
-"로딩…" 화면에서 멈추는 현상. 다음 4개 root cause 를 모두 제거:
+- **`FB.get/put/putRetry`** 에 AbortController 5초 timeout. `fetch` 무한 hang 차단 — v8.5 의 재시도/watchdog 가 작동하려면 fetch 자체가 끝나야 함.
+- **5지선다 결과 대기** 1.5s × 50회 (75초) → 0.8s × 31회 (25초) + SSE 콜백으로 양측 done 즉시 감지.
+- **5지선다 forfeit 정산 무결성** — 양측 모두 미응답 timeout 시 양쪽 화면이 각자 상대를 forfeit 처리하여 양쪽 다 win 처리되던 氣 부풀림 버그. 이제 score 비교로 outcome 결정.
+- 카드 對決 watchdog 8s → 4s 단축 (빠른 진단).
+- **회귀 픽스**: `armCardInactivityWatchdog` 호출만 들어가 있고 정의가 없어 `ReferenceError` 로 양측 진입 안 되던 버그. 호출 제거 (v8.7 에서 정의 포함 재구현).
 
-| # | 위치 | 원인 | 픽스 |
-|---|---|---|---|
-| 1 | `FB.subscribe.emit()` | `try{}catch(_){}` 가 렌더 콜백의 예외를 silent swallow → "로딩…" 가 영원히 남음 | `console.error` + `_lastSubError` 전역으로 노출. watchdog 가 진단 표시 |
-| 2 | `startCardBattle` | SSE 에만 의존. 초기 콜백이 안 오거나 늦으면 화면 갱신 안 됨 | `await FB.get(card_battles/{roomId})` 4회 재시도 (350·700·1050·1400ms 백오프) 로 즉시 첫 렌더 보장. 그 후 SSE subscribe |
-| 3 | `STALE_BATTLE_QUICK_MS` | v8.4 의 **1분** 임계. SSE 지연 환경에서 정상 매칭도 stale 처리됨 | **5분** (5지선다 `STALE_ROOM_MS` 와 통일) |
-| 4 | (없음) | watchdog 부재. 8초 이상 로딩되면 사용자가 끊을 방법 없음 | 8초 watchdog — 진단 + 「수동 패치 시도」/「포기(방 폐쇄)」 버튼 |
+---
 
-5지선다 對決도 같은 패턴이라 사용자 지적대로 risk 존재. `startBattle` 의
-`await FB.get` 도 **1회 → 4회 재시도** 로 격상 (네트워크 일시 장애에 강함).
+## v8.5 — 2026.05.17p
 
-```js
-// v8.5 패턴 — 모든 배틀 진입에 적용
-let room = null;
-for(let i=0; i<4; i++){
-  try{ room = await FB.get(`battles/${roomId}`); }catch(_){ room = null; }
-  if(room) break;
-  await new Promise(r => setTimeout(r, 350 * (i+1)));
-}
-if(!room){ toast('방을 찾을 수 없음 (4회 재시도 실패)','red'); setTab('hall'); return; }
+- `FB.subscribe.emit()` silent error swallow 제거 (console.error + `_lastSubError`)
+- `startCardBattle` FB.get 4회 재시도 + 8초 watchdog (수동 패치/포기 버튼)
+- `startBattle` FB.get 1회 → 4회 재시도
+- `STALE_BATTLE_QUICK_MS` 1분 → 5분 (1분 stale 버그 회복)
+- 첫 시작 캐릭터 神급 + 이순재 제외 45명 풀 랜덤
+- `S.character` 기본값 `null` (기존 사용자 보존)
+- `S.cardBattleHistory`, `S.herbLang` 스키마 추가 (v8.7 에서 사용)
+
+---
+
+## v8.1~v8.4
+
+- v8.4: 카드 큐 10s keep-alive · 5지선다 15s keep-alive · 자기 stale entry 정리 · 큐 카운트 UI · 수동 재등록
+- v8.3: 원격 wipe (`/system/wipeAt` → 단말 1회 자동 청소)
+- v8.2: PWA 내장 관리자 패널 (`#admin` hash 또는 헤더 5회 연타)
+- v8.1: Firebase 응답 본문 노출 (Permission denied 등 식별)
+
+---
+
+## 검증
+
+- `node --check app.js` 통과
+- `playSkillFX` 호출 5회 (5개 神급 스킬 모두 후크 적용)
+- `armCardInactivityWatchdog` 정의 + 호출 1쌍 매칭
+- v8.7 직접 코드 grep:
+
+```
+playSkillFX( 6회 (정의 1 + 호출 5)
+armCardInactivityWatchdog 2회 (정의 + 호출)
+toggleHerbLang 2회 (정의 + 버튼 inline)
+cardBattleHistory 4회 (init + push + slice + hall 렌더)
 ```
 
-### B. 첫 시작 캐릭터 — 神급·이순재 제외 랜덤
-
-기존: 모든 신규 사용자가 기본 캐릭터 `qibo` (岐伯, 神급) 로 시작 → 모든
-사용자가 카드 對決에서 「雷公問難」스킬을 보유. 의도와 무관한 균질화.
-
-v8.5: `S.character` 기본값을 `null` 로 두고, `loadState()` 에서 神급 5인
-(黃帝·神農·伏羲·女媧·岐伯) + 이순재 (시트콤 외래 캐릭터) 를 제외한
-**45명 풀** 에서 랜덤 부여. 기존 사용자는 영향 없음 (localStorage 에 이미
-character 가 있으면 그 값을 유지).
-
-```js
-// loadState (v8.5)
-if(!S.character){
-  const pool = PHYSICIANS.filter(p => p && p.id && p.cat !== 'divine' && p.id !== 'leesoonjae');
-  S.character = pool[Math.floor(Math.random() * pool.length)].id;
-}
-```
-
-검증: PHYSICIANS 51명 → 5명 divine 제외 → 1명 leesoonjae 제외 → 풀 **45명**.
-
-### C. 누적 필드 보강 (v8.6+ 준비)
-
-다음 세션에서 구현 예정인 기능을 위해 `S` 스키마에 빈 필드 미리 추가:
-
-- `S.cardBattleHistory: []` — 카드 對決 전적 (5지선다와 분리 통계용)
-- `S.herbLang: 'han'` — 본초 카드 표시 언어 토글 (한자/한글)
-
-코드 사용처는 없음 — 다음 세션의 기능 구현 진입점.
-
-### D. 변경 파일
-
-| 파일 | 변경 |
-|---|---|
-| `app.js` | FB.subscribe.emit() 에러 표시 · startCardBattle 재시도+watchdog · startBattle 재시도 · STALE 5분 통일 · stopCardStreams watchdog 정리 · S 스키마 (character null, cardBattleHistory, herbLang) · loadState 캐릭터 랜덤 |
-| `sw.js`  | 캐시키 `v8-4-2026-05` → `v8-5-2026-05` |
-| `CHANGELOG_v8.md` | 신규 — v8.1~v8.5 통합 |
-
 ---
 
-## ② v8.4 — 카드 큐 keep-alive + 큐 stale 정리
+## 다음 세션 후보
 
-- 카드 對決 큐에 **10초 keep-alive** (`setInterval` 으로 `lobby_card/{userId}/ts` 갱신) → 45초 fresh 윈도우 안전 유지
-- 5지선다 큐에 **15초 keep-alive**
-- 큐 입장 직후 자기 stale entry 강제 정리 (이전 세션 잔재 제거)
-- 큐 카운트 UI 항상 표시
-- 수동 「큐 재등록」 버튼 — stuck 상태 회복
-- `STALE_BATTLE_QUICK_MS = 60s` 도입 — 이는 v8.5 에서 5분으로 되돌림
-
----
-
-## ③ v8.3 — 원격 wipe 메커니즘
-
-`/system/wipeAt` 노드에 timestamp 게시 → 각 사용자가 다음 PWA 로드 시
-자동 청소 + 새로 시작. 1회만 적용 (wipeAck.v1 로 ack 관리). 모든 사용자가
-v8.3+ 를 로드한 상태여야 작동.
-
-```json
-// Firebase 콘솔에서 수동 게시
-{"system": {"wipeAt": 1716345600000}}
-```
-
-청소 대상: localStorage 의 `bangje.*` 와 `quiz.*` prefix.
-
----
-
-## ④ v8.2 — PWA 내장 관리자 패널
-
-기존: 별도 `admin-reset.html` 페이지. CORS/sandbox 제약 존재.
-v8.2: PWA 같은 origin 안에 `#admin` hash 또는 헤더 朱砂 도장 5회 연타로 진입.
-6개 Firebase 노드 (lobby·battles·lobby_card·card_battles·presence·lobby_idle)
-를 각각 보거나 일괄 청소. v8.3 의 원격 wipe 버튼 포함.
-
----
-
-## ⑤ v8.1 — Firebase 에러 응답 본문 노출
-
-큐 등록·방 생성 실패 시 단순 "HTTP 403" 만 보였던 것을 "권한 거부 (보안 룰)"
-처럼 사용자 친화 메시지로 변환. `FB.diag()` 가 응답 본문 (예: "Permission denied")
-까지 표시 → 보안 룰 누락 진단이 가능.
-
----
-
-## ⑥ 검증
-
-- `node --check app.js` 통과 (구문 오류 없음)
-- PHYSICIANS 풀 검증: 45명 (51 − 5 divine − 1 leesoonjae)
-- 카드 對決 진입 회귀 테스트 (수동):
-  - 정상 매칭 → 첫 렌더 < 1초 (FB.get 즉시 응답 시)
-  - SSE 차단 환경 (테스트로 onerror 강제) → polling 폴백 + watchdog 진단 표시
-  - 방 데이터 없음 → "방 찾을 수 없음" 즉시 hall 복귀 (4회 재시도 후)
-- 신규 사용자 시뮬레이션 (localStorage 청소 후 로드): 45명 풀에서 랜덤 캐릭터 부여 확인
-
----
-
-## ⑦ 알려진 제한 / 다음 세션 후보
-
-v7 CHANGELOG §⑨ 의 v8+ 후보 중 **이번 세션 미적용**:
-
-- [ ] 神農 召草 자동완성 (`HERBS` 검색 datalist)
-- [ ] 神급 스킬 5종 시각 효과 (펄스·파티클)
-- [ ] 카드 對決 전용 BGM (戰鼓 + 본초 그라인딩 SFX) — `bgm.scheduleCardDuel` 스켈레톤만 폴백 처리됨
-- [ ] 본초 카드 한자↔한글 토글 (`S.herbLang` 필드만 추가, UI 미적용)
-- [ ] 카드 對決 W/L 별도 통계 (`S.cardBattleHistory` 필드만 추가, 정산·통계 탭 미적용)
-- [ ] 旁観 모드 (관전자 진행 중 게임 보기)
-- [ ] 카드 對決 친선전 (방 코드 공유)
-
-위 7개 항목은 다음 세션에서 일괄 진행 예정. v8.5 는 critical bug fix 와
-첫 시작 캐릭터 정책 변경만으로 범위를 한정.
-
----
-
-## ⑧ 인수 체크리스트
-
-- [x] `npm install` 불필요 (CDN 또는 vanilla)
-- [x] Firebase 보안 룰 변경 없음 (v7 룰 그대로)
-- [x] localStorage 마이그레이션 불필요 (기존 사용자 character 유지)
-- [ ] 카드 對決 2인 동시 테스트 — 한 명도 "로딩…" 멈추지 않는지 확인
-- [ ] 신규 사용자 (수동 localStorage 청소 후) — 캐릭터가 神급/이순재가 아닌지 확인
-- [ ] 모든 사용자 v8.5 캐시 키로 갱신 확인 (서비스 워커 자동 갱신)
+- F3: 카드 對決 전용 BGM/SFX (戰鼓 + 본초 그라인딩) — `scheduleCardDuel` 미구현, 현재 `bgm.startBattle` 폴백
+- F6: 旁観 모드 (관전자 진행 중 게임 보기) — 신규 구조
+- F7: 카드 對決 친선전 (방 코드 공유) — `friend_card_battles` 노드
 
 작성: 2026-05-17 · CIM Lab
