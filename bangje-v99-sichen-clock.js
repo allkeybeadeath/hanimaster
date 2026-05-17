@@ -153,8 +153,9 @@ function _renderChip(){
   `;
 }
 
+// idempotent inject — chip 이 이미 있고 텍스트가 같으면 DOM mutation 일으키지 않음
+let _lastChipHtml = '';
 function _inject(){
-  // 大廳(home) 의 hello-card 옆에 inject
   const hello = document.getElementById('hello-card');
   if(!hello) return;
   let chip = document.getElementById('v99-sichen-chip');
@@ -164,10 +165,13 @@ function _inject(){
     chip.className = 'v99-sichen-chip';
     chip.setAttribute('title', '시진(時辰) 클릭 — 12지지 + 子午流注');
     chip.addEventListener('click', openTable);
-    // hello-card 위(앞)에 작은 줄로 배치
     hello.parentNode.insertBefore(chip, hello);
   }
-  chip.innerHTML = _renderChip();
+  const next = _renderChip();
+  if(next !== _lastChipHtml){
+    chip.innerHTML = next;
+    _lastChipHtml = next;
+  }
 }
 
 function openTable(){
@@ -230,7 +234,22 @@ function _observe(){
   const v = document.getElementById('view');
   if(!v){ setTimeout(_observe, 400); return; }
   _injectCSS();
-  const obs = new MutationObserver(() => { try{ _inject(); }catch(_){} });
+  // 자기 자신 mutation 무시: 우리 chip 내부의 변경은 skip + 강한 throttle
+  let _t = null;
+  const obs = new MutationObserver(records => {
+    // 모든 mutation 이 우리 chip 내부에서 발생한 것이면 skip
+    let external = false;
+    for(const r of records){
+      const tgt = r.target;
+      if(!tgt) continue;
+      if(tgt.id === 'v99-sichen-chip') continue;
+      if(tgt.closest && tgt.closest('#v99-sichen-chip')) continue;
+      external = true; break;
+    }
+    if(!external) return;
+    if(_t) return;
+    _t = setTimeout(() => { _t = null; try{ _inject(); }catch(_){} }, 300);
+  });
   obs.observe(v, { childList: true, subtree: true });
   setTimeout(() => { _inject(); _schedule(); }, 300);
 }

@@ -646,9 +646,26 @@ function _observe(){
       console.warn(`[V99Body] 데이터 검증: ${tot}혈 (예상 ${TOTAL_POINTS}). POINT_NAMES 누락/오타.`);
     }
   }catch(_){}
-  // 뷰 변경 시 메달리온 재부착·unlock 검사
-  const obs = new MutationObserver(() => {
-    try{ _checkAndUnlock(); _injectMedallion(); }catch(_){}
+  // 뷰 변경 시 메달리온 재부착·unlock 검사 — 자기 자신 mutation 무시 + throttle
+  let _t = null;
+  const obs = new MutationObserver(records => {
+    // 우리가 추가한 v99-medal-essence 변경만 있으면 skip
+    let external = false;
+    for(const r of records){
+      const tgt = r.target;
+      if(!tgt) continue;
+      if(tgt.classList && tgt.classList.contains('v99-medal-essence')) continue;
+      if(tgt.closest && tgt.closest('.v99-medal-essence')) continue;
+      // 자기 모달 내부 변경도 skip
+      if(tgt.closest && tgt.closest('#v99-body-wrap')) continue;
+      external = true; break;
+    }
+    if(!external) return;
+    if(_t) return;
+    _t = setTimeout(() => {
+      _t = null;
+      try{ _checkAndUnlock(); _injectMedallion(); }catch(_){}
+    }, 500);
   });
   obs.observe(document.body, { childList: true, subtree: true });
   // 초기 시도
