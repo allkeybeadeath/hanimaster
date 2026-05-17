@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v5';                    // ★ 로비 표시용 (2026-05) — v5: 四象 진영
-const APP_BUILD   = '2026.05.17d';
+const APP_VERSION = 'v6';                    // ★ 로비 표시용 (2026-05) — v6: 처방 드릴 + TTS Google fallback + 매칭 stale 정리
+const APP_BUILD   = '2026.05.17e';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -538,15 +538,16 @@ function refreshHeader(){
 // ───── 6. BGM (Web Audio 五聲音階 古琴) ─────────────────────────────────────
 
 // ─── v4: TTS (인트로 한문 낭독) ──────────────────────────────────────────
+//   v6 개편: SpeechSynthesis(zh voice 보유 시) → Google Translate TTS (audio element fallback)
+//            → silent (둘 다 실패 시). 사용자가 별도 설치 없이 중국어 들림.
 //   A안 — zh-CN voice 통일. 양측이 거의 동시에 발화하도록 speak() 동시 호출.
-//   브라우저별 직렬화 정책 차이로 완전 동시는 보장 안 되나, voice 두 개를 다르게
-//   잡으면 일부 브라우저(Firefox·일부 Chrome)는 병렬 재생. 직렬화되더라도 두
-//   utterance가 차례로 즉시 재생되므로 인트로 9초 안에 양측 모두 들림.
 //   이순재(id='leesoonjae') 는 명시적으로 무음 (시트콤 외래 캐릭터).
 const tts = {
-  voicesReady: null,   // Promise<SpeechSynthesisVoice[]>
-  zhVoices: [],        // zh-CN voice 캐시
+  voicesReady: null,
+  zhVoices: [],
   supported: typeof window !== 'undefined' && 'speechSynthesis' in window,
+  warnedNoZh: false,        // v6: 중국어 voice 없음 안내 1회만
+  _activeAudios: [],        // v6: Google fallback 활성 Audio 인스턴스 추적 (cancel용)
 
   init(){
     if(!this.supported) return Promise.resolve([]);
@@ -555,7 +556,6 @@ const tts = {
       const grab = () => {
         const list = speechSynthesis.getVoices() || [];
         this.zhVoices = list.filter(v => /^zh(-|_)?(CN|HK|TW)/i.test(v.lang) || /Chinese|普通话|國語|Mandarin|Cantonese/i.test(v.name||''));
-        // zh-CN 우선 정렬
         this.zhVoices.sort((a,b) => {
           const A = /zh.CN/i.test(a.lang) ? 0 : (/zh.TW/i.test(a.lang) ? 1 : 2);
           const B = /zh.CN/i.test(b.lang) ? 0 : (/zh.TW/i.test(b.lang) ? 1 : 2);
@@ -566,55 +566,91 @@ const tts = {
       const cur = speechSynthesis.getVoices();
       if(cur && cur.length){ grab(); return; }
       speechSynthesis.addEventListener('voiceschanged', grab, { once:true });
-      // 1.5초 폴백
       setTimeout(grab, 1500);
     });
     return this.voicesReady;
   },
 
-  // 단일 한문 발화. opts.voiceIndex 로 voice 다르게 (양측 구분)
-  speak(text, opts){
-    if(!this.supported || !text) return null;
-    opts = opts || {};
+  // v6: Google Translate 비공식 TTS endpoint — audio element 로 재생 (CORS 우회)
+  //   100자 제한이 있으나 인트로 명언은 보통 12자 내외.
+  //   네트워크 / 차단 시 자동 silent. 인트로 진행은 안 막음.
+  _googleTTSUrl(text){
+    const t = String(text||'').slice(0, 90);   // 안전 마진
+    return `https://translate.google.com/translate_tts?ie=UTF-8&tl=zh-CN&client=tw-ob&q=${encodeURIComponent(t)}`;
+  },
+  _playGoogleTTS(text, opts){
+    if(!text) return null;
     try{
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'zh-CN';
-      u.rate = opts.rate != null ? opts.rate : 0.85;
-      u.pitch = opts.pitch != null ? opts.pitch : 1.0;
-      u.volume = opts.volume != null ? opts.volume : 0.95;
-      if(this.zhVoices.length){
+      const a = new Audio(this._googleTTSUrl(text));
+      a.volume = opts && opts.volume != null ? opts.volume : 0.95;
+      a.playbackRate = opts && opts.rate != null ? Math.max(0.5, Math.min(2.0, opts.rate)) : 0.85;
+      this._activeAudios.push(a);
+      a.addEventListener('ended', () => {
+        this._activeAudios = this._activeAudios.filter(x => x !== a);
+      });
+      a.addEventListener('error', () => {
+        this._activeAudios = this._activeAudios.filter(x => x !== a);
+      });
+      // play() 는 Promise 반환. 차단 환경에서는 catch 로 silent 처리.
+      const p = a.play();
+      if(p && typeof p.catch === 'function') p.catch(() => {});
+      return a;
+    } catch(e){ return null; }
+  },
+
+  // 단일 한문 발화. 분기: zh voice 있으면 SpeechSynthesis, 없으면 Google TTS
+  speak(text, opts){
+    if(!text) return null;
+    opts = opts || {};
+    // v6: zh voice 보유 → 기존 SpeechSynthesis
+    if(this.supported && this.zhVoices.length){
+      try{
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = 'zh-CN';
+        u.rate = opts.rate != null ? opts.rate : 0.85;
+        u.pitch = opts.pitch != null ? opts.pitch : 1.0;
+        u.volume = opts.volume != null ? opts.volume : 0.95;
         const idx = ((opts.voiceIndex|0) % this.zhVoices.length + this.zhVoices.length) % this.zhVoices.length;
         u.voice = this.zhVoices[idx];
-      }
-      speechSynthesis.speak(u);
-      return u;
-    } catch(e){ return null; }
+        speechSynthesis.speak(u);
+        return u;
+      } catch(e){ /* fall through */ }
+    }
+    // v6: zh voice 없음 → Google Translate TTS fallback
+    if(!this.warnedNoZh){
+      this.warnedNoZh = true;
+      // 첫 1회만 toast — 게임 진행 안 막음
+      try{ if(typeof toast === 'function') toast('중국어 voice 없음 → 인터넷 TTS 사용 (네트워크 필요)','gold'); }catch(_){}
+    }
+    return this._playGoogleTTS(text, opts);
   },
 
   // 양측 동시 발화. me/opp 두 quote 객체. id가 leesoonjae 면 그 측은 무음.
   speakIntroPair(meId, meText, oppId, oppText){
-    if(!this.supported) return Promise.resolve();
-    return this.init().then(() => {
+    return Promise.resolve(this.init()).then(() => {
       this.cancel();
-      // 양측 다 무음이면 그냥 종료
       const meSilent = (meId === 'leesoonjae');
       const oppSilent = (oppId === 'leesoonjae');
       if(meSilent && oppSilent) return;
-      // 약간 다른 pitch/voice 로 구별 — 동시 재생 시 청각적 분리
+      // v6: Google TTS fallback 시 동시 재생은 audio element 가 알아서 병렬 처리
       if(!oppSilent && oppText){
         this.speak(oppText, { rate: 0.82, pitch: 0.92, voiceIndex: 0 });
       }
       if(!meSilent && meText){
-        // 두 번째 utterance — 다른 voice index 또는 다른 pitch
-        // speak() 거의 동시 호출. Firefox 는 병렬, Chrome 은 순차이지만 끊김 없이 이어 재생.
-        this.speak(meText, { rate: 0.82, pitch: 1.08, voiceIndex: this.zhVoices.length > 1 ? 1 : 0 });
+        // 약간의 지연 — Google TTS audio 가 동시 시작하면 한쪽이 묻힐 수 있어 80ms 분리
+        const delayMs = this.zhVoices.length ? 0 : 80;
+        setTimeout(() => {
+          this.speak(meText, { rate: 0.82, pitch: 1.08, voiceIndex: this.zhVoices.length > 1 ? 1 : 0 });
+        }, delayMs);
       }
     });
   },
 
   cancel(){
-    if(!this.supported) return;
-    try{ speechSynthesis.cancel(); } catch(_){}
+    if(this.supported){ try{ speechSynthesis.cancel(); } catch(_){} }
+    // v6: Google TTS audio 도 정지
+    this._activeAudios.forEach(a => { try{ a.pause(); a.currentTime = 0; }catch(_){} });
+    this._activeAudios = [];
   }
 };
 if(typeof window !== 'undefined') window.tts = tts;
@@ -1994,10 +2030,18 @@ async function joinBattleQueue(level){
   }, 1000);
 
   // 5) /battles SSE — 상대가 방 생성자였을 때 즉시 감지
+  // v6 수정: stale 방 필터링 (createdAt 5분 이상 지난 방 또는 status='done' 인 방 무시)
+  //         그리고 자기 stale entry는 매칭 화면 진입 직후 1회 정리
+  const STALE_ROOM_MS = 5 * 60 * 1000;
   const onBattlesSnap = (battles) => {
     if(!active || matching) return;
     if(!battles) return;
-    const myRoom = Object.values(battles).find(r => r && r.players && r.players[S.userId] && r.status !== 'done');
+    const now = Date.now();
+    const myRoom = Object.values(battles).find(r =>
+      r && r.players && r.players[S.userId]
+      && r.status !== 'done'
+      && (now - (r.createdAt||0)) < STALE_ROOM_MS    // v6: 5분 이상 지난 방 무시
+    );
     if(myRoom){
       matching = true;
       const status = $('#queue-status'); if(status) status.textContent = '방 발견 — 입장 중…';
@@ -2009,6 +2053,24 @@ async function joinBattleQueue(level){
     }
   };
   _battlesStream = FB.subscribe('battles', onBattlesSnap);
+
+  // v6: 입장 직후 자기의 stale 방 정리 (지난 5분+ 방에 자기가 player 로 남아있으면 status='done' 마킹)
+  // 이러면 다음 onBattlesSnap 에서 잘못 매칭 안 됨
+  (async () => {
+    try{
+      const allBattles = await FB.get('battles');
+      if(allBattles){
+        const now2 = Date.now();
+        for(const [rid, r] of Object.entries(allBattles)){
+          if(r && r.players && r.players[S.userId] && r.status !== 'done'
+             && (now2 - (r.createdAt||0)) >= STALE_ROOM_MS){
+            // stale — 명시적으로 done 마킹
+            try{ await FB.put(`battles/${rid}/status`, 'done'); }catch(_){}
+          }
+        }
+      }
+    }catch(_){}
+  })();
 
   // 6) /lobby/{level} SSE — 상대 발견 시 사전순 작은 쪽이 방 생성
   const onLobbySnap = async (all) => {
@@ -2977,7 +3039,10 @@ async function renderPersonalAnalysis(det){
                 ${bar(r.n)}
                 <div class="pa-row-meta">${r.n}/${r.total} = <b>${(r.rate*100).toFixed(0)}%</b></div>
               </div>
-              ${fmeta ? `<button class="pa-row-act" data-act="formula-deep" data-formula="${esc(r.fo)}" title="이 처방 심층 분석">
+              ${fmeta ? `<button class="pa-row-act" data-act="formula-drill" data-formula-id="${esc(fmeta.id)}" title="이 처방 드릴 (반복 학습)">
+                <span class="han">練</span>
+              </button>
+              <button class="pa-row-act" data-act="formula-deep" data-formula="${esc(r.fo)}" title="이 처방 심층 분석">
                 <span class="han">析</span>
               </button>` : ''}
             </div>`;
@@ -2999,8 +3064,14 @@ async function renderPersonalAnalysis(det){
       <div class="pa-section pa-actions">
         <div class="pa-section-title"><span class="han">策</span> 처방안 — 약점 보강</div>
         <div class="pa-action-grid">
+          ${topFormulas[0] && formulaByHan.get(topFormulas[0].fo) ? `
+            <button class="pa-action-btn primary" data-act="formula-drill-lg" data-formula-id="${esc(formulaByHan.get(topFormulas[0].fo).id)}">
+              <div class="pa-action-han">練</div>
+              <div class="pa-action-ttl">${esc(topFormulas[0].fo)} 드릴</div>
+              <div class="pa-action-sub">본초·君臣·作用·主治 반복</div>
+            </button>` : ''}
           ${topChapters[0] ? `
-            <button class="pa-action-btn primary" data-act="chapter-auto-lg" data-chapter="${esc(topChapters[0].ch)}">
+            <button class="pa-action-btn" data-act="chapter-auto-lg" data-chapter="${esc(topChapters[0].ch)}">
               <div class="pa-action-han">出</div>
               <div class="pa-action-ttl">${esc(topChapters[0].ch)} 자동 출제</div>
               <div class="pa-action-sub">${DIFFICULTY_META[weakestDiffN].han}·${DIFFICULTY_META[weakestDiffN].ko} 10문</div>
@@ -3010,12 +3081,6 @@ async function renderPersonalAnalysis(det){
               <div class="pa-action-han">析</div>
               <div class="pa-action-ttl">${esc(topFormulas[0].fo)} 심층</div>
               <div class="pa-action-sub">구성·君臣佐使·기출</div>
-            </button>` : ''}
-          ${topChapters[0] ? `
-            <button class="pa-action-btn" data-act="quiz-tab" data-chapter="${esc(topChapters[0].ch)}">
-              <div class="pa-action-han">問</div>
-              <div class="pa-action-ttl">학습 탭 (${esc(topChapters[0].ch)} 필터)</div>
-              <div class="pa-action-sub">난이도·풀 직접 선택</div>
             </button>` : ''}
           <button class="pa-action-btn" data-act="wrong-mode">
             <div class="pa-action-han">錯</div>
@@ -3077,24 +3142,43 @@ async function renderPersonalAnalysis(det){
       const act = el.dataset.act;
       if(act === 'chapter-auto' || act === 'chapter-auto-lg'){
         const ch = el.dataset.chapter;
-        // chapter 메타데이터가 question에는 '8장-補氣' 형식이지만 처방의 chapter는 '8장-補氣-補氣' 형식.
-        // generateQuizQuestions의 opts.chapter는 formula의 chapter 와 매칭하므로 startsWith 패턴은 사용 못함.
-        // 대신 wrongExams 에서 해당 章의 formula 들을 추출하여 formulaIds 옵션으로 전달.
+        // v6 수정: wrongExams 의존이 아닌 FORMULAS 전체에서 章 매칭으로 처방 풀 구성.
+        // 章 약점은 표시되었는데 처방 데이터 부족으로 출제 못 하는 버그를 해소.
+        // formula.chapter 는 '8장 補益劑·補氣' 형식, 표시 章은 split('-')[0] 후 .trim() 한 값.
+        // 그러나 chapter 는 '·'·' ' 구분자가 섞여있어 split('-')[0] 결과는 그냥 '8장 補益劑' 같은 형식.
+        // 안전 매칭: formula.chapter 시작 일치 (대분류) + 백업으로 wrongExams 추출.
         const formIds = [];
-        wrongExams.forEach(e => {
-          const eCh = (e.chapter||'').split('-')[0];
-          if(eCh === ch){
-            const f = formulaByHan.get(e.formula);
-            if(f && !formIds.includes(f.id)) formIds.push(f.id);
+        formulas.forEach(f => {
+          const fCh = (f.chapter||'').split('-')[0].split('·')[0].trim();
+          const target = ch.split('-')[0].split('·')[0].trim();
+          if(fCh === target || (f.chapter||'').startsWith(target)){
+            if(!formIds.includes(f.id)) formIds.push(f.id);
           }
         });
-        if(!formIds.length){ toast('해당 章의 처방 데이터가 부족합니다','gold'); return; }
-        toast(`${ch} 자동 출제 시작 — ${DIFFICULTY_META[weakestDiffN].ko} 10문`,'gold');
+        // 백업: 매칭 0건이면 wrongExams 에서 추출
+        if(!formIds.length){
+          wrongExams.forEach(e => {
+            const eCh = (e.chapter||'').split('-')[0];
+            if(eCh === ch){
+              const f = formulaByHan.get(e.formula);
+              if(f && !formIds.includes(f.id)) formIds.push(f.id);
+            }
+          });
+        }
+        if(!formIds.length){
+          toast(`${ch} — FORMULAS 에서 매칭되는 처방이 없습니다`,'gold');
+          return;
+        }
+        toast(`${ch} 자동 출제 시작 — ${DIFFICULTY_META[weakestDiffN].ko} 10문 (${formIds.length}개 처방 풀)`,'gold');
         startQuizSession('auto', weakestDiffN, 10, {formulaIds: formIds});
       } else if(act === 'formula-deep' || act === 'formula-deep-lg'){
         const formulaName = el.dataset.formula;
         if(typeof openFormulaDeep === 'function') openFormulaDeep(formulaName);
         else toast('처방 심층 모달을 열 수 없습니다');
+      } else if(act === 'formula-drill' || act === 'formula-drill-lg'){
+        // v6: 처방 드릴 — 약점 처방 1개를 다각도로 반복 학습
+        const fid = el.dataset.formulaId;
+        startFormulaDrill(fid);
       } else if(act === 'quiz-tab'){
         // 章 필터를 quiz.sel.v1 에 박고 quiz 탭 이동.
         // 학습 탭은 chapter 필터를 UI로 노출하지 않으므로 일회성 사전 설정 후 toast 안내.
@@ -3128,10 +3212,11 @@ async function renderWrongsRank(det){
   const list = Object.entries(wrongs)
     .map(([qid, count]) => ({qid, count: Number(count)||0}))
     .filter(x => x.count > 0)
+    .filter(x => !x.qid.startsWith('auto:'))   // v6: 자동 생성 문제 제외 (재현 불가)
     .sort((a,b) => b.count - a.count)
     .slice(0, 30);
 
-  // 카테고리: 기출(past_*) / 자동생성(auto:*) / 기타
+  // 카테고리: 기출(past_*) / 기타 (auto:* 는 위에서 필터링됨)
   const annotate = (it) => {
     if(it.qid.startsWith('past_')){
       const ex = byId.get(it.qid);
@@ -3158,7 +3243,7 @@ async function renderWrongsRank(det){
     <div class="card fade-in">
       <div class="card-title"><span class="han">難題</span> 가장 많이 틀린 문제 TOP ${rows.length}</div>
       <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:8px">
-        기출 ${npast}건 · 자동생성 ${nauto}건 · 클릭 시 상세
+        기출 ${npast}건 · 자동생성 제외 · 클릭 시 상세
       </div>
       <div class="wrong-list" id="wrong-list">
         ${rows.map((r, i) => {
@@ -4248,6 +4333,315 @@ window.startQuizSession = function(mode, diff, count, opts){
   }
   show();
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v6: 처방 드릴 모드 — 한 처방을 여러 각도로 반복 학습
+// ═══════════════════════════════════════════════════════════════════════════
+// 사용자의 약점 처방 1개를 받아 그 처방의 모든 학습 포인트를 카드 단위로 생성:
+//   - 본초 빈칸 (composition 의 각 본초마다 1장)
+//   - 君臣佐使 매칭 (monarch_minister 의 각 본초마다 1장)
+//   - 主作用 (action)
+//   - 主治 키워드 (indication 에서 핵심 어구)
+//   - 加減 변환 (keyPoints 에서 +/-/→ 패턴 자동 추출)
+//   - 出典 (source)
+// 객관식 4지선다 + 즉시 정답 공개. 점수 추적은 하되 결과는 보조적
+// (드릴의 목적은 마스터, 점수 X).
+
+function generateDrillCards(formula){
+  if(!formula) return [];
+  const herbs = (typeof HERBS !== 'undefined') ? HERBS : [];
+  const allFormulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
+  const herbByHan = new Map();
+  herbs.forEach(h => herbByHan.set(h.han, h));
+  // 본초 매칭 헬퍼 — 炙甘草·甘草(炙) → 甘草 정규화
+  const normHerb = (s) => String(s||'').replace(/\([^)]*\)/g, '').replace(/^炙/,'');
+
+  const cards = [];
+  const shuffle = (arr) => arr.map(x => ({x, r: Math.random()})).sort((a,b)=>a.r-b.r).map(o=>o.x);
+  const pick = (arr, n, exclude) => {
+    const ex = new Set(exclude || []);
+    return shuffle(arr.filter(x => !ex.has(x))).slice(0, n);
+  };
+
+  // ── 1. 본초 빈칸 (각 본초당 1장) ─────────────────────────────
+  const comp = formula.composition || [];
+  comp.forEach((herb, i) => {
+    const base = normHerb(herb);
+    // 같은 章의 다른 처방에서 본초 후보 추출 (난이도↑)
+    const sameChapterHerbs = new Set();
+    allFormulas.forEach(f => {
+      if(f.chapter === formula.chapter && f.id !== formula.id){
+        (f.composition || []).forEach(c => sameChapterHerbs.add(normHerb(c)));
+      }
+    });
+    sameChapterHerbs.delete(base);
+    comp.forEach(c => sameChapterHerbs.delete(normHerb(c)));
+    let pool = Array.from(sameChapterHerbs);
+    if(pool.length < 3){
+      // 부족하면 HERBS 전체에서 보충
+      const allHerbs = herbs.map(h => h.han).filter(h => !comp.includes(h) && h !== base);
+      pool = pool.concat(shuffle(allHerbs).slice(0, 6));
+    }
+    const distractors = pick(pool, 3);
+    const blanked = comp.map((c, j) => j === i ? '___' : c).join(' · ');
+    const herbMeta = herbByHan.get(base);
+    cards.push({
+      type: 'blank_herb',
+      label: '構成',
+      prompt: `${formula.han} 構成 中 빈칸의 본초는?`,
+      detail: blanked,
+      answer: herb,
+      options: shuffle([herb, ...distractors]),
+      explain: herbMeta ? `<b>${herb}</b> (${herbMeta.ko}) — ${herbMeta.sm}<br>${herbMeta.meaning}` : herb,
+    });
+  });
+
+  // ── 2. 君臣佐使 매칭 ─────────────────────────────────────
+  if(formula.monarch_minister){
+    const roles = ['君','臣','佐','使'];
+    Object.entries(formula.monarch_minister).forEach(([role, hs]) => {
+      (hs || []).forEach(h => {
+        cards.push({
+          type: 'monarch',
+          label: '君臣佐使',
+          prompt: `${formula.han} 에서 <b style="color:var(--zhusha-d)">${h}</b> 은(는) 어떤 役인가?`,
+          detail: '',
+          answer: role,
+          options: roles.slice(),
+          explain: `${formula.han} 君臣佐使<br>` + Object.entries(formula.monarch_minister)
+            .map(([r, hh]) => `<b>${r}</b>: ${(hh||[]).join('·')}`).join(' / '),
+        });
+      });
+    });
+  }
+
+  // ── 3. 主作用 ─────────────────────────────────────────
+  if(formula.action){
+    // 같은 章의 다른 처방 작용을 distractor 로
+    const otherActions = allFormulas
+      .filter(f => f.id !== formula.id && f.action)
+      .map(f => f.action);
+    cards.push({
+      type: 'action',
+      label: '作用',
+      prompt: `${formula.han} 의 主作用은?`,
+      detail: '',
+      answer: formula.action,
+      options: shuffle([formula.action, ...pick(otherActions, 3)]),
+      explain: `<b>${formula.han}</b> = ${formula.action}<br><span style="color:var(--gutong);font-size:11px">主治: ${formula.indication || ''}</span>`,
+    });
+  }
+
+  // ── 4. 主治 — indication 분석 (첫 「證」 또는 첫 구두점까지) ─────
+  if(formula.indication){
+    const firstSeg = formula.indication.split(/[.。·,，]/)[0].trim();
+    if(firstSeg && firstSeg.length < 25){
+      const others = allFormulas
+        .filter(f => f.id !== formula.id && f.indication)
+        .map(f => f.indication.split(/[.。·,，]/)[0].trim())
+        .filter(s => s && s.length < 25 && s !== firstSeg);
+      cards.push({
+        type: 'indication',
+        label: '主治',
+        prompt: `${formula.han} 의 主治 证候는?`,
+        detail: '',
+        answer: firstSeg,
+        options: shuffle([firstSeg, ...pick(others, 3)]),
+        explain: `<b>${formula.han}</b>: ${formula.indication}`,
+      });
+    }
+  }
+
+  // ── 5. 加減 변환 (keyPoints 에서 +/-/→ 패턴 추출) ─────────────
+  (formula.keyPoints || []).forEach(kp => {
+    // 패턴: "+X·Y → ZZ방" 또는 "−X + Y = 본방"
+    const m = kp.match(/([+−\-][^\s,，]+(?:[·,，][^\s,，]+)*)\s*[→=]\s*([^\s,，()]+)/);
+    if(m){
+      const change = m[1];
+      const target = m[2];
+      // distractor: 같은 章의 다른 처방명
+      const otherNames = allFormulas
+        .filter(f => f.id !== formula.id && f.chapter === formula.chapter)
+        .map(f => f.han)
+        .filter(n => n !== target);
+      if(otherNames.length >= 3){
+        cards.push({
+          type: 'addition',
+          label: '加減',
+          prompt: `${formula.han} ${change} → ?`,
+          detail: '',
+          answer: target,
+          options: shuffle([target, ...pick(otherNames, 3)]),
+          explain: kp,
+        });
+      }
+    }
+  });
+
+  // ── 6. 出典 ─────────────────────────────────────────────
+  if(formula.source){
+    const cleanSource = formula.source.split('—')[0].trim();
+    const otherSources = Array.from(new Set(
+      allFormulas
+        .filter(f => f.id !== formula.id && f.source)
+        .map(f => f.source.split('—')[0].trim())
+        .filter(s => s && s !== cleanSource)
+    ));
+    if(otherSources.length >= 3){
+      cards.push({
+        type: 'source',
+        label: '出典',
+        prompt: `${formula.han} 의 出典은?`,
+        detail: '',
+        answer: cleanSource,
+        options: shuffle([cleanSource, ...pick(otherSources, 3)]),
+        explain: formula.source,
+      });
+    }
+  }
+
+  return shuffle(cards);
+}
+
+// 처방 드릴 세션 — bgm 영향 없음. setTab('quiz') 아닌 직접 view 렌더
+function startFormulaDrill(formulaId){
+  const allFormulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
+  const formula = allFormulas.find(f => f.id === formulaId);
+  if(!formula){ toast('처방을 찾을 수 없습니다'); return; }
+  const cards = generateDrillCards(formula);
+  if(!cards.length){ toast('드릴 카드를 생성할 수 없습니다'); return; }
+
+  let cur = 0;
+  let correct = 0;
+  let answered = false;
+
+  const render = () => {
+    if(cur >= cards.length){
+      // 결과 화면
+      const pct = Math.round(correct / cards.length * 100);
+      const grade = pct === 100 ? '滿點' : pct >= 80 ? '熟達' : pct >= 60 ? '習得' : pct >= 40 ? '練習中' : '初學';
+      const gradeColor = pct >= 80 ? 'var(--feicui)' : pct >= 60 ? 'var(--huang)' : pct >= 40 ? 'var(--gutong)' : 'var(--zhusha)';
+      view.innerHTML = `
+        <h2 class="view-title fade-in"><span class="han">了</span>드릴 완료</h2>
+        <div class="card imperial fade-in" style="text-align:center;padding:24px">
+          <div class="han" style="font-size:36px;color:var(--zhusha-d);letter-spacing:.1em;margin-bottom:8px">${esc(formula.han)}</div>
+          <div style="font-size:12px;color:var(--mo-l);margin-bottom:18px">${esc(formula.ko)} · ${esc(formula.chapter)}</div>
+          <div style="font-family:var(--font-display);font-size:54px;color:${gradeColor};margin:6px 0">${grade}</div>
+          <div style="font-size:22px;color:var(--mo);margin:6px 0"><b>${correct}</b> / ${cards.length}<span style="color:var(--gutong);font-size:14px"> (${pct}%)</span></div>
+          <div style="margin-top:18px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+            <button class="btn btn-gold" onclick="startFormulaDrill('${esc(formulaId)}')">다시 드릴 (재셔플)</button>
+            <button class="btn btn-o" onclick="openFormulaDeep('${esc(formula.han)}')">${esc(formula.han)} 심층</button>
+            <button class="btn btn-o" onclick="setTab('stats')">사적 분석</button>
+          </div>
+        </div>`;
+      // 마스터 표시
+      if(pct === 100){
+        S.masteredFormulas = S.masteredFormulas || [];
+        if(!S.masteredFormulas.includes(formulaId)){
+          S.masteredFormulas.push(formulaId);
+          saveState();
+          toast(`${formula.han} 滿點 마스터 등록`,'gold');
+        }
+      }
+      return;
+    }
+
+    const c = cards[cur];
+    answered = false;
+    const progressPct = Math.round((cur / cards.length) * 100);
+    view.innerHTML = `
+      <h2 class="view-title fade-in">
+        <span class="han">練</span>${esc(formula.han)} 드릴
+        <span style="float:right;font-size:12px;color:var(--gutong);font-family:var(--font-body)">${cur+1} / ${cards.length}</span>
+      </h2>
+      <div class="drill-progress"><div class="drill-progress-fill" style="width:${progressPct}%"></div></div>
+      <div class="card imperial fade-in" style="margin-top:10px">
+        <div class="drill-label"><span class="han">${esc(c.label)}</span></div>
+        <div class="drill-prompt">${c.prompt}</div>
+        ${c.detail ? `<div class="drill-detail">${esc(c.detail)}</div>` : ''}
+        <div class="drill-opts" id="drill-opts">
+          ${c.options.map((o, i) => `
+            <button class="drill-opt" data-idx="${i}" data-val="${esc(o)}">
+              <span class="drill-opt-num">${i+1}</span>
+              <span class="drill-opt-val">${esc(o)}</span>
+            </button>`).join('')}
+        </div>
+        <div class="drill-feedback" id="drill-feedback" style="display:none"></div>
+        <div style="margin-top:12px;text-align:center">
+          <button class="btn btn-o btn-sm" onclick="setTab('stats')">중단 (사적 분석으로)</button>
+        </div>
+      </div>
+    `;
+
+    // 드릴 스타일 한 번 주입
+    if(!document.getElementById('drill-style')){
+      const st = document.createElement('style');
+      st.id = 'drill-style';
+      st.textContent = `
+        .drill-progress{height:4px;background:var(--mi-d);border-radius:2px;overflow:hidden;margin-top:-4px}
+        .drill-progress-fill{height:100%;background:linear-gradient(90deg,var(--feicui),var(--huang));transition:width .3s ease}
+        .drill-label{font-family:var(--font-display);font-size:11px;color:var(--zhusha);letter-spacing:.1em;margin-bottom:6px}
+        .drill-label .han{background:var(--zhusha);color:#FFF;padding:2px 8px;border-radius:3px;margin-right:6px}
+        .drill-prompt{font-size:14.5px;color:var(--mo);line-height:1.6;margin-bottom:10px}
+        .drill-prompt b{color:var(--zhusha-d)}
+        .drill-detail{font-family:var(--font-han);font-size:16px;color:var(--zhusha-d);background:var(--mi-w);padding:10px 14px;border-radius:6px;border-left:3px solid var(--huang);margin-bottom:14px;letter-spacing:.05em;text-align:center}
+        .drill-opts{display:flex;flex-direction:column;gap:6px}
+        .drill-opt{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid var(--mi-d);background:#FFF;border-radius:6px;cursor:pointer;font-family:var(--font-body);font-size:13.5px;color:var(--mo);text-align:left;transition:all .12s}
+        .drill-opt:hover:not(.disabled){border-color:var(--huang);background:var(--mi-w)}
+        .drill-opt.disabled{cursor:default;opacity:.85}
+        .drill-opt.correct{border-color:var(--feicui);background:#E8F5E8}
+        .drill-opt.wrong{border-color:var(--zhusha);background:#FDE8E8}
+        .drill-opt-num{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--mi-d);color:var(--gutong);font-family:var(--font-display);font-size:12px;font-weight:bold;flex:0 0 24px}
+        .drill-opt.correct .drill-opt-num{background:var(--feicui);color:#FFF}
+        .drill-opt.wrong .drill-opt-num{background:var(--zhusha);color:#FFF}
+        .drill-opt-val{flex:1;font-family:var(--font-han);font-size:14px;color:var(--mo)}
+        .drill-feedback{margin-top:12px;padding:10px 12px;border-radius:6px;font-size:12.5px;line-height:1.6}
+        .drill-feedback.ok{background:#E8F5E8;color:#1A5A3A;border-left:3px solid var(--feicui)}
+        .drill-feedback.no{background:#FDE8E8;color:#7A2424;border-left:3px solid var(--zhusha)}
+        .drill-feedback b{color:inherit}
+        .drill-next-btn{display:block;width:100%;margin-top:10px;padding:11px;font-family:var(--font-display);font-size:14px;letter-spacing:.1em}
+      `;
+      document.head.appendChild(st);
+    }
+
+    // 옵션 클릭 핸들러
+    $$('#drill-opts .drill-opt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if(answered) return;
+        answered = true;
+        const picked = btn.dataset.val;
+        const ok = picked === c.answer;
+        if(ok) correct++;
+        // 모든 옵션 disabled, 정/오답 색칠
+        $$('#drill-opts .drill-opt').forEach(b => {
+          b.classList.add('disabled');
+          if(b.dataset.val === c.answer) b.classList.add('correct');
+          else if(b === btn && !ok) b.classList.add('wrong');
+        });
+        // 피드백
+        const fb = $('#drill-feedback');
+        fb.style.display = '';
+        fb.className = 'drill-feedback ' + (ok ? 'ok' : 'no');
+        fb.innerHTML = `
+          <div style="font-family:var(--font-display);font-size:13px;margin-bottom:4px">
+            ${ok ? '<span class="han" style="color:var(--feicui)">正</span> 정답!' : '<span class="han" style="color:var(--zhusha)">誤</span> 오답'}
+            ${!ok ? `<span style="margin-left:6px;color:inherit;font-size:11.5px">정답: <b>${esc(c.answer)}</b></span>` : ''}
+          </div>
+          <div>${c.explain || ''}</div>
+        `;
+        // 다음 버튼
+        const nextBtn = document.createElement('button');
+        nextBtn.className = 'btn drill-next-btn';
+        nextBtn.textContent = cur + 1 >= cards.length ? '결과 보기 →' : `다음 (${cur+2} / ${cards.length}) →`;
+        nextBtn.onclick = () => { cur++; render(); };
+        fb.parentNode.appendChild(nextBtn);
+      });
+    });
+  };
+
+  render();
+}
+if(typeof window !== 'undefined') window.startFormulaDrill = startFormulaDrill;
 
 // ─── 난이도별 자동 문제 생성 ─────────────────────────────────────────────
 // difficulty 1: 작용·구성 단순 매칭 (빈출 위주)
