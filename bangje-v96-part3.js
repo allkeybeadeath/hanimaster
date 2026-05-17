@@ -17,7 +17,7 @@ const toast_ = (m,k) => { if(typeof toast === 'function') toast(m,k); };
 const AI_TURN_DELAY = [1800, 2400, 1500];
 const DECOCT_CONFIDENCE = 0.62;
 
-let _bridgeSavedFB = null;
+let _origMethods = null;   // 패치 이전 원본 메소드 저장
 let _roomRef = null;
 let _roomId = null;
 let _aiUid = null;
@@ -140,7 +140,7 @@ function stop(){
 }
 
 function _notify(){
-  // v9.6: 마이크로태스크 배칭 — 부분 상태 emit 방지
+  // v9.6: 마이크로태스크 배칭 — 부분 상태 emit 방지 + 경로별 정확한 데이터 전달
   if(!_roomRef || !_roomId) return;
   _roomRef.lastActionAt = now();
   if(_notifyPending) return;
@@ -148,16 +148,37 @@ function _notify(){
   Promise.resolve().then(() => {
     _notifyPending = false;
     if(!_roomRef || !_roomId) return;
-    const subs = _bridgeSubs[_roomId] || [];
-    subs.forEach(cb => { try{ cb(_roomRef); }catch(_){} });
+    const rid = _roomId;
+    const subs = _bridgeSubs[rid] || [];
+    for(const s of subs){
+      try{
+        if(s.path === `card_battles/${rid}`){
+          s.cb(_roomRef);
+        } else {
+          const rel = s.path.slice(`card_battles/${rid}/`.length);
+          const segs = rel.split('/').filter(Boolean);
+          let cur = _roomRef;
+          for(const k of segs){ if(cur==null) break; cur = cur[k]; }
+          s.cb(cur);
+        }
+      }catch(_){}
+    }
   });
 }
 let _notifyPending = false;
 
 function _setupBridge(){
-  if(_bridgeSavedFB) return;
-  _bridgeSavedFB = window.FB;
-  const orig = _bridgeSavedFB;
+  if(_origMethods) return;
+  const F = window.FB;
+  if(!F){ console.warn('[V96CardAI] window.FB 없음'); return; }
+  // app.js 의 `const FB` 와 `window.FB` 는 동일 객체. 메소드 자체를 패치하면
+  // 양쪽 참조 모두 패치된 메소드를 사용. 객체 reference 교체는 const 캡쳐를
+  // 우회 못함 → 핵심 픽스.
+  _origMethods = {
+    get: F.get, put: F.put, putRetry: F.putRetry,
+    del: F.del, push: F.push, subscribe: F.subscribe,
+  };
+  const orig = _origMethods;
   const rid = _roomId;
   const isMine = (path) => path && (path === `card_battles/${rid}` || path.startsWith(`card_battles/${rid}/`));
 
@@ -177,81 +198,99 @@ function _setupBridge(){
     for(const k of segs){ if(cur==null) return null; cur = cur[k]; }
     return cur;
   }
-  const wrap = {
-    base: orig ? orig.base : null,
-    get: async (path) => {
-      if(isMine(path)){
-        if(path === `card_battles/${rid}`) return _roomRef;
-        const rel = path.slice(`card_battles/${rid}/`.length);
-        return pathGet(_roomRef, rel);
-      }
-      return orig ? orig.get(path) : null;
-    },
-    put: async (path, val) => {
-      if(isMine(path)){
-        if(path === `card_battles/${rid}`){ _roomRef = Object.assign(_roomRef||{}, val); }
-        else {
-          const rel = path.slice(`card_battles/${rid}/`.length);
-          pathSet(_roomRef, rel, val);
-        }
-        _afterMutation(path, val);
-        _notify();
-        return true;
-      }
-      return orig ? orig.put(path, val) : true;
-    },
-    putRetry: async function(p,v){ return this.put(p,v); },
-    del: async (path) => {
-      if(isMine(path)){
-        if(path === `card_battles/${rid}`){ _roomRef = null; return true; }
-        const rel = path.slice(`card_battles/${rid}/`.length);
-        const segs = rel.split('/').filter(Boolean);
-        let cur = _roomRef;
-        for(let i=0;i<segs.length-1;i++){ cur = cur && cur[segs[i]]; }
-        if(cur) delete cur[segs[segs.length-1]];
-        _notify();
-        return true;
-      }
-      return orig ? orig.del(path) : true;
-    },
-    push: async (path, val) => {
-      if(isMine(path)){
-        const id = 'lc_'+Math.random().toString(36).slice(2,8);
-        if(!_roomRef) return false;
-        const rel = path.slice(`card_battles/${rid}/`.length);
-        const segs = rel.split('/').filter(Boolean);
-        let cur = _roomRef;
-        for(const k of segs){
-          if(typeof cur[k] !== 'object' || cur[k] === null) cur[k] = {};
-          cur = cur[k];
-        }
-        cur[id] = val;
-        _notify();
-        return id;
-      }
-      return orig ? orig.push(path, val) : null;
-    },
-    subscribe: (path, cb, opts) => {
-      if(isMine(path)){
-        (_bridgeSubs[rid] = _bridgeSubs[rid] || []).push(cb);
-        setTimeout(() => { try{ cb(_roomRef); }catch(_){} }, 30);
-        return { close: () => {
-          const arr = _bridgeSubs[rid] || [];
-          const ix = arr.indexOf(cb);
-          if(ix >= 0) arr.splice(ix, 1);
-        }};
-      }
-      return orig && orig.subscribe ? orig.subscribe(path, cb, opts) : { close: ()=>{} };
-    },
+
+  F.get = async function(path, ...rest){
+    if(isMine(path)){
+      if(path === `card_battles/${rid}`) return _roomRef;
+      const rel = path.slice(`card_battles/${rid}/`.length);
+      return pathGet(_roomRef, rel);
+    }
+    return orig.get.call(F, path, ...rest);
   };
-  window.FB = wrap;
+  F.put = async function(path, val, ...rest){
+    if(isMine(path)){
+      if(path === `card_battles/${rid}`){ _roomRef = Object.assign(_roomRef||{}, val); }
+      else {
+        const rel = path.slice(`card_battles/${rid}/`.length);
+        pathSet(_roomRef, rel, val);
+      }
+      _afterMutation(path, val);
+      _notify();
+      return true;
+    }
+    return orig.put.call(F, path, val, ...rest);
+  };
+  F.putRetry = async function(path, val, opts){
+    if(isMine(path)){
+      const ok = await F.put(path, val);
+      return { ok, status: 200, retries: 0, message: '' };
+    }
+    return orig.putRetry.call(F, path, val, opts);
+  };
+  F.del = async function(path, ...rest){
+    if(isMine(path)){
+      if(path === `card_battles/${rid}`){ _roomRef = null; _notify(); return true; }
+      const rel = path.slice(`card_battles/${rid}/`.length);
+      const segs = rel.split('/').filter(Boolean);
+      let cur = _roomRef;
+      for(let i=0;i<segs.length-1;i++){ cur = cur && cur[segs[i]]; }
+      if(cur) delete cur[segs[segs.length-1]];
+      _notify();
+      return true;
+    }
+    return orig.del.call(F, path, ...rest);
+  };
+  F.push = async function(path, val, ...rest){
+    if(isMine(path)){
+      const id = 'lc_'+Math.random().toString(36).slice(2,8);
+      if(!_roomRef) return false;
+      const rel = path.slice(`card_battles/${rid}/`.length);
+      const segs = rel.split('/').filter(Boolean);
+      let cur = _roomRef;
+      for(const k of segs){
+        if(typeof cur[k] !== 'object' || cur[k] === null) cur[k] = {};
+        cur = cur[k];
+      }
+      cur[id] = val;
+      _notify();
+      return id;
+    }
+    return orig.push.call(F, path, val, ...rest);
+  };
+  F.subscribe = function(path, cb, opts){
+    if(isMine(path)){
+      (_bridgeSubs[rid] = _bridgeSubs[rid] || []).push({path, cb});
+      // 첫 emit — 해당 경로 데이터를 정확히 전달 (전체 룸 X)
+      setTimeout(() => {
+        try{
+          if(path === `card_battles/${rid}`) cb(_roomRef);
+          else {
+            const rel = path.slice(`card_battles/${rid}/`.length);
+            cb(pathGet(_roomRef, rel));
+          }
+        }catch(_){}
+      }, 30);
+      return { close: () => {
+        const arr = _bridgeSubs[rid] || [];
+        _bridgeSubs[rid] = arr.filter(s => s.cb !== cb);
+      }};
+    }
+    return orig.subscribe.call(F, path, cb, opts);
+  };
 }
 
 function _teardownBridge(){
-  if(_bridgeSavedFB){
-    window.FB = _bridgeSavedFB;
-    _bridgeSavedFB = null;
+  if(!_origMethods) return;
+  const F = window.FB;
+  if(F){
+    F.get = _origMethods.get;
+    F.put = _origMethods.put;
+    F.putRetry = _origMethods.putRetry;
+    F.del = _origMethods.del;
+    F.push = _origMethods.push;
+    F.subscribe = _origMethods.subscribe;
   }
+  _origMethods = null;
   for(const k of Object.keys(_bridgeSubs)) delete _bridgeSubs[k];
 }
 

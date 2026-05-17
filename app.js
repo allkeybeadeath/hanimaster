@@ -21,7 +21,7 @@
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
 const APP_VERSION = 'v9.6';                  // ★ 로비 표시용 (2026-05) — 채팅·presence상세·2시간의전사·AI 對決 (카드·큐브)
-const APP_BUILD   = '2026.05.18b';
+const APP_BUILD   = '2026.05.18c';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 

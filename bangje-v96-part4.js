@@ -17,7 +17,7 @@ const toast_ = (m,k) => { if(typeof toast === 'function') toast(m,k); };
 const FB_NODE = 'cube_rooms';
 
 let _started = false;
-let _saved = null;
+let _origMethods = null;
 let _room = null;
 let _subs = [];
 let _aiTimer = null;
@@ -147,14 +147,19 @@ function _selfStart(){
 }
 
 function _setupBridge(){
-  if(_saved) return;
-  _saved = window.FB;
-  const orig = _saved;
+  if(_origMethods) return;
+  const F = window.FB;
+  if(!F){ console.warn('[V96CubeAI] window.FB 없음'); return; }
+  _origMethods = {
+    get: F.get, put: F.put, putRetry: F.putRetry,
+    del: F.del, push: F.push, subscribe: F.subscribe,
+  };
+  const orig = _origMethods;
   const rid = _rid;
   const isMine = (p) => p && (
     p === `${FB_NODE}/${rid}` ||
     p.startsWith(`${FB_NODE}/${rid}/`) ||
-    p === FB_NODE   // BC 가 룸 리스트 조회할 때
+    p === FB_NODE
   );
   function pathSet(obj, path, val){
     const segs = path.split('/').filter(Boolean);
@@ -172,78 +177,110 @@ function _setupBridge(){
     for(const k of segs){ if(cur==null) return null; cur = cur[k]; }
     return cur;
   }
-  const wrap = {
-    base: orig ? orig.base : null,
-    get: async (path) => {
-      if(!isMine(path)) return orig ? orig.get(path) : null;
-      if(path === FB_NODE){ return _room ? { [rid]: _room } : {}; }
-      if(path === `${FB_NODE}/${rid}`) return _room;
-      const rel = path.slice(`${FB_NODE}/${rid}/`.length);
-      return pathGet(_room, rel);
-    },
-    put: async (path, val) => {
-      if(!isMine(path)) return orig ? orig.put(path, val) : true;
-      if(path === `${FB_NODE}/${rid}`){ _room = Object.assign(_room||{}, val); }
-      else {
-        const rel = path.slice(`${FB_NODE}/${rid}/`.length);
-        pathSet(_room, rel, val);
-      }
-      _afterMutation(path, val);
-      _emit();
-      return true;
-    },
-    putRetry: async function(p,v){ return this.put(p,v); },
-    del: async (path) => {
-      if(!isMine(path)) return orig ? orig.del(path) : true;
-      if(path === `${FB_NODE}/${rid}`){ _room = null; _emit(); return true; }
-      const rel = path.slice(`${FB_NODE}/${rid}/`.length);
-      const segs = rel.split('/').filter(Boolean);
-      let cur = _room;
-      for(let i=0;i<segs.length-1;i++){ cur = cur && cur[segs[i]]; }
-      if(cur) delete cur[segs[segs.length-1]];
-      _emit();
-      return true;
-    },
-    push: async (path, val) => {
-      if(!isMine(path)) return orig ? orig.push(path, val) : null;
-      const rel = path.slice(`${FB_NODE}/${rid}/`.length);
-      const segs = rel.split('/').filter(Boolean);
-      let cur = _room;
-      for(const k of segs){
-        if(typeof cur[k] !== 'object' || cur[k] === null) cur[k] = {};
-        cur = cur[k];
-      }
-      const id = 'lc_'+Math.random().toString(36).slice(2,8);
-      cur[id] = val;
-      _emit();
-      return id;
-    },
-    subscribe: (path, cb, opts) => {
-      if(!isMine(path)) return orig && orig.subscribe ? orig.subscribe(path, cb, opts) : { close:()=>{} };
-      _subs.push({ path, cb });
-      setTimeout(() => { try{ cb(_room); }catch(_){} }, 30);
-      return { close: () => { _subs = _subs.filter(s => s.cb !== cb); }};
-    },
+  F.get = async function(path, ...rest){
+    if(!isMine(path)) return orig.get.call(F, path, ...rest);
+    if(path === FB_NODE){ return _room ? { [rid]: _room } : {}; }
+    if(path === `${FB_NODE}/${rid}`) return _room;
+    const rel = path.slice(`${FB_NODE}/${rid}/`.length);
+    return pathGet(_room, rel);
   };
-  window.FB = wrap;
+  F.put = async function(path, val, ...rest){
+    if(!isMine(path)) return orig.put.call(F, path, val, ...rest);
+    if(path === `${FB_NODE}/${rid}`){ _room = Object.assign(_room||{}, val); }
+    else {
+      const rel = path.slice(`${FB_NODE}/${rid}/`.length);
+      pathSet(_room, rel, val);
+    }
+    _afterMutation(path, val);
+    _emit();
+    return true;
+  };
+  F.putRetry = async function(path, val, opts){
+    if(isMine(path)){
+      const ok = await F.put(path, val);
+      return { ok, status: 200, retries: 0, message: '' };
+    }
+    return orig.putRetry.call(F, path, val, opts);
+  };
+  F.del = async function(path, ...rest){
+    if(!isMine(path)) return orig.del.call(F, path, ...rest);
+    if(path === `${FB_NODE}/${rid}`){ _room = null; _emit(); return true; }
+    const rel = path.slice(`${FB_NODE}/${rid}/`.length);
+    const segs = rel.split('/').filter(Boolean);
+    let cur = _room;
+    for(let i=0;i<segs.length-1;i++){ cur = cur && cur[segs[i]]; }
+    if(cur) delete cur[segs[segs.length-1]];
+    _emit();
+    return true;
+  };
+  F.push = async function(path, val, ...rest){
+    if(!isMine(path)) return orig.push.call(F, path, val, ...rest);
+    const rel = path.slice(`${FB_NODE}/${rid}/`.length);
+    const segs = rel.split('/').filter(Boolean);
+    let cur = _room;
+    for(const k of segs){
+      if(typeof cur[k] !== 'object' || cur[k] === null) cur[k] = {};
+      cur = cur[k];
+    }
+    const id = 'lc_'+Math.random().toString(36).slice(2,8);
+    cur[id] = val;
+    _emit();
+    return id;
+  };
+  F.subscribe = function(path, cb, opts){
+    if(!isMine(path)) return orig.subscribe.call(F, path, cb, opts);
+    _subs.push({ path, cb });
+    setTimeout(() => {
+      try{
+        if(path === `${FB_NODE}/${rid}`) cb(_room);
+        else if(path === FB_NODE) cb(_room ? { [rid]: _room } : {});
+        else {
+          const rel = path.slice(`${FB_NODE}/${rid}/`.length);
+          cb(pathGet(_room, rel));
+        }
+      }catch(_){}
+    }, 30);
+    return { close: () => { _subs = _subs.filter(s => s.cb !== cb); }};
+  };
 }
 
 function _teardownBridge(){
-  if(_saved){ window.FB = _saved; _saved = null; }
+  if(!_origMethods) return;
+  const F = window.FB;
+  if(F){
+    F.get = _origMethods.get;
+    F.put = _origMethods.put;
+    F.putRetry = _origMethods.putRetry;
+    F.del = _origMethods.del;
+    F.push = _origMethods.push;
+    F.subscribe = _origMethods.subscribe;
+  }
+  _origMethods = null;
   _subs = [];
 }
 
 function _emit(){
-  // v9.6: 마이크로태스크 배칭 — startGame 등에서 Promise.all 로 여러 PUT 이 동시
-  //   발사될 때 부분 상태로 구독자 cb 가 호출되어 renderGame 이 잘못된 snap 으로
-  //   진입하는 것 방지. 동기 PUT 여러 건을 1회 emit 으로 합침.
+  // v9.6: 마이크로태스크 배칭 + 경로별 정확한 데이터 전달
   if(_emitPending) return;
   _emitPending = true;
   Promise.resolve().then(() => {
     _emitPending = false;
     if(!_room && _subs.length === 0) return;
+    const rid = _rid;
     for(const s of _subs){
-      try{ s.cb(_room); }catch(_){}
+      try{
+        if(s.path === `${FB_NODE}/${rid}`){
+          s.cb(_room);
+        } else if(s.path === FB_NODE){
+          s.cb(_room ? { [rid]: _room } : {});
+        } else {
+          const rel = s.path.slice(`${FB_NODE}/${rid}/`.length);
+          const segs = rel.split('/').filter(Boolean);
+          let cur = _room;
+          for(const k of segs){ if(cur==null) break; cur = cur[k]; }
+          s.cb(cur);
+        }
+      }catch(_){}
     }
   });
 }
