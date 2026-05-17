@@ -8,6 +8,14 @@
  *     못 만들면 1장 드로우.
  *   - 보드 확장 (보드 set 변형) 은 미구현 (난이도·휴리스틱 복잡). 단순화 OK.
  *   - 난이도 누적 점수 _formulationScore 로 추적 → renderResult 에서 가산.
+ *
+ * v9.7 픽스:
+ *   - _setupBridge() 가 boolean 반환 (성공/실패).
+ *   - FB 탐색 다중화: window.FB → globalThis.FB → 렉시컬 FB.
+ *   - 셋업 실패 시 start() 가 즉시 stop() → _started 가 stuck 되지 않음
+ *     ("이미 진행중" 무한 락아웃 + "방을 찾을 수 없습니다" 버그 해결).
+ *   - BC.enterRoom 후 BC.currentRoom() 으로 사후 검증.
+ *   - _patchedF 변수로 teardown 안정화.
  */
 (function(){
 'use strict';
@@ -18,6 +26,7 @@ const FB_NODE = 'cube_rooms';
 
 let _started = false;
 let _origMethods = null;
+let _patchedF = null;      // v9.7: setup 때 잡은 F reference
 let _room = null;
 let _subs = [];
 let _aiTimer = null;
@@ -79,12 +88,11 @@ async function start(numAi){
   };
   _aiUids.forEach(u => { _room._formulationScore[u] = 0; });
   _started = true;
-  _setupBridge();
-  if(!_origMethods){
-    // v9.6.4: bridge 설치 실패 시 즉시 정리 — _started 잔존 방지
-    toast_('AI bridge 설치 실패','red');
-    _started = false;
-    _room = null; _rid = null; _aiUids = [];
+  // v9.7: 브릿지 셋업이 실패하면 즉시 stop()
+  const bridgeOk = _setupBridge();
+  if(!bridgeOk){
+    toast_('AI 진입 실패: FB 어댑터 활성화 실패 (새로고침 권장)','red');
+    stop();
     return;
   }
   if(window.V96Activity) V96Activity.set('AI 방미큐브', `${1 + numAi}人 對局`);
@@ -100,6 +108,18 @@ async function start(numAi){
     console.error('BC.enterRoom failed', e);
     toast_('AI 룸 진입 실패','red'); stop(); return;
   }
+  // v9.7: 入室 후 BC.currentRoom() 이 _rid 와 일치하는지 검증.
+  //   enterRoom 은 f.get 실패 시 toast 만 띄우고 silent return 하므로,
+  //   브릿지가 잘 적용됐는지 사후 검증 → 불일치면 stop() 으로 정리.
+  try{
+    const cur = (typeof BC.currentRoom === 'function') ? BC.currentRoom() : null;
+    if(cur !== _rid){
+      console.warn('[V96CubeAI] enterRoom 결과 CUR_ROOM 불일치', {expected:_rid, actual:cur});
+      toast_('AI 룸 진입 검증 실패 — 새로고침 권장','red');
+      stop();
+      return;
+    }
+  }catch(_){}
 
   // 자동 시작 (1.5초 후)
   setTimeout(async () => {
@@ -155,11 +175,14 @@ function _selfStart(){
 
 function _setupBridge(){
   if(_origMethods) return true;
-  // v9.6.4 FIX: app.js 의 `const FB` 는 classic script global lexical binding 으로
-  //   `window.FB` 프로퍼티로는 노출되지 않음. bangje-cube.js 와 동일하게
-  //   `typeof FB !== 'undefined' && FB` 로 접근해야 함.
-  const F = (typeof FB !== 'undefined' && FB) || null;
-  if(!F){ console.warn('[V96CubeAI] FB 전역 없음 — bridge 설치 불가'); return false; }
+  // v9.7: FB 탐색 다중화 — window.FB → globalThis.FB → eval('FB')
+  let F = (typeof window !== 'undefined' && window.FB) || null;
+  if(!F && typeof globalThis !== 'undefined' && globalThis.FB) F = globalThis.FB;
+  if(!F){ try{ F = eval('typeof FB !== "undefined" ? FB : null'); }catch(_){} }
+  if(!F){
+    console.warn('[V96CubeAI] FB 노출 실패 — window.FB / globalThis.FB / lex FB 모두 부재');
+    return false;  // ← 호출자가 _started 정리 가능
+  }
   _origMethods = {
     get: F.get, put: F.put, putRetry: F.putRetry,
     del: F.del, push: F.push, subscribe: F.subscribe,
@@ -252,11 +275,14 @@ function _setupBridge(){
     }, 30);
     return { close: () => { _subs = _subs.filter(s => s.cb !== cb); }};
   };
+  _patchedF = F;  // v9.7
+  return true;
 }
 
 function _teardownBridge(){
   if(!_origMethods) return;
-  const F = (typeof FB !== 'undefined' && FB) || null;
+  // v9.7: setup 때 잡았던 F reference 우선 사용
+  const F = _patchedF || (typeof window !== 'undefined' && window.FB) || null;
   if(F){
     F.get = _origMethods.get;
     F.put = _origMethods.put;
@@ -266,6 +292,7 @@ function _teardownBridge(){
     F.subscribe = _origMethods.subscribe;
   }
   _origMethods = null;
+  _patchedF = null;
   _subs = [];
 }
 

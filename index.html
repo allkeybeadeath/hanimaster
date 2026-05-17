@@ -1393,6 +1393,10 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
 <script src="data-syndromes.js"></script>
 <script src="data-neijing.js"></script>
 
+<!-- v9.7 業績·시그니처 데이터 (app 보다 먼저 로드) -->
+<script src="data-achievements.js"></script>
+<script src="data-signatures.js"></script>
+
 <!-- v9.6 확장 모듈 (채팅 · presence상세 · 2시간의전사 · AI 대국) — bangje-cube/app 보다 먼저 로드 -->
 <script src="bangje-v96-part1.js"></script>
 <script src="bangje-v96-part2.js"></script>
@@ -1402,6 +1406,12 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
 
 <script src="bangje-cube.js"></script>
 <script src="app.js"></script>
+
+<!-- v9.7 業績 추적 + 시그니처 효과 + 프로필 UI (app 이후 로드, S/saveState/toast 의존) -->
+<script src="bangje-v97-signatures.js"></script>
+<script src="bangje-v97-achievements.js"></script>
+<script src="bangje-v97-profile.js"></script>
+<script src="bangje-v97-formuladict.js"></script>
 
 <!-- 서비스 워커 -->
 <script>

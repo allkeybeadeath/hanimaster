@@ -675,20 +675,19 @@ if(typeof window !== 'undefined'){
   window.CAT_LABELS = CAT_LABELS;
 }
 
-// ─── CHARACTER_IMAGES — v5: 全人 로컬 우선 + Wikimedia fallback ─────────
-// v5 변경: 모바일 일괄 업로드 편의를 위해 photos/ 하위 폴더를 폐지,
-//          사진을 프로젝트 루트와 동일 디렉토리 ({id}.jpg) 로 평탄화.
+// ─── CHARACTER_IMAGES — v9.7: 캐릭터 사진을 images/characters/ 폴더로 격리 ─
+// v9.7 변경: PWA 루트가 캐릭터 사진들로 어수선해지는 것을 막기 위해
+//             images/characters/{id}.{ext} 로 이동. 루트에는 PWA 아이콘만.
+// (v5 회귀: 한때 폴더를 폐지했으나 사진 갯수가 늘면서 다시 폴더화)
 //
 // 設計:
-//   • url        : 로컬 파일 ({id}.jpg). app 디렉토리에 두면 자동 인식.
-//   • fallback   : 검증된 (또는 추정된) Wikimedia URL. url 로드 실패 시 시도.
-//   • fallback도 실패하면 SVG init 메달리온이 자동 노출 (안전망).
+//   • url        : 로컬 파일 (images/characters/{id}.{ext}).
+//   • fallback   : Wikimedia URL. url 로드 실패 시 시도.
+//   • fallback도 실패하면 CSS init 메달리온이 자동 노출 (안전망).
 //
-// 사용자 작업:
-//   1. 인물별 사진을 {id}.jpg 또는 {id}.png 로 루트 디렉토리에 저장
-//      (예: liuwansu.jpg, heojun.jpg) — 폴더 없이 일괄 업로드 가능
-//   2. 파일이 없거나 로드 실패 시 fallback URL이 자동으로 시도되고,
-//      그것도 실패하면 한자 init 이 표시됨.
+// 새 사진 추가 시:
+//   1. images/characters/{id}.jpg (또는 .png/.jpeg) 로 저장
+//   2. 캐싱 위해 sw.js의 STATIC 목록에 경로 추가 권장
 //
 // 검증 출처:
 //   ✓ Wellcome L0039312–L0039324 (14인): 1601 明 萬曆刊 本草蒙筌 卷首
@@ -701,7 +700,7 @@ if(typeof window !== 'undefined'){
 //
 // 한 이미지에 한 인물 사진만. 이순재 (게임 캐릭터) 는 로컬 jpeg.
 const _W = (n) => 'https://commons.wikimedia.org/wiki/Special:FilePath/' + n + '?width=320';
-const _LOCAL = (id, ext='jpg') => id + '.' + ext;
+const _LOCAL = (id, ext='jpg') => 'images/characters/' + id + '.' + ext;
 const CHARACTER_IMAGES = {
   // ═ 神階 (5인) ═ Wellcome 의가 시리즈 (검증됨) + 女媧 (한대 백화)
   huangdi:     { url: _LOCAL('huangdi'),     fallback: _W('Chinese_woodcut,_Famous_medical_figures;_The_Yellow_Emperor_Wellcome_L0039314.jpg'), caption: '黃帝 — Wellcome 의가 시리즈 (1601)', license: 'CC BY 4.0' },
@@ -772,7 +771,7 @@ const CHARACTER_IMAGES = {
   leejema:     { url: _LOCAL('leejema'),     fallback: _W('Lee_Je-ma.jpg'),                                                                        caption: '李濟馬 — 표준영정',                     license: 'PD-old' },
 
   // ═ 番外 (시트콤) ═
-  leesoonjae:  { url: 'leesoonjae-medallion.jpeg',                                                                                                  caption: '이순재 — 거침없이 하이킥 (MBC 2006)',   license: 'fair-use, 개인 학습용' }
+  leesoonjae:  { url: 'images/characters/leesoonjae-medallion.jpeg',                                                                                caption: '이순재 — 거침없이 하이킥 (MBC 2006)',   license: 'fair-use, 개인 학습용' }
 };
 
 if(typeof window !== 'undefined'){

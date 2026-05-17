@@ -6,6 +6,14 @@
  *     이 평소처럼 동작하되, 모든 RTDB IO 가 로컬 객체로 향함.
  *   - AI 결정은 SYNDROME_BY_ID, FORMULAS 의 indication 키워드 매칭 휴리스틱.
  *   - 채팅은 window._v96CurrentChatCtx 에 등록된 ctx 에 push.
+ *
+ * v9.7 픽스:
+ *   - _setupBridge() 가 boolean 반환 (성공/실패).
+ *   - FB 탐색 다중화: window.FB → globalThis.FB → 렉시컬 FB.
+ *   - 셋업 실패 시 start() 가 즉시 stop() → _started 가 stuck 되지 않음
+ *     ("이미 진행중" 무한 락아웃 버그 해결).
+ *   - startCardBattle 후 probe query 로 브릿지 검증.
+ *   - _patchedF 변수로 teardown 안정화 (window.FB 가 그 사이 변경돼도 OK).
  */
 (function(){
 'use strict';
@@ -18,6 +26,7 @@ const AI_TURN_DELAY = [1800, 2400, 1500];
 const DECOCT_CONFIDENCE = 0.62;
 
 let _origMethods = null;   // 패치 이전 원본 메소드 저장
+let _patchedF = null;      // v9.7: setup 때 잡은 F reference (teardown 안정성)
 let _roomRef = null;
 let _roomId = null;
 let _aiUid = null;
@@ -103,12 +112,11 @@ async function start(){
     },
     chat: {},
   };
-  _setupBridge();
-  if(!_origMethods){
-    // v9.6.4: bridge 설치 실패 시 즉시 정리 — _started 잔존 방지
-    toast_('AI bridge 설치 실패','red');
-    _started = false;
-    _roomRef = null; _roomId = null; _aiUid = null; _meUid = null;
+  // v9.7: 브릿지 셋업이 실패하면 즉시 stop() — _started 가 stuck 되지 않음
+  const bridgeOk = _setupBridge();
+  if(!bridgeOk){
+    toast_('AI 진입 실패: FB 어댑터 활성화 실패 (새로고침 권장)','red');
+    stop();
     return;
   }
   if(window.V96Activity) V96Activity.set('AI 카드 對決', `vs ${aiP.han}`);
@@ -121,6 +129,19 @@ async function start(){
     stop();
     return;
   }
+  // v9.7: 브릿지 검증 — _patchedF.get 으로 자기 룸을 query 해서 _roomRef 가 돌아오는지 확인.
+  //   돌아오지 않으면 패치가 적용되지 않은 상태 (다른 모듈이 FB 를 재할당 등) → 정리.
+  try{
+    if(_patchedF){
+      const probe = await _patchedF.get(`card_battles/${_roomId}`);
+      if(!probe || !probe.players){
+        console.warn('[V96CardAI] 브릿지 검증 실패 — probe 결과 비어있음', probe);
+        toast_('AI 진입 실패: 어댑터 검증 실패 — 새로고침 권장','red');
+        stop();
+        return;
+      }
+    }
+  }catch(_){}
 
   setTimeout(() => {
     if(!_roomRef) return;
@@ -176,12 +197,17 @@ let _notifyPending = false;
 
 function _setupBridge(){
   if(_origMethods) return true;
-  // v9.6.4 FIX: app.js 의 `const FB` 는 classic script global lexical binding 으로
-  //   `window.FB` 프로퍼티로는 노출되지 않음. bangje-cube.js 와 동일하게
-  //   `typeof FB !== 'undefined' && FB` 로 접근해야 함.
-  //   객체 reference 는 같으므로 메소드 패치로 양쪽 모두 가로채는 전략은 유효.
-  const F = (typeof FB !== 'undefined' && FB) || null;
-  if(!F){ console.warn('[V96CardAI] FB 전역 없음 — bridge 설치 불가'); return false; }
+  // v9.7: FB 탐색 다중화 — window.FB → globalThis.FB → eval('FB')
+  let F = (typeof window !== 'undefined' && window.FB) || null;
+  if(!F && typeof globalThis !== 'undefined' && globalThis.FB) F = globalThis.FB;
+  if(!F){ try{ F = eval('typeof FB !== "undefined" ? FB : null'); }catch(_){} }
+  if(!F){
+    console.warn('[V96CardAI] FB 노출 실패 — window.FB / globalThis.FB / lex FB 모두 부재');
+    return false;  // ← 호출자가 _started 정리 가능
+  }
+  // app.js 의 `const FB` 와 `window.FB` 는 동일 객체. 메소드 자체를 패치하면
+  // 양쪽 참조 모두 패치된 메소드를 사용. 객체 reference 교체는 const 캡쳐를
+  // 우회 못함 → 핵심 픽스.
   _origMethods = {
     get: F.get, put: F.put, putRetry: F.putRetry,
     del: F.del, push: F.push, subscribe: F.subscribe,
@@ -285,11 +311,14 @@ function _setupBridge(){
     }
     return orig.subscribe.call(F, path, cb, opts);
   };
+  _patchedF = F;  // v9.7: teardown 시 동일 reference 사용
+  return true;
 }
 
 function _teardownBridge(){
   if(!_origMethods) return;
-  const F = (typeof FB !== 'undefined' && FB) || null;
+  // v9.7: setup 때 잡았던 F reference 우선 사용 (window.FB 가 그 사이 변경됐을 가능성 차단)
+  const F = _patchedF || (typeof window !== 'undefined' && window.FB) || null;
   if(F){
     F.get = _origMethods.get;
     F.put = _origMethods.put;
@@ -299,6 +328,7 @@ function _teardownBridge(){
     F.subscribe = _origMethods.subscribe;
   }
   _origMethods = null;
+  _patchedF = null;
   for(const k of Object.keys(_bridgeSubs)) delete _bridgeSubs[k];
 }
 

@@ -166,8 +166,17 @@ function build(){
     for(const it of (obj.items||[])) for(const h of (it.herbs||[]).map(herbNorm).filter(x=>x))
       freq[h] = (freq[h]||0)+0.5;
   const proto = [];
+  // v9.7: 빈도 비례 분포 재조정 — 甘草(34회)·生薑(18.5)·白芍(17) 등이
+  //       기존 평탄 공식(f>=10이면 일률 4장)에 묻혀 실제 출현 비율과 어긋났음.
+  //       방제학 교과서 출현 빈도에 더 가깝게 5단계로 세분화.
   for(const [h, f] of Object.entries(freq)){
-    let n; if(f>=10) n=4; else if(f>=5) n=3; else if(f>=2) n=2; else n=1;
+    let n;
+    if(f >= 25)      n = 7;     // 甘草 (34회 — 거의 모든 처방)
+    else if(f >= 15) n = 5;     // 生薑·白芍·茯苓·大棗
+    else if(f >= 10) n = 4;     // 當歸·桂枝·人蔘·白朮·川芎
+    else if(f >= 5)  n = 3;
+    else if(f >= 2)  n = 2;
+    else             n = 1;
     for(let i=0;i<n;i++) proto.push(h);
   }
   _proto = proto;
@@ -207,6 +216,8 @@ async function createRoom(opts){
   };
   const ok = await f.put(`${FB_NODE}/${rid}`, room);
   if(!ok){ toast_('방 생성 실패','warn'); return null; }
+  // v9.7: 업적 추적 — 큐브 對局 (호스트도 참여로 카운트)
+  try{ if(window.V97Ach) window.V97Ach.recordCubeJoin(); }catch(_){}
   return rid;
 }
 
@@ -226,6 +237,10 @@ async function joinRoom(rid){
     name: myName(), character: u.character||null, faction: u.faction||null,
     isHost: false, isReady: false, handCount: 0, joinedAt: nowMs(),
   });
+  // v9.7: 업적 추적 — 큐브 참여
+  if(ok){
+    try{ if(window.V97Ach) window.V97Ach.recordCubeJoin(); }catch(_){}
+  }
   return ok ? {ok:true, roomId:rid} : {ok:false, msg:'입장 실패'};
 }
 
@@ -886,6 +901,7 @@ async function renderGame(rid, room){
         <div style="display:flex;align-items:center;margin-bottom:6px">
           <span class="card-title" style="margin:0"><span class="han">桌面</span> 보드</span>
           <span style="flex:1"></span>
+          <button type="button" onclick="window.V97Dict && window.V97Dict.open()" title="처방 사전 (對局 중 참조 가능)" style="margin-right:6px;padding:2px 9px;font-size:10.5px;border:1px solid var(--zhusha-d);background:var(--zhusha-d)22;color:var(--zhusha-d);border-radius:10px;cursor:pointer;font-family:var(--font-display)">方劑 사전</button>
           <span style="font-size:11px;color:var(--gutong)" id="bc-deckinfo">덱 <b>${room.deckCount||0}</b>장 · set <b>${(LOCAL.board||[]).length}</b></span>
         </div>
         <div id="bc-board" class="bc-board"></div>

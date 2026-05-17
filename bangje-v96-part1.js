@@ -151,6 +151,8 @@ const Chat = (function(){
       msg: String(txt).slice(0, 80),
       ts: now(),
     };
+    // v9.7: 업적 추적 — 채팅 게시
+    try{ if(window.V97Ach) window.V97Ach.recordChat(); }catch(_){}
     if(ctx.onSend){
       try{ await ctx.onSend(msg); }catch(_){}
     }

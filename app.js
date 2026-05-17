@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v9.6';                  // ★ 로비 표시용 (2026-05) — 채팅·presence상세·2시간의전사·AI 對決 (카드·큐브)
-const APP_BUILD   = '2026.05.18c';
+const APP_VERSION = 'v9.7';                  // ★ 로비 표시용 (2026-05) — 業績·印章·캐릭터 시그니처 (솔로 三段)
+const APP_BUILD   = '2026.05.18e';           // e: 카드 對決 reveal 픽스 + 큐브 본초 재분포 + 處方 사전
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -119,6 +119,15 @@ function saveState(){
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(S)); }catch(_){}
   }, 250);
 }
+
+// v9.7: const/let 전역은 window 에 자동 부착되지 않음 — v97 외부 모듈용 노출
+//       S 는 Object.assign 으로만 mutate 되므로 한 번 노출하면 참조 안정.
+try{
+  window.S = S;
+  window.saveState = saveState;
+  window.EXAM_DATE_ISO = EXAM_DATE_ISO;
+  window.EXAM_META = EXAM_META;
+}catch(_){}
 
 // v8.5: SSE 콜백 에러 진단 (FB.subscribe emit() 에서 갱신)
 let _lastSubError = null;
@@ -323,6 +332,18 @@ const FB = (() => {
     },
   };
 })();
+
+// v9.7.0 (롤업): FB 를 window 에 노출.
+// 이유: 최상위 const 는 globalThis 에 자동 노출되지 않음 (classic script 사양).
+//      bangje-v96-part3.js (Card AI) / bangje-v96-part4.js (Cube AI) 가
+//      window.FB.get/put/subscribe 를 monkey-patch 해 in-memory 룸 IO 를 흉내내는데,
+//      window.FB 가 undefined 면 setupBridge() 가 silent return → 패치 안됨 →
+//      AI 룸 데이터가 진짜 Firebase 에 query 됨 → "방 데이터 없음" / "방을 찾을 수 없습니다".
+// 또한 bangje-cube.js 의 fb() 헬퍼는 lexical FB 를 반환하므로, 패치가 양쪽 참조에
+// 동시에 적용되도록 동일 객체 reference 를 window.FB 에 묶어둠 (대입 X · 동일 ref).
+// globalThis 에도 노출해 module scope 외부에서 안전하게 접근 가능.
+if(typeof window !== 'undefined' && FB){ window.FB = FB; }
+if(typeof globalThis !== 'undefined' && FB){ globalThis.FB = FB; }
 
 // ───── 3. 유틸 ─────────────────────────────────────────────────────────────
 const view = document.getElementById('view');
@@ -1700,6 +1721,8 @@ async function loadPresenceList(){
     .filter(p => (now - (p.ts||0)) < PRESENCE_FRESH_MS)
     .sort((a,b) => (b.ts||0) - (a.ts||0));
   if(elCount) elCount.textContent = fresh.length;
+  // v9.7: 업적 추적 — 동시 학습자 최대치
+  try{ if(window.V97Ach) window.V97Ach.recordPresencePeak(fresh.length); }catch(_){}
   if(fresh.length === 0){
     elList.innerHTML = '<span style="font-size:11.5px;color:var(--gutong)">현재 아무도 학습 중이 아닙니다.</span>';
     return;
@@ -1832,6 +1855,8 @@ function openPurchaseDialog(p){
     saveState(); refreshHeader();
     closeModal();
     toast(`${p.han} 잠금 해제!`,'gold');
+    // v9.7: 神階 해금 업적 즉시 평가
+    try{ if(window.V97Ach) window.V97Ach.evaluateAll(); }catch(_){}
     setTimeout(() => openCharacterPicker(), 300);
   });
 }
@@ -2152,6 +2177,7 @@ const BET_LEVELS = [
   { id:'large',  han:'大博', ko:'대박', pct:0.30, min:150, desc:'30% · 최소 150 氣',diffProfile:[0.05, 0.30, 0.45, 0.20] },
   { id:'allin',  han:'賭命', ko:'도명', pct:0.50, min:500, desc:'50% · 최소 500 氣',diffProfile:[0.00, 0.10, 0.40, 0.50] },
 ];
+try{ window.BET_LEVELS = BET_LEVELS; }catch(_){}
 function calcBet(level){
   const lv = BET_LEVELS.find(l => l.id === level) || BET_LEVELS[0];
   const pct = Math.floor(S.qi * lv.pct);
@@ -2307,10 +2333,10 @@ function openBattleLobby(){
         <div style="font-size:12.5px;line-height:1.6">
           베팅 <b class="seal" style="color:var(--zhusha-d)">${bet.toLocaleString()} 氣 (현재 氣의 25%)</b><br>
           ① 양측이 무작위 3개 證 중 1개를 10초 안에 선택<br>
-          ② 공유 1덱(본초 카드) + 보드 초기 3장 · 게임 시작 시 <b>양측 증상 1개씩 자동 공개</b><br>
+          ② 공유 1덱(본초 카드) + 보드 초기 3장 · 게임 시작 시 <b>각자 자기 증상 1개를 골라 공개</b> (30초)<br>
           ③ 매 턴: 神급 스킬(게임 1회) → 전탕 시도 or 턴 종료 · 턴 종료 시 덱에서 1장 보드로<br>
-          ④ <b>덱 소진 후</b>엔 자기 턴마다 증상 1개 자동 공개<br>
-          ⑤ <span style="color:var(--zhusha-d)"><b>전탕 빗나가면</b> 페널티로 자기 증상 1개 강제 공개</span><br>
+          ④ <b>덱 소진 후</b>엔 자기 턴마다 증상 1개를 골라 공개 (15초)<br>
+          ⑤ <span style="color:var(--zhusha-d)"><b>전탕 빗나가면</b> 페널티로 자기 증상 1개 선택 공개</span><br>
           ⑥ 상대 證에 맞는 처방을 본초로 먼저 구성한 쪽이 승리
         </div>
         <!-- v9.6: AI 상대 선택 -->
@@ -3066,6 +3092,8 @@ async function startBattle(roomId, isCreator){
   const oppId = Object.keys(room.players||{}).find(k => k !== S.userId) || null;
   _inBattleSession = true;
   _battleSessionMeta = { mode:'quiz', roomId, oppId };
+  // v9.7: 멀티 모드 — 시그니처 효과·점수 OFF
+  try{ if(window.V97Sig) window.V97Sig.setMode('multi'); }catch(_){}
   // 戰鬪 BGM 시작 — 긴박감 (사용자 토글과 무관하게 켜짐)
   try{ bgm.startBattle(); }catch(_){}
   // 인트로 컷 (對決開始 + 명언 말풍선)
@@ -3361,6 +3389,8 @@ async function renderBattleGame(roomId){
     // v7.2: 결과 화면 진입 — 탭 이탈 가드 해제
     _inBattleSession = false;
     _battleSessionMeta = null;
+    // v9.7: 솔로 모드 복원 (시그니처 효과 재가동)
+    try{ if(window.V97Sig) window.V97Sig.setMode('solo'); }catch(_){}
     bgm.stopBattle();  // 戰鬪 BGM 종료 후 → 승/패 BGM 전환
     const players = room.players;
     const me = players[S.userId];
@@ -3427,6 +3457,14 @@ async function renderBattleGame(roomId){
     });
     if(S.battleHistory.length > 20) S.battleHistory = S.battleHistory.slice(0, 20);
     saveState(); refreshHeader();
+
+    // v9.7: 업적 추적 — 對決 결과
+    try{
+      if(window.V97Ach){
+        const lvlIdx = BET_LEVELS.findIndex(l => l.id === room.level) + 1;  // 1..4
+        window.V97Ach.recordBattle({ outcome, betLevel: lvlIdx });
+      }
+    }catch(_){}
 
     // v3: 전역 W-L 기록 — 양측 모두 increment (winner 본인이 쓰지만 안전을 위해 본인 것만 씀)
     //     상대 측은 상대 클라이언트가 자기 결과 화면에서 자기 record를 갱신함.
@@ -5230,6 +5268,16 @@ window.startQuizSession = function(mode, diff, count, opts){
   const startedAt = Date.now();
   const dm = DIFFICULTY_META[diff];
 
+  // v9.7: 시그니처 세션 초기화 (솔로 학습 모드)
+  try{
+    if(window.V97Sig){
+      window.V97Sig.setMode('solo');
+      window.V97Sig.resetSession();
+    }
+  }catch(_){}
+  let _quizStreak = 0;       // v9.7: 한 퀴즈 내 연속 정답
+  let _quizBestStreak = 0;   // v9.7: 한 퀴즈 내 최고 연속
+
   function show(){
     if(cur >= pool.length){
       // 결과 + 氣 보상 (난이도 보너스)
@@ -5244,14 +5292,45 @@ window.startQuizSession = function(mode, diff, count, opts){
       } else if(S.faction === 'soeum' && isPerfect){
         factionBonus = Math.round(pool.length * 5 * diffMult);
       }
-      const earned = baseEarned + factionBonus;
+      // v9.7: 캐릭터 시그니처 보너스 (솔로만, baseEarned 의 최대 +50% 캡)
+      let sigBonus = 0;
+      let sigBreakdown = null;
+      try{
+        if(window.V97Sig){
+          const r = window.V97Sig.sessionBonus(baseEarned);
+          sigBonus = r.bonus || 0;
+          sigBreakdown = r.breakdown;
+        }
+      }catch(_){}
+      const earned = baseEarned + factionBonus + sigBonus;
       S.qi += earned; saveState(); refreshHeader();
+      // v9.7: 업적 추적 — 全 정답·연속 정답·플래시 카운터 (퀴즈는 따로)
+      try{
+        if(window.V97Ach){
+          window.V97Ach.recordStreak(_quizBestStreak);
+          if(isPerfect) window.V97Ach.recordPerfectQuiz();
+          // 오답함 비움: 누적 10문제 이상 풀고 wrongIds 가 0 일 때만 인정
+          if((S.wrongIds || []).length === 0 &&
+             (S.achStats && (S.achStats.totalAnswered || 0) >= 10)){
+            window.V97Ach.recordWrongCleared();
+          }
+        }
+      }catch(_){}
       const fObj = (typeof getFaction === 'function') ? getFaction(S.faction) : null;
       const factionLine = factionBonus > 0 && fObj ? `
         <div style="margin-top:6px;font-size:12px;color:${esc(fObj.colorDim||'#666')};font-weight:600">
           ${_factionChip(S.faction,'tiny')}
           <span style="margin-left:4px">${esc(fObj.han)} 패시브 +${factionBonus} 氣</span>
           <span style="color:var(--gutong);font-weight:400;font-size:10.5px">${S.faction==='soeum'?'(全 정답 N='+pool.length+'×5×'+diffMult+')':'(상시 +10%)'}</span>
+        </div>` : '';
+      // v9.7: 시그니처 보너스 표시
+      const charObj = PHYSICIAN_BY_ID[S.character];
+      const sigLine = (sigBonus > 0 && sigBreakdown && charObj) ? `
+        <div style="margin-top:6px;font-size:12px;color:var(--feicui);font-weight:600">
+          <span class="han">${esc(charObj.han)}</span>
+          <span> 시그니처 +${sigBonus} 氣</span>
+          ${sigBreakdown.juexue > 0 ? `<span style="color:var(--huang);margin-left:4px">絕學!</span>` : ''}
+          ${sigBreakdown.raw > sigBreakdown.cap ? `<span style="color:var(--gutong);font-weight:400;font-size:10.5px"> (캡 적용)</span>` : `<span style="color:var(--gutong);font-weight:400;font-size:10.5px"> (章典 ${window.V97Sig.getSession().totalChapter} · 逸品 ${window.V97Sig.getSession().totalYipin}${sigBreakdown.juexue>0?' · 絕學 1':''})</span>`}
         </div>` : '';
       view.innerHTML = `
         <h2 class="view-title fade-in"><span class="han">畢</span>완료</h2>
@@ -5263,6 +5342,7 @@ window.startQuizSession = function(mode, diff, count, opts){
           <div class="seal" style="font-size:42px;color:var(--zhusha-d);line-height:1">${score}<span style="font-size:24px;opacity:.6">/${pool.length}</span></div>
           <div style="margin-top:8px;font-size:14px;color:var(--feicui);font-weight:600">+${earned} 氣 ${diff>1?`<span style="font-size:11px;color:var(--gutong)">(×${diffMult} 난이도 보너스)</span>`:''}</div>
           ${factionLine}
+          ${sigLine}
           <div style="margin-top:6px;font-size:11px;color:var(--gutong)">${Math.round((Date.now()-startedAt)/1000)}초 소요</div>
         </div>
         <div style="display:flex;gap:6px;justify-content:center;margin-top:14px">
@@ -5300,6 +5380,54 @@ window.startQuizSession = function(mode, diff, count, opts){
       if(correct) score++;
       // v3: 선지 효과음
       try{ correct ? bgm.sfxCorrect() : bgm.sfxWrong(); }catch(_){}
+      // v9.7: 시그니처 평가 + 효과 + 업적
+      if(correct){
+        _quizStreak++;
+        if(_quizStreak > _quizBestStreak) _quizBestStreak = _quizStreak;
+        try{
+          // 업적 누적: 총 정답 / 정답 캐릭터별 / 정답 章별
+          if(window.V97Ach){
+            window.V97Ach.bumpCounter('totalAnswered', 1);
+            window.V97Ach.recordCharacterRight(S.character);
+            // 章 추출: q.formula 가 있으면 매칭, 아니면 자동생성 처방의 ch
+            const fAll = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
+            const fHan = q.formula || q.formula_han || '';
+            const fId  = q.formula_id || '';
+            let f = null;
+            if(fId)  f = fAll.find(x => x.id === fId);
+            if(!f && fHan){
+              f = fAll.find(x => x.ko === fHan || x.han === fHan);
+            }
+            if(f && f.chapter){
+              const m = f.chapter.match(/^(\d)/);
+              if(m) window.V97Ach.recordChapterRight(m[1]);
+            }
+            // 시그니처 평가 — formula 객체 필요
+            if(window.V97Sig){
+              const sigRes = window.V97Sig.evaluate(S.character, q, f);
+              if(sigRes && sigRes.tier){
+                window.V97Sig.fireEffect(S.character, sigRes);
+                const tickRes = window.V97Sig.tickSession(sigRes.tier);
+                window.V97Ach.recordSignature(sigRes.tier);
+                if(tickRes && tickRes.juexue){
+                  setTimeout(() => {
+                    try{ window.V97Sig.fireJuexueEffect(S.character, sigRes); }catch(_){}
+                  }, 1700);
+                  window.V97Ach.recordSignature('juexue');
+                }
+              } else {
+                window.V97Sig.tickSession(null);
+              }
+            }
+          }
+        }catch(_){}
+      } else {
+        _quizStreak = 0;
+        try{
+          if(window.V97Sig) window.V97Sig.tickSession(null);
+          if(window.V97Ach) window.V97Ach.bumpCounter('totalAnswered', 1);
+        }catch(_){}
+      }
       $$('.quiz-opt').forEach(x => {
         x.disabled = true;
         if(+x.dataset.i === (q.answer||0)){ x.style.background='var(--feicui)'; x.style.color='var(--mi-w)'; x.style.borderColor='transparent'; }
@@ -7336,6 +7464,10 @@ let _cardRoomState  = null;
 let _cardChooseTimer= null;
 let _cardLoadWatchdog = null;  // v8.5: 로딩 watchdog timer
 let _cardFirstRenderDone = false;  // v8.5: 첫 렌더 성공 플래그
+// v9.7: 증상 공개 picker 가드 (SSE re-render 시 모달 중복 방지)
+let _cardInitialPickerShown = false;   // 게임 시작 picker 표시 여부 (roomId 단위)
+let _cardDeckPickerTurnIdx  = -1;       // 덱 빈 단계 마지막 picker 가 떴던 turnIdx
+let _cardPickerRoomId       = null;     // 현재 picker 가드가 유효한 roomId
 async function startCardBattle(roomId, isCreator){
   setTab('battle');
   view.innerHTML = `
@@ -7371,6 +7503,12 @@ async function startCardBattle(roomId, isCreator){
   _inBattleSession = true;
   _battleSessionMeta = { mode:'card', roomId, oppId:null };
   _cardFirstRenderDone = false;
+  // v9.7: 멀티 모드 — 시그니처 효과·점수 OFF (카드 對決)
+  try{ if(window.V97Sig) window.V97Sig.setMode('multi'); }catch(_){}
+  // v9.7: 증상 공개 picker 가드 초기화
+  _cardInitialPickerShown = false;
+  _cardDeckPickerTurnIdx  = -1;
+  _cardPickerRoomId       = roomId;
 
   // v9.2: 초기 방 데이터 FB.get 4회 재시도 (350·700·1050·1400 ms, 총 3.5초). publish fire-and-forget
   //       완료를 위한 retry window. polling subscribe 가 추가 안전망.
@@ -7554,17 +7692,26 @@ function renderCardPlaying(roomId, room, me, opp){
   const isDivineMe  = myChar  && myChar.category === 'divine';
   const skillMeta = isDivineMe ? CARD_SKILLS[me.character] : null;
 
-  // ── v7.3: 강제 공개 트리거 (수동 공개 액션 제거 — 모두 자동/페널티) ──
-  //   ① 게임 시작 자동 공개 (initialRevealed=false 면 자기 것 1개 공개, 1회만)
-  //   ② 덱 빈 후 자기 턴 시작 자동 공개 (lastAutoRevealTurnIdx !== turnIdx 면 자기 것 1개 공개)
-  //   ③ 페널티 공개 (attemptDecoct 오답 처리 분기에서)
+  // ── v9.7: 증상 공개는 모두 "사용자 선택" — 자동/랜덤 폐기 ──
+  //   ① 게임 시작 — 양측 각자 1개 선택 공개 (모달; 30초 후 미선택 시 자동 폴백)
+  //   ② 덱 비고 자기 턴 시작 — 1개 선택 공개 (모달; 15초 후 자동 폴백)
+  //   ③ 페널티 (오답 후) — openPenaltyRevealModal 이미 사용자 선택 (6초)
+  //   SSE re-render 가드: _cardInitialPickerShown, _cardDeckPickerTurnIdx
   const deckEmpty = (room.deck||[]).length === 0;
-  if(!me.initialRevealed){
-    // ① — race 없는 자기 PUT 만. SSE 재진입 후 initialRevealed=true 로 갱신되어 건너뜀.
-    autoRevealOneSymptom(roomId, room, me, mySyn, {kind:'initial'}).catch(_=>{});
-  } else if(isMyTurn && deckEmpty && (me.lastAutoRevealTurnIdx !== room.turnIdx)){
-    // ② — 덱 빈 단계 턴별 자동 공개
-    autoRevealOneSymptom(roomId, room, me, mySyn, {kind:'deck_empty', turnIdx: room.turnIdx}).catch(_=>{});
+  if(_cardPickerRoomId !== roomId){
+    // 가드가 다른 방으로 묵은 경우 초기화
+    _cardInitialPickerShown = false;
+    _cardDeckPickerTurnIdx  = -1;
+    _cardPickerRoomId       = roomId;
+  }
+  if(!me.initialRevealed && !_cardInitialPickerShown){
+    _cardInitialPickerShown = true;
+    openInitialRevealModal(roomId, room, me, mySyn).catch(_=>{});
+  } else if(me.initialRevealed && isMyTurn && deckEmpty
+            && me.lastAutoRevealTurnIdx !== room.turnIdx
+            && _cardDeckPickerTurnIdx !== room.turnIdx){
+    _cardDeckPickerTurnIdx = room.turnIdx;
+    openDeckEmptyRevealModal(roomId, room, me, mySyn).catch(_=>{});
   }
 
   // 자기 증상 (남은 미공개 + 공개됨 — 자기 화면에서는 모두 표시)
@@ -7593,6 +7740,7 @@ function renderCardPlaying(roomId, room, me, opp){
         턴 ${room.turnIdx+1}/${CARD_TURN_MAX} · 덱 ${room.deck.length}장${deckEmpty?' <span style="color:var(--zhusha-d);font-size:11px">[증상 공개 단계]</span>':''} ·
         ${isMyTurn ? '<b style="color:var(--feicui)">나의 턴</b>' : '<b style="color:var(--gutong)">상대 턴</b>'}
         <button class="cb-lang-toggle" onclick="toggleHerbLang()" title="본초 한자↔한글 토글" style="margin-left:8px;padding:1px 8px;font-size:10.5px;border:1px solid var(--gutong);background:transparent;border-radius:10px;cursor:pointer;color:var(--mo);font-family:var(--font-display)">${S.herbLang==='ko'?'韓→漢':'漢→韓'}</button>
+        <button class="cb-dict-btn" onclick="window.V97Dict && window.V97Dict.open()" title="처방 사전 (게임 중 참조 가능)" style="margin-left:4px;padding:1px 8px;font-size:10.5px;border:1px solid var(--zhusha-d);background:var(--zhusha-d)22;color:var(--zhusha-d);border-radius:10px;cursor:pointer;font-family:var(--font-display)">方劑 사전</button>
       </div>
       <!-- v7.5: 五味 색 범례 -->
       <div class="cb-taste-legend" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;margin:4px 0 6px;font-size:10.5px;font-family:var(--font-display)">
@@ -7705,6 +7853,141 @@ async function autoRevealOneSymptom(roomId, room, me, mySyn, opts){
     appendCardLog(roomId, room, `${me.name}: ${kindKo} — ${sym}`);
   }catch(_){}
   return true;
+}
+
+// v9.7: 게임 시작 증상 공개 모달 — 자기 증상 1개를 골라 공개 (30초 타임아웃)
+//   각자(양쪽 다) 시작 시 하나씩 선택 공개. 미선택 시 첫 번째로 폴백.
+//   _cardInitialPickerShown 가드는 호출 측에서 처리됨 (renderCardPlaying).
+//   race 픽스: initialRevealed=true 검사를 await 직전에 다시 확인 (FB.put 지연 동안 중복 호출 방지).
+function openInitialRevealModal(roomId, room, me, mySyn){
+  return new Promise((resolve) => {
+    // double-fire 방어: 이미 공개 완료 상태라면 즉시 종료
+    if(me.initialRevealed){ resolve(); return; }
+    const remaining = (mySyn.symptoms||[]).filter(s => !(me.revealedSymptoms||[]).includes(s));
+    const hasFake = !!me.fakeSymptomNext;
+    // 공개할 게 없으면 마커만 갱신
+    if(!remaining.length && !hasFake){
+      (async () => {
+        try{ await FB.put(`card_battles/${roomId}/players/${S.userId}/initialRevealed`, true); }catch(_){}
+        resolve();
+      })();
+      return;
+    }
+
+    const m = document.createElement('div');
+    m.className = 'overlay';
+    m.innerHTML = `
+      <div class="modal" style="max-width:520px">
+        <div class="modal-title" style="color:var(--feicui)">▶ 게임 시작 — 자기 증상 1개 공개</div>
+        <div class="modal-body">
+          <div style="margin-bottom:10px;font-size:12.5px;color:var(--mo)">
+            <b>${esc(mySyn.han)}</b> (${esc(mySyn.ko)}) — 시작 단서로 <b>자기 증상 1개</b>를 골라 상대에게 공개합니다.
+          </div>
+          ${hasFake ? `<div class="cb-fake-banner" style="margin-bottom:8px">黃帝 欺症 발동 중 — 어느 것을 골라도 <b>거짓 증상 "${esc(me.fakeSymptomNext)}"</b> 가 공개됩니다.</div>` : ''}
+          <div style="margin:6px 0;font-size:11.5px;color:var(--mo-l)">증상 선택 (30초 — 미선택 시 첫 번째 자동):</div>
+          <div class="cb-sym-grid" id="cb-initial-grid">
+            ${remaining.length
+              ? remaining.map(s => `<button class="cb-sym-btn" type="button" data-sym="${esc(s)}">${esc(s)}</button>`).join('')
+              : '<div style="color:var(--gutong);padding:8px">공개할 증상이 없습니다 (fake 만 공개)</div>'}
+          </div>
+          <div style="margin-top:8px;font-size:11px;color:var(--gutong);text-align:right" id="cb-initial-timer">30초</div>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+
+    let done = false;
+    let remain = 30;
+    const timerEl = m.querySelector('#cb-initial-timer');
+    const tick = setInterval(() => {
+      remain--;
+      if(timerEl) timerEl.textContent = `${remain}초`;
+      if(remain <= 0){
+        clearInterval(tick);
+        if(!done){ done = true; finish(remaining[0] || null); }
+      }
+    }, 1000);
+
+    const finish = async (pick) => {
+      if(m.parentNode) m.remove();
+      try{
+        await autoRevealOneSymptom(roomId, room, me, mySyn, {kind:'initial', pick: pick||undefined});
+      }catch(_){}
+      resolve();
+    };
+
+    m.querySelectorAll('.cb-sym-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if(done) return; done = true; clearInterval(tick);
+        finish(btn.dataset.sym);
+      });
+    });
+  });
+}
+
+// v9.7: 덱 소진 단계 자기 턴 증상 공개 모달 — 자기 증상 1개를 골라 공개 (15초 타임아웃)
+//   자기 턴 시작 시 1회 트리거. lastAutoRevealTurnIdx 로 턴별 중복 방지.
+function openDeckEmptyRevealModal(roomId, room, me, mySyn){
+  return new Promise((resolve) => {
+    const turnIdx = room.turnIdx;
+    if(me.lastAutoRevealTurnIdx === turnIdx){ resolve(); return; }
+    const remaining = (mySyn.symptoms||[]).filter(s => !(me.revealedSymptoms||[]).includes(s));
+    const hasFake = !!me.fakeSymptomNext;
+    if(!remaining.length && !hasFake){
+      (async () => {
+        try{ await FB.put(`card_battles/${roomId}/players/${S.userId}/lastAutoRevealTurnIdx`, turnIdx); }catch(_){}
+        resolve();
+      })();
+      return;
+    }
+
+    const m = document.createElement('div');
+    m.className = 'overlay';
+    m.innerHTML = `
+      <div class="modal" style="max-width:520px">
+        <div class="modal-title" style="color:var(--zhusha-d)">⚪ 덱 소진 — 자기 증상 1개 공개</div>
+        <div class="modal-body">
+          <div style="margin-bottom:10px;font-size:12.5px;color:var(--mo)">
+            덱이 비었습니다. 자기 턴마다 <b>자기 증상 1개</b>를 골라 상대에게 공개해야 합니다.
+          </div>
+          ${hasFake ? `<div class="cb-fake-banner" style="margin-bottom:8px">黃帝 欺症 발동 중 — 어느 것을 골라도 <b>거짓 증상 "${esc(me.fakeSymptomNext)}"</b> 가 공개됩니다.</div>` : ''}
+          <div style="margin:6px 0;font-size:11.5px;color:var(--mo-l)">증상 선택 (15초 — 미선택 시 첫 번째 자동):</div>
+          <div class="cb-sym-grid">
+            ${remaining.length
+              ? remaining.map(s => `<button class="cb-sym-btn" type="button" data-sym="${esc(s)}">${esc(s)}</button>`).join('')
+              : '<div style="color:var(--gutong);padding:8px">공개할 증상이 없습니다 (fake 만 공개)</div>'}
+          </div>
+          <div style="margin-top:8px;font-size:11px;color:var(--gutong);text-align:right" id="cb-deck-timer">15초</div>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+
+    let done = false;
+    let remain = 15;
+    const timerEl = m.querySelector('#cb-deck-timer');
+    const tick = setInterval(() => {
+      remain--;
+      if(timerEl) timerEl.textContent = `${remain}초`;
+      if(remain <= 0){
+        clearInterval(tick);
+        if(!done){ done = true; finish(remaining[0] || null); }
+      }
+    }, 1000);
+
+    const finish = async (pick) => {
+      if(m.parentNode) m.remove();
+      try{
+        await autoRevealOneSymptom(roomId, room, me, mySyn, {kind:'deck_empty', turnIdx, pick: pick||undefined});
+      }catch(_){}
+      resolve();
+    };
+
+    m.querySelectorAll('.cb-sym-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if(done) return; done = true; clearInterval(tick);
+        finish(btn.dataset.sym);
+      });
+    });
+  });
 }
 
 // 본초 카드 SVG HTML
@@ -8218,6 +8501,8 @@ async function renderCardResult(roomId, room, me, opp){
   // v7.2: 결과 화면 진입 — 탭 이탈 가드 해제
   _inBattleSession = false;
   _battleSessionMeta = null;
+  // v9.7: 솔로 모드 복원 (시그니처 효과 재가동)
+  try{ if(window.V97Sig) window.V97Sig.setMode('solo'); }catch(_){}
   if(_cardChooseTimer){ clearInterval(_cardChooseTimer); _cardChooseTimer=null; }
   const stage = $('#cb-stage');
   const res = room.result || {};
@@ -8253,6 +8538,16 @@ async function renderCardResult(roomId, room, me, opp){
       });
       if(S.cardBattleHistory.length > 20) S.cardBattleHistory = S.cardBattleHistory.slice(0, 20);
       saveState();
+      // v9.7: 업적 추적 — 카드 對決 결과
+      try{
+        if(window.V97Ach){
+          const lvlIdx = (typeof BET_LEVELS !== 'undefined') ? (BET_LEVELS.findIndex(l => l.id === room.level) + 1) : 0;
+          window.V97Ach.recordBattle({
+            outcome: outcome === 'loss' ? 'lose' : outcome,
+            betLevel: lvlIdx,
+          });
+        }
+      }catch(_){}
       await FB.put(`card_battles/${roomId}/_settled/${S.userId}`, true);
       // record 갱신 (5지선다와 통합 W/L — 기존 동작 유지)
       if(FB && S.userId){

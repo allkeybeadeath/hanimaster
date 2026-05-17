@@ -1,3 +1,35 @@
+# 方劑學 PWA — HANDOVER
+
+> CIM Lab 본과 2학년 방제학 학습 도구. 시험일 2026-05-20.
+> **현재 버전: v9.7 (2026-05-18)** — 業績·印章 + 캐릭터 시그니처 三段 효과
+> 이전 버전 변경사항은 `CHANGELOG_v9_7.md` 등 개별 파일 참조.
+
+## v9.7 핵심 추가사항
+
+### 시그니처 三段 (`bangje-v97-signatures.js`)
+- 캐릭터별 章 / 처방 / 키워드 매칭으로 章典(+10%)·逸品(+25%)·絕學(연속 +50%) 자동 발동
+- **솔로 학습 전용** — `V97Sig.setMode('multi')` 로 對決·카드·큐브 중 비활성
+- 캐릭터 매핑은 `data-signatures.js` (48 캐릭터)
+- Web Audio Oscillator 직접 합성 五聲 음색
+
+### 業績·印章 (`bangje-v97-achievements.js` + `bangje-v97-profile.js`)
+- 46개 업적 / 8 카테고리 / 銅·銀·金·翠 4 tier
+- `S.achievements`, `S.equippedSeals` (최대 3) 로컬 저장
+- 홈에 `業績·印章` 타일 자동 inject (MutationObserver)
+- 메달리온 옆 印章 도장 (이름 줄 inject)
+
+### 폴더 정리
+- 모든 캐릭터 사진을 `images/characters/` 로 이동
+- 루트에는 PWA 아이콘 3개만 잔존
+
+### Firebase 룰
+- **변경 없음** — 현재 10개 룰(presence/feedback/lobby/lobby_idle/battles/lobby_card/card_battles/cube_rooms/stats/system) 그대로 사용
+- 업적/시그니처는 로컬 저장. 채팅은 battles·card_battles·cube_rooms 하위라 기존 룰로 cover.
+
+---
+
+# 아래는 v2.2 시점 원본 (참고용·일부 outdated)
+
 # 方劑學 PWA v2.2 — HANDOVER
 
 > CIM Lab 본과 2학년 방제학 학습 도구. Greek v60 패턴을 따른 단일-파일 PWA.

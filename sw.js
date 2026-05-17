@@ -1,10 +1,16 @@
-/* sw.js — v9.6 서비스 워커
- * network-first index.html / app.js / bangje-cube.js / bangje-v96-part*.js (개발 편의),
+/* sw.js — v9.7 서비스 워커
+ * network-first index.html / app.js / bangje-cube.js / bangje-v9{6,7}-*.js (개발 편의),
  * cache-first 나머지 정적 파일 (data, icons, manifest).
  *
- * v9.6: bangje-v96-part1..5.js 추가 · 캐시 키 갱신
+ * v9.7: 業績/시그니처 시스템 추가
+ *   • data-achievements.js, data-signatures.js (정의)
+ *   • bangje-v97-achievements.js (업적 추적)
+ *   • bangje-v97-signatures.js (캐릭터 시그니처 효과)
+ *   • bangje-v97-profile.js (印章 프로필 + 업적 갤러리)
+ *   • 캐릭터 사진 → images/characters/ 폴더로 이동
+ *   • 캐시 키 갱신
  */
-const CACHE = 'bangje-pwa-v9-6-2026-05';
+const CACHE = 'bangje-pwa-v9-7-2026-05b';
 const PRECACHE = [
   './',
   './index.html',
@@ -15,6 +21,10 @@ const PRECACHE = [
   './bangje-v96-part3.js',
   './bangje-v96-part4.js',
   './bangje-v96-part5.js',
+  './bangje-v97-achievements.js',
+  './bangje-v97-signatures.js',
+  './bangje-v97-profile.js',
+  './bangje-v97-formuladict.js',
   './data-physicians.js',
   './data-ranks.js',
   './data-factions.js',
@@ -24,12 +34,14 @@ const PRECACHE = [
   './data-questions-bulk.js',
   './data-syndromes.js',
   './data-neijing.js',
+  './data-achievements.js',
+  './data-signatures.js',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
   './apple-touch-icon.png',
-  './shennong.png',
-  './leesoonjae-medallion.jpeg'
+  './images/characters/shennong.png',
+  './images/characters/leesoonjae-medallion.jpeg'
 ];
 
 self.addEventListener('install', e => {
@@ -50,13 +62,13 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if(req.method !== 'GET') return;
   const url = new URL(req.url);
-  // network-first: index.html, app.js, bangje-cube.js, bangje-v96-part*.js (변경이 잦은 코드)
+  // network-first: index.html, app.js, bangje-cube.js, bangje-v9{6,7}-*.js (변경이 잦은 코드)
   const networkFirst =
     url.pathname.endsWith('index.html') ||
     url.pathname.endsWith('/') ||
     url.pathname.endsWith('app.js') ||
     url.pathname.endsWith('bangje-cube.js') ||
-    /bangje-v96-part\d+\.js$/.test(url.pathname);
+    /bangje-v9[67]-[\w-]+\.js$/.test(url.pathname);
   if(networkFirst){
     e.respondWith(
       fetch(req).then(r => {
