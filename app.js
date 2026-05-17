@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v9.1';                  // ★ 로비 표시용 (2026-05) — v9.1: 카드 watchdog 폐기 · putRetry 6s · FB.get 재시도 단축
-const APP_BUILD   = '2026.05.17y';
+const APP_VERSION = 'v9.2';                  // ★ 로비 표시용 (2026-05) — v9.2 critical: publish fire-and-forget (호스트 자기 진입 hang 픽스)
+const APP_BUILD   = '2026.05.17z';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -2701,14 +2701,19 @@ async function joinBattleQueue(level){
       questions: generateBattleQuestions(5, level),
       createdAt: Date.now()
     };
-    // v9.1: 매치 publish — 기본 3회×5초=15초 → 2회×3초=6초로 단축. 실패 시 다음 폴링에서 재시도.
-    const created = await FB.putRetry(`battles/${roomId}`, room, {tries:2, backoffMs:300, timeoutMs:3000});
-    if(!created.ok){
-      matching = false;
-      const st = $('#queue-status'); if(st) st.textContent = `매치 publish 실패 (HTTP ${created.status||'?'}) — 재시도 대기`;
-      return;
-    }
-    // 자기 큐 entry 만 정리 — 상대 entry 는 건드리지 않음 (race-free 원칙)
+    // v9.2 critical 픽스: publish 를 fire-and-forget 으로 → 호스트가 자기 진입 hang 안 됨.
+    //   기존: `await FB.putRetry(...)` 가 응답까지 대기 → 응답 느리면 호스트 cleanup 못 함
+    //         → startBattle 호출 안 됨 → "처음 들어간 사람만 진행 안 됨" 증상
+    //   v9.2: publish 는 백그라운드 promise. 즉시 cleanup + startBattle 진입.
+    //         startBattle 의 FB.get 재시도 + polling subscribe 가 publish 완료를 자동 감지.
+    FB.putRetry(`battles/${roomId}`, room, {tries:3, backoffMs:400, timeoutMs:5000})
+      .then(res => {
+        if(!res || !res.ok){
+          console.warn('[battles publish] background fail:', res);
+        }
+      })
+      .catch(e => { console.warn('[battles publish] exception:', e); });
+    // 자기 큐 entry 만 정리
     try{ await FB.del(`lobby/${level}/${S.userId}`); }catch(_){}
     await cleanup(false);
     startBattle(roomId, true);
@@ -2720,9 +2725,10 @@ async function joinBattleQueue(level){
 
 
 async function startBattle(roomId, isCreator){
-  // v9.1: FB.get 재시도 — 2회 (350·700 ms). polling 2초가 백업하므로 짧게.
+  // v9.2: FB.get 4회 재시도 (350·700·1050·1400 ms 백오프, 총 3.5초). publish 가 fire-and-forget 이므로
+  //       그 완료를 위해 충분한 retry window. polling subscribe 가 추가 안전망.
   let room = null;
-  for(let i=0; i<2; i++){
+  for(let i=0; i<4; i++){
     try{ room = await FB.get(`battles/${roomId}`); }catch(_){ room = null; }
     if(room) break;
     await new Promise(r => setTimeout(r, 350 * (i+1)));
@@ -5881,12 +5887,15 @@ async function createCardBattleRoom(roomId, me, opp, bet){
     log: [],
     result: null
   };
-  // v9.1: 매치 publish putRetry — 기본 3회×5초=15초 hang 가능 → 2회×3초=최대 6초로 단축.
-  //       실패 시 호출자(onLobbySnap)가 matching=false 로 풀고 다음 폴링(2초)에서 재시도.
-  const pubRes = await FB.putRetry(`card_battles/${roomId}`, room, {tries:2, backoffMs:300, timeoutMs:3000});
-  if(!pubRes || !pubRes.ok){
-    throw new Error('매치 publish 실패 (HTTP ' + (pubRes && pubRes.status || '?') + ')');
-  }
+  // v9.2 critical 픽스: publish fire-and-forget → 호스트 hang 방지.
+  //   startCardBattle 의 FB.get + polling subscribe 가 publish 완료를 자동 감지.
+  FB.putRetry(`card_battles/${roomId}`, room, {tries:3, backoffMs:400, timeoutMs:5000})
+    .then(res => {
+      if(!res || !res.ok){
+        console.warn('[card_battles publish] background fail:', res);
+      }
+    })
+    .catch(e => { console.warn('[card_battles publish] exception:', e); });
   return room;
 }
 
@@ -5948,11 +5957,11 @@ async function startCardBattle(roomId, isCreator){
   _battleSessionMeta = { mode:'card', roomId, oppId:null };
   _cardFirstRenderDone = false;
 
-  // v9.1: 초기 방 데이터 FB.get 재시도 2회 (350·700 ms). polling 2초 (FB.subscribe) 가 백업.
-  //       polling 이 즉시 첫 fetch 호출하므로 사실상 이 블록은 보조망.
+  // v9.2: 초기 방 데이터 FB.get 4회 재시도 (350·700·1050·1400 ms, 총 3.5초). publish fire-and-forget
+  //       완료를 위한 retry window. polling subscribe 가 추가 안전망.
   (async () => {
     let initial = null;
-    for(let i=0; i<2; i++){
+    for(let i=0; i<4; i++){
       try{ initial = await FB.get(`card_battles/${roomId}`); }catch(_){ initial = null; }
       if(initial) break;
       await new Promise(r => setTimeout(r, 350 * (i+1)));
