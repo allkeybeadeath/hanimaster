@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v7.1';                  // ★ 로비 표시용 (2026-05) — v7.1: 도홍경 사진 + 멀티 진단 도구
-const APP_BUILD   = '2026.05.17g';
+const APP_VERSION = 'v8';                    // ★ 로비 표시용 (2026-05) — v8: 본초 맛 색 + 진단 도구 + 전탕 힌트 차단 + forfeit 통합
+const APP_BUILD   = '2026.05.17k';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -1077,6 +1077,20 @@ function recordChip(rec, size){
 
 // ───── 7. 라우팅 ─────────────────────────────────────────────────────────────
 function setTab(name){
+  // v7.2: 배틀 중 외부 탭 이동 가드 — 확인 모달 + forfeit 처리
+  //   결과 화면이거나 명시적으로 'battle' 탭 호출이면 통과.
+  //   _inBattleSession 이 true 인데 외부 탭으로 가려고 하면 모달 띄우고 탭 이동 중단.
+  if(_inBattleSession && name !== 'battle'){
+    confirmLeaveBattle(() => {
+      // 확인됨 — forfeit 처리 후 탭 이동
+      forfeitCurrentBattle().finally(() => {
+        _inBattleSession = false;
+        _battleSessionMeta = null;
+        setTab(name);  // 가드 통과 후 재호출
+      });
+    });
+    return;
+  }
   // v2.2.2: 다른 탭으로 이동 시 멀티 로비 SSE/idle 정리
   if(typeof stopLobbyStreams === 'function') stopLobbyStreams();
   if(typeof stopLobbyIdle    === 'function') stopLobbyIdle();
@@ -1092,6 +1106,105 @@ function setTab(name){
   if(FB && S.userId) recordPresence();
 }
 window.setTab = setTab;
+
+// v7.2: 배틀 이탈 확인 모달
+function confirmLeaveBattle(onConfirm){
+  const meta = _battleSessionMeta || {};
+  const modeKo = meta.mode === 'card' ? '카드 對決' : '5지선다 對決';
+  openModal(`
+    <div style="text-align:center;padding:8px 4px 4px">
+      <div class="han" style="font-size:34px;color:var(--zhusha-d);margin-bottom:6px">敗</div>
+      <h3 style="font-family:var(--font-display);font-size:18px;color:var(--zhusha-d);margin-bottom:10px">정말 ${esc(modeKo)}에서 나가시겠습니까?</h3>
+      <div style="font-size:13px;color:var(--mo);margin-bottom:6px">
+        나가면 <b style="color:var(--zhusha-d)">패배 처리</b>되어 베팅한 氣를 잃습니다.<br>
+        상대에게는 부전승이 부여됩니다.
+      </div>
+      <div style="font-size:11px;color:var(--gutong);margin-bottom:16px">방 ID: ${esc(meta.roomId||'?')}</div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button class="btn" id="leave-cancel" type="button">계속 對決</button>
+        <button class="btn btn-o" id="leave-confirm" type="button" style="color:var(--zhusha-d);border-color:var(--zhusha-d)">나가기 (패배)</button>
+      </div>
+    </div>
+  `);
+  $('#leave-cancel').addEventListener('click', () => closeModal());
+  $('#leave-confirm').addEventListener('click', () => {
+    closeModal();
+    onConfirm();
+  });
+}
+window.confirmLeaveBattle = confirmLeaveBattle;
+
+// v7.2: 현재 진행 중 배틀에 대한 forfeit 처리
+//   5지선다: players/{me}/done=true, score=0, surrendered=true 마킹
+//             → 상대 클라이언트는 allDone 검사에서 즉시 정산 (자기 승리)
+//   카드:    result={winner:oppId, by:'forfeit'} + status='done'
+//             → 상대 _cardRoomStream 이 즉시 결과 화면 표시
+//   beforeunload(keepalive)에서도 호출 가능하도록 keepalive 옵션 분기 제공.
+async function forfeitCurrentBattle(opts){
+  const meta = _battleSessionMeta;
+  if(!meta || !meta.roomId) return;
+  const keepalive = !!(opts && opts.keepalive);
+  const base = FB && FB.base;
+  if(!base) return;
+  try{
+    if(meta.mode === 'card'){
+      // 카드 對決 — 상대를 승자로
+      const oppId = meta.oppId;
+      if(!oppId){ return; }
+      const result = {winner: oppId, by: 'forfeit', forfeitedBy: S.userId, finishedAt: Date.now()};
+      // PUT result + PUT status (병렬, keepalive 가능)
+      fetch(`${base}/card_battles/${meta.roomId}/result.json`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(result), keepalive
+      }).catch(()=>{});
+      await fetch(`${base}/card_battles/${meta.roomId}/status.json`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify('done'), keepalive
+      }).catch(()=>{});
+    } else {
+      // 5지선다 — 자기 done=true + surrendered=true. 상대는 자동 승리.
+      const patch = {done:true, score:0, surrendered:true, finishedAt:Date.now()};
+      await fetch(`${base}/battles/${meta.roomId}/players/${S.userId}.json`, {
+        method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(patch), keepalive
+      }).catch(()=>{});
+    }
+    // 로컬 측: 氣 정산 (베팅은 이미 에스크로로 차감됨, 추가 손실 없음 — 베팅 손실 = 패배 정산)
+    // battleHistory 에 forfeit 기록 추가
+    S.battleHistory = S.battleHistory || [];
+    S.battleHistory.unshift({
+      ts: Date.now(), win: false, draw: false, forfeit: true, surrender: true,
+      myScore: 0, oppScore: '-',
+      opponentName: '(상대)', opponentChar: null,
+      bet: 0, deltaQi: 0, factionBonus: 0, faction: S.faction,
+      mode: meta.mode
+    });
+    if(S.battleHistory.length > 20) S.battleHistory = S.battleHistory.slice(0,20);
+    // 패배 record 갱신
+    if(!keepalive && FB && S.userId){
+      try{
+        const rec = (await FB.get(`stats/records/${S.userId}`)) || {w:0,l:0,d:0};
+        rec.l = (rec.l||0)+1;
+        rec.lastTs = Date.now();
+        await FB.put(`stats/records/${S.userId}`, rec);
+      }catch(_){}
+    }
+    saveState();
+  }catch(_){}
+}
+window.forfeitCurrentBattle = forfeitCurrentBattle;
+
+// v7.2: 페이지 닫기/새로고침/뒤로가기 가드
+//   beforeunload 에서 browser confirm + 백그라운드로 forfeit 시도 (keepalive)
+window.addEventListener('beforeunload', (e) => {
+  if(!_inBattleSession) return;
+  // forfeit 시도 (keepalive fetch — async 완료 못 기다림)
+  try{ forfeitCurrentBattle({keepalive:true}); }catch(_){}
+  // 브라우저 표준 확인 다이얼로그 (사용자 작업 종료 방지)
+  e.preventDefault();
+  e.returnValue = '對決 중입니다. 페이지를 떠나면 패배 처리됩니다.';
+  return e.returnValue;
+});
 
 const ROUTES = {
   home: renderHome,
@@ -1727,6 +1840,12 @@ function calcBet(level){
 
 // 배틀 상태 (메모리)
 let _battle = null;
+// v7.2: 배틀 진행 중 (intro/play 단계, 결과 화면 진입 전) — 탭 이탈 가드용
+//   true 면 setTab(외부 탭) 호출 시 confirm 모달 + forfeit 처리
+//   startBattle / startCardBattle / 인트로 진입 시 → true
+//   showResult / renderCardResult 진입 시 → false (결과 화면에서는 자유 이동)
+let _inBattleSession = false;
+let _battleSessionMeta = null;   // {mode:'quiz'|'card', roomId, oppId}
 let _lobbyTimer = null;          // (legacy) 폴링 fallback 시에만 사용
 let _lobbySelfTimer = null;
 // v2.2.2: SSE 스트림 + 둘러보는 중(idle) 프레전스
@@ -1863,9 +1982,11 @@ function openBattleLobby(){
         <div style="font-size:12.5px;line-height:1.6">
           베팅 <b class="seal" style="color:var(--zhusha-d)">${bet.toLocaleString()} 氣 (현재 氣의 25%)</b><br>
           ① 양측이 무작위 3개 證 중 1개를 10초 안에 선택<br>
-          ② 공유 1덱(본초 카드) + 보드 초기 3장<br>
-          ③ 매 턴 증상 공개 → 神급 스킬(게임 1회) → 전탕 or 턴 종료<br>
-          ④ 상대 證에 맞는 처방을 본초로 먼저 구성한 쪽이 승리
+          ② 공유 1덱(본초 카드) + 보드 초기 3장 · 게임 시작 시 <b>양측 증상 1개씩 자동 공개</b><br>
+          ③ 매 턴: 神급 스킬(게임 1회) → 전탕 시도 or 턴 종료 · 턴 종료 시 덱에서 1장 보드로<br>
+          ④ <b>덱 소진 후</b>엔 자기 턴마다 증상 1개 자동 공개<br>
+          ⑤ <span style="color:var(--zhusha-d)"><b>전탕 빗나가면</b> 페널티로 자기 증상 1개 강제 공개</span><br>
+          ⑥ 상대 證에 맞는 처방을 본초로 먼저 구성한 쪽이 승리
         </div>
       `;
       const ruleCard = view.querySelector('.card[style*="--mi"]');
@@ -2317,6 +2438,10 @@ async function startBattle(roomId, isCreator){
   const room = await FB.get(`battles/${roomId}`);
   if(!room){ toast('방을 찾을 수 없음'); setTab('hall'); return; }
   _battle = { roomId, isCreator, room };
+  // v7.2: 배틀 진행 중 플래그 ON — 탭 이탈 가드 활성
+  const oppId = Object.keys(room.players||{}).find(k => k !== S.userId) || null;
+  _inBattleSession = true;
+  _battleSessionMeta = { mode:'quiz', roomId, oppId };
   // 戰鬪 BGM 시작 — 긴박감 (사용자 토글과 무관하게 켜짐)
   try{ bgm.startBattle(); }catch(_){}
   // 인트로 컷 (對決開始 + 명언 말풍선)
@@ -2570,6 +2695,9 @@ async function renderBattleGame(roomId){
   }
 
   async function showResult(room, forfeit){
+    // v7.2: 결과 화면 진입 — 탭 이탈 가드 해제
+    _inBattleSession = false;
+    _battleSessionMeta = null;
     bgm.stopBattle();  // 戰鬪 BGM 종료 후 → 승/패 BGM 전환
     const players = room.players;
     const me = players[S.userId];
@@ -5140,7 +5268,7 @@ const CARD_NOISE_HERBS  = 10;               // 노이즈 본초 장수
 
 // 신급 캐릭터 → 스킬 매핑
 const CARD_SKILLS = {
-  huangdi:  { id:'fake_symptom',   han:'欺症',  ko:'거짓 증상', desc:'다음 증상 공개에 무관한 증상 1개를 공개' },
+  huangdi:  { id:'fake_symptom',   han:'欺症',  ko:'거짓 증상', desc:'다음 강제 공개(턴별 자동/페널티)를 무관한 증상으로 대체' },
   shennong: { id:'summon_herb',    han:'召草',  ko:'본초 召喚', desc:'본초 한자 1개 입력 — 덱에 있으면 보드로' },
   fuxi:     { id:'foresee_deck',   han:'卦知',  ko:'八卦 預知', desc:'덱 상위 3장을 자기만 미리 봄' },
   nuwa:     { id:'transmute_board',han:'造化',  ko:'補天造化', desc:'보드 본초 1장을 덱에서 무작위로 교체' },
@@ -5339,8 +5467,10 @@ async function createCardBattleRoom(roomId, me, opp, bet){
         syndromeChosen: null,
         revealedSymptoms: [],
         skillUsed: false,
-        fakeSymptomNext: null,           // 황제 스킬 결과 (다음 증상 공개에 적용)
-        foreseenDeck: null               // 복희 스킬 결과
+        fakeSymptomNext: null,           // 황제 스킬 결과 (다음 강제 공개를 거짓으로 대체)
+        foreseenDeck: null,              // 복희 스킬 결과
+        initialRevealed: false,          // v7.3: 게임 시작 자동 공개 완료 마커 (중복 방지)
+        lastAutoRevealTurnIdx: -1        // v7.3: 덱 빈 단계 턴별 자동 공개 마커
       },
       [opp.userId]: {
         userId: opp.userId, name: opp.name||'무명',
@@ -5350,7 +5480,9 @@ async function createCardBattleRoom(roomId, me, opp, bet){
         revealedSymptoms: [],
         skillUsed: false,
         fakeSymptomNext: null,
-        foreseenDeck: null
+        foreseenDeck: null,
+        initialRevealed: false,
+        lastAutoRevealTurnIdx: -1
       }
     },
     deck, board, turn: firstTurn, turnIdx: 0,
@@ -5376,6 +5508,10 @@ async function startCardBattle(roomId, isCreator){
   `;
   bgm.startBattle && bgm.startBattle();
 
+  // v7.2: 배틀 진행 중 플래그 ON (탭 이탈 가드용) — oppId 는 첫 SSE 콜백에서 확정
+  _inBattleSession = true;
+  _battleSessionMeta = { mode:'card', roomId, oppId:null };
+
   // 방 데이터 구독
   _cardRoomStream = FB.subscribe(`card_battles/${roomId}`, (room) => {
     if(!room){
@@ -5384,6 +5520,10 @@ async function startCardBattle(roomId, isCreator){
       return;
     }
     _cardRoomState = room;
+    // v7.2: oppId 보강 (forfeit 시 상대 식별용)
+    if(_battleSessionMeta && !_battleSessionMeta.oppId && room.players){
+      _battleSessionMeta.oppId = Object.keys(room.players).find(k => k !== S.userId) || null;
+    }
     renderCardBattle(roomId, room);
   });
 }
@@ -5520,7 +5660,20 @@ function renderCardPlaying(roomId, room, me, opp){
   const isDivineMe  = myChar  && myChar.category === 'divine';
   const skillMeta = isDivineMe ? CARD_SKILLS[me.character] : null;
 
-  // 자기 증상 (남은 미공개 + 황제 스킬 fake 옵션)
+  // ── v7.3: 강제 공개 트리거 (수동 공개 액션 제거 — 모두 자동/페널티) ──
+  //   ① 게임 시작 자동 공개 (initialRevealed=false 면 자기 것 1개 공개, 1회만)
+  //   ② 덱 빈 후 자기 턴 시작 자동 공개 (lastAutoRevealTurnIdx !== turnIdx 면 자기 것 1개 공개)
+  //   ③ 페널티 공개 (attemptDecoct 오답 처리 분기에서)
+  const deckEmpty = (room.deck||[]).length === 0;
+  if(!me.initialRevealed){
+    // ① — race 없는 자기 PUT 만. SSE 재진입 후 initialRevealed=true 로 갱신되어 건너뜀.
+    autoRevealOneSymptom(roomId, room, me, mySyn, {kind:'initial'}).catch(_=>{});
+  } else if(isMyTurn && deckEmpty && (me.lastAutoRevealTurnIdx !== room.turnIdx)){
+    // ② — 덱 빈 단계 턴별 자동 공개
+    autoRevealOneSymptom(roomId, room, me, mySyn, {kind:'deck_empty', turnIdx: room.turnIdx}).catch(_=>{});
+  }
+
+  // 자기 증상 (남은 미공개 + 공개됨 — 자기 화면에서는 모두 표시)
   const myRevealed = me.revealedSymptoms||[];
   const myRemaining= (mySyn.symptoms||[]).filter(s => !myRevealed.includes(s));
 
@@ -5543,8 +5696,15 @@ function renderCardPlaying(roomId, room, me, opp){
     <!-- 중앙: 보드 + 덱 -->
     <div class="cb-board-wrap">
       <div class="cb-board-meta">
-        턴 ${room.turnIdx+1}/${CARD_TURN_MAX} · 덱 ${room.deck.length}장 ·
+        턴 ${room.turnIdx+1}/${CARD_TURN_MAX} · 덱 ${room.deck.length}장${deckEmpty?' <span style="color:var(--zhusha-d);font-size:11px">[증상 공개 단계]</span>':''} ·
         ${isMyTurn ? '<b style="color:var(--feicui)">나의 턴</b>' : '<b style="color:var(--gutong)">상대 턴</b>'}
+      </div>
+      <!-- v7.5: 五味 색 범례 -->
+      <div class="cb-taste-legend" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;margin:4px 0 6px;font-size:10.5px;font-family:var(--font-display)">
+        ${['辛','甘','苦','酸','鹹','淡','澁'].map(t => {
+          const c = herbTasteColor(t+',');
+          return `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:8px;background:${c.bg};border:1px solid ${c.bd};color:${c.accent}">${t}</span>`;
+        }).join('')}
       </div>
       <div class="cb-board" id="cb-board">
         ${(room.board||[]).map(h => renderHerbCardHTML(h)).join('')}
@@ -5559,27 +5719,30 @@ function renderCardPlaying(roomId, room, me, opp){
         <span class="cb-me-syn">— <b>${esc(mySyn.han)}</b> (${esc(mySyn.ko)})</span>
       </div>
       <div class="cb-me-sym">
-        <div class="cb-me-sym-title">나의 증상 (공개되지 않은)</div>
+        <div class="cb-me-sym-title">나의 증상 (전체 — 공개 ${myRevealed.length}/${(mySyn.symptoms||[]).length})</div>
         <div class="cb-me-sym-list">
-          ${myRemaining.map(s => `<span class="cb-sym-chip own ${isMyTurn?'pickable':''}" data-sym="${esc(s)}">${esc(s)}</span>`).join('')}
+          ${myRemaining.map(s => `<span class="cb-sym-chip own" data-sym="${esc(s)}">${esc(s)}</span>`).join('')}
           ${myRevealed.map(s => `<span class="cb-sym-chip own revealed-mine">${esc(s)}</span>`).join('')}
         </div>
+        ${me.fakeSymptomNext ? `<div class="cb-fake-banner" style="margin-top:6px">黃帝 欺症 발동 중 — 다음 강제 공개는 <b>거짓 증상 "${esc(me.fakeSymptomNext)}"</b> 로 대체됩니다</div>` : ''}
       </div>
       <div class="cb-me-act">
-        <button class="btn ${isMyTurn?'':'disabled'}" id="cb-act-reveal" ${isMyTurn?'':'disabled'}>증상 공개</button>
         ${skillMeta && !me.skillUsed ? `<button class="btn btn-gold ${isMyTurn?'':'disabled'}" id="cb-act-skill" ${isMyTurn?'':'disabled'}>${esc(skillMeta.han)} (${esc(skillMeta.ko)})</button>` : ''}
         <button class="btn btn-o ${isMyTurn?'':'disabled'}" id="cb-act-decoct" ${isMyTurn?'':'disabled'}>전탕 시도</button>
         <button class="btn btn-o ${isMyTurn?'':'disabled'}" id="cb-act-end" ${isMyTurn?'':'disabled'}>턴 종료</button>
       </div>
       ${skillMeta ? `<div class="cb-skill-hint">神급 스킬: <b>${esc(skillMeta.han)}</b> — ${esc(skillMeta.desc)}${me.skillUsed?' <span style="color:var(--zhusha-d)">[사용 완료]</span>':''}</div>` : ''}
       <div class="cb-action-hint" id="cb-action-hint">
-        ${isMyTurn ? '증상을 공개하거나 전탕을 시도하세요.' : '상대 턴 진행 중…'}
+        ${isMyTurn
+          ? (deckEmpty
+              ? '덱 소진 — 매 턴 자기 증상 1개가 자동 공개됩니다. 전탕을 시도하거나 턴을 종료하세요.'
+              : '전탕을 시도하거나 턴을 종료하세요. 턴 종료 시 덱에서 1장이 보드로 옵니다.')
+          : '상대 턴 진행 중…'}
       </div>
     </div>
   `;
 
   if(isMyTurn){
-    $('#cb-act-reveal') && $('#cb-act-reveal').addEventListener('click', () => openSymptomRevealModal(roomId, room, me, mySyn));
     if(skillMeta && !me.skillUsed){
       $('#cb-act-skill') && $('#cb-act-skill').addEventListener('click', () => openSkillModal(roomId, room, me, opp, skillMeta));
     }
@@ -5593,28 +5756,100 @@ function renderCardPlaying(roomId, room, me, opp){
   }
 }
 
+// v7.3: 강제 증상 공개 (자동/페널티 공통)
+//   opts.kind: 'initial' (게임 시작) | 'deck_empty' (덱 빈 턴별) | 'penalty' (오답 후)
+//   opts.turnIdx: 'deck_empty' 일 때 사용 (lastAutoRevealTurnIdx 갱신용)
+//   opts.pick: 'penalty' 시 사용자가 선택한 증상 (없으면 random)
+//   fakeSymptomNext 가 있으면 그것을 노출 (자기 진짜 증상 보전, fake 만 소비)
+async function autoRevealOneSymptom(roomId, room, me, mySyn, opts){
+  opts = opts || {};
+  const fb = FB && FB.base ? FB : null;
+  if(!fb) return false;
+  // 황제 fake 우선
+  if(me.fakeSymptomNext){
+    const newRev = (me.revealedSymptoms||[]).slice();
+    newRev.push(me.fakeSymptomNext);
+    try{
+      await FB.put(`card_battles/${roomId}/players/${S.userId}/revealedSymptoms`, newRev);
+      await FB.put(`card_battles/${roomId}/players/${S.userId}/fakeSymptomNext`, null);
+      if(opts.kind === 'initial') await FB.put(`card_battles/${roomId}/players/${S.userId}/initialRevealed`, true);
+      if(opts.kind === 'deck_empty' && typeof opts.turnIdx === 'number'){
+        await FB.put(`card_battles/${roomId}/players/${S.userId}/lastAutoRevealTurnIdx`, opts.turnIdx);
+      }
+      appendCardLog(roomId, room, `${me.name}: ${opts.kind==='initial'?'게임 시작':opts.kind==='deck_empty'?'턴별':'페널티'} 공개 (黃帝 欺症)`);
+    }catch(_){}
+    return true;
+  }
+  // 일반 강제 공개
+  const remaining = (mySyn.symptoms||[]).filter(s => !(me.revealedSymptoms||[]).includes(s));
+  if(!remaining.length){
+    // 더 공개할 게 없으면 마커만 갱신 (게임 계속)
+    try{
+      if(opts.kind === 'initial') await FB.put(`card_battles/${roomId}/players/${S.userId}/initialRevealed`, true);
+      if(opts.kind === 'deck_empty' && typeof opts.turnIdx === 'number'){
+        await FB.put(`card_battles/${roomId}/players/${S.userId}/lastAutoRevealTurnIdx`, opts.turnIdx);
+      }
+    }catch(_){}
+    return false;
+  }
+  const sym = opts.pick && remaining.includes(opts.pick)
+    ? opts.pick
+    : remaining[Math.floor(Math.random()*remaining.length)];
+  const newRev = (me.revealedSymptoms||[]).slice();
+  newRev.push(sym);
+  try{
+    await FB.put(`card_battles/${roomId}/players/${S.userId}/revealedSymptoms`, newRev);
+    if(opts.kind === 'initial') await FB.put(`card_battles/${roomId}/players/${S.userId}/initialRevealed`, true);
+    if(opts.kind === 'deck_empty' && typeof opts.turnIdx === 'number'){
+      await FB.put(`card_battles/${roomId}/players/${S.userId}/lastAutoRevealTurnIdx`, opts.turnIdx);
+    }
+    const kindKo = opts.kind === 'initial' ? '게임 시작 공개' :
+                   opts.kind === 'deck_empty' ? '턴별 공개' :
+                   opts.kind === 'penalty' ? '페널티 공개' : '강제 공개';
+    appendCardLog(roomId, room, `${me.name}: ${kindKo} — ${sym}`);
+  }catch(_){}
+  return true;
+}
+
 // 본초 카드 SVG HTML
+// v7.5: 본초 맛(味) → 五行 팔레트 (전통: 辛→金, 甘→土, 苦→火, 酸→木, 鹹→水)
+//   HERBS.sm 의 콤마 앞 부분 (예: "甘微苦,微溫" → "甘微苦") 의 첫 맛 글자로 결정.
+//   微/大 같은 prefix 무시. 복합 맛은 주(主) 맛 = 첫 글자 원칙.
+function herbTasteColor(sm){
+  const fallback = {bg:'#F5E6D3', bd:'#876A36', accent:'#5E4920', taste:'?'};
+  if(!sm) return fallback;
+  const tasteSection = String(sm).split(',')[0] || '';
+  // 첫 맛 글자만 추출 (微·大 등 강도 prefix 제거)
+  const cleaned = tasteSection.replace(/[微大小極]/g, '');
+  const first = cleaned[0] || '';
+  switch(first){
+    case '辛': return {bg:'#FFF1E4', bd:'#C97A3A', accent:'#7A3A14', taste:'辛'};
+    case '甘': return {bg:'#FFF8D8', bd:'#B89A3A', accent:'#5E4920', taste:'甘'};
+    case '苦': return {bg:'#FBE2E0', bd:'#9C3030', accent:'#5E1414', taste:'苦'};
+    case '酸': return {bg:'#E2F3E5', bd:'#3D7E50', accent:'#1E5030', taste:'酸'};
+    case '鹹':
+    case '咸': return {bg:'#DDE7F5', bd:'#3D5E9C', accent:'#1E3060', taste:'鹹'};
+    case '淡': return {bg:'#ECECEC', bd:'#7A7A7A', accent:'#3D3D3D', taste:'淡'};
+    case '澁':
+    case '澀': return {bg:'#E8DCC0', bd:'#7A5C30', accent:'#3D2E14', taste:'澁'};
+    default:   return fallback;
+  }
+}
+
 function renderHerbCardHTML(herb, opts){
   opts = opts || {};
-  // 약재 카테고리·성미 — HERBS 에서 찾아 색상 결정
+  // HERBS 에서 약재 찾기 (han 또는 별칭)
   const h = (typeof HERBS !== 'undefined') ? HERBS.find(x => x.han === herb || x.han_alt === herb) : null;
-  // 성미 색상: 寒=청·熱=홍·溫=주·凉=취·平=황 (대략)
-  let bg = '#F5E6D3', bd = '#876A36', accent = '#9C3030';
-  if(h){
-    const props = (h.properties || h.flavor || '');
-    if(/寒/.test(props))      { bg='#E8F3F5'; bd='#3D6E7E'; accent='#2C5A6E'; }
-    else if(/熱/.test(props)) { bg='#FBE6E2'; bd='#9C3030'; accent='#722020'; }
-    else if(/溫/.test(props)) { bg='#F8DEC9'; bd='#A85A1E'; accent='#7C3D14'; }
-    else if(/凉/.test(props)) { bg='#E0EBE3'; bd='#2A7060'; accent='#1E5043'; }
-    else if(/平/.test(props)) { bg='#F1E5C0'; bd='#876A36'; accent='#5E4920'; }
-  }
-  const ko = (h && h.ko) ? h.ko : '';
+  // v7.5: 맛 기준 五行 팔레트
+  const c = herbTasteColor(h && h.sm);
+  const ko    = (h && h.ko) ? h.ko : '';
   const click = opts.click ? `data-herb="${esc(herb)}" style="cursor:pointer"` : '';
   const klass = opts.selected ? 'cb-card-selected' : '';
   return `
-    <div class="cb-herb-card ${klass}" ${click} style="background:${bg};border-color:${bd};color:${accent}">
+    <div class="cb-herb-card ${klass}" ${click} style="background:${c.bg};border-color:${c.bd};color:${c.accent}">
       <div class="cb-herb-han">${esc(herb)}</div>
       ${ko ? `<div class="cb-herb-ko">${esc(ko)}</div>` : ''}
+      <div class="cb-herb-taste" style="font-size:9px;letter-spacing:.08em;opacity:.65;margin-top:2px;font-family:var(--font-display)">${esc(c.taste)}</div>
     </div>
   `;
 }
@@ -5829,14 +6064,16 @@ function openSkillModal(roomId, room, me, opp, skillMeta){
 }
 
 // 전탕 시도 모달 (26 처방 중 1개 선택)
+// v7.2: 힌트 제거 — "시도 가능 처방" 분류와 "부족 본초" 노출 모두 폐기.
+//   사용자는 보드 本草를 직접 보고 추리해 26 처방 중 골라야 한다.
+//   본초 부족 / 오답 판정은 클릭 후 attemptDecoct 에서 처리.
 function openDecoctModal(roomId, room, me, opp){
-  const board = new Set(room.board||[]);
-  const candidates = FORMULAS.map(f => {
-    const comp = f.composition||[];
-    const have = comp.every(h => board.has(h));
-    return {f, have, missing: comp.filter(h => !board.has(h))};
+  // 26 처방을 章 → 처방 순서로 정렬 (게임 내 일관된 순서 유지)
+  const formulas = FORMULAS.slice().sort((a,b) => {
+    const ca = (a.chapter||'').localeCompare(b.chapter||'');
+    if(ca !== 0) return ca;
+    return (a.id||'').localeCompare(b.id||'');
   });
-  const available = candidates.filter(c => c.have).sort((a,b)=> (b.f.composition.length - a.f.composition.length));
 
   const m = document.createElement('div');
   m.className = 'overlay';
@@ -5844,25 +6081,16 @@ function openDecoctModal(roomId, room, me, opp){
     <div class="modal" style="max-width:640px">
       <div class="modal-title">전탕 시도 (煎湯)</div>
       <div class="modal-body">
-        <div style="font-size:12px;color:var(--mo-l);margin-bottom:8px">
-          처방의 모든 構成 本草가 보드에 있어야 시도 가능. 상대 證에 맞는 처방이면 승리, 아니면 턴 손실.
+        <div style="font-size:12px;color:var(--mo-l);margin-bottom:10px;line-height:1.55">
+          26 처방 중 하나를 선택. 상대 證에 맞는 처방이면 즉시 승리,
+          아니면 턴 손실. 보드 本草만으로 추리하세요.
         </div>
-        <div style="font-size:12.5px;font-family:var(--font-display);color:var(--zhusha-d);margin-bottom:6px">시도 가능 처방 (${available.length})</div>
         <div class="cb-formula-grid">
-          ${available.length ? available.map(c => `
-            <button class="cb-formula-btn" type="button" data-fid="${c.f.id}">
-              <div class="cb-formula-han">${esc(c.f.han)}</div>
-              <div class="cb-formula-ko">${esc(c.f.ko)} · ${c.f.composition.length}味</div>
+          ${formulas.map(f => `
+            <button class="cb-formula-btn" type="button" data-fid="${esc(f.id)}">
+              <div class="cb-formula-han">${esc(f.han)}</div>
+              <div class="cb-formula-ko">${esc(f.ko)}</div>
             </button>
-          `).join('') : '<div class="cb-empty">시도 가능한 처방 없음</div>'}
-        </div>
-        <div style="margin-top:14px;font-size:12px;font-family:var(--font-display);color:var(--gutong)">참고 (불완전, 부족 본초 표시)</div>
-        <div class="cb-formula-grid" style="opacity:0.55">
-          ${candidates.filter(c=>!c.have).slice(0,6).map(c => `
-            <div class="cb-formula-btn" style="cursor:default">
-              <div class="cb-formula-han">${esc(c.f.han)}</div>
-              <div class="cb-formula-ko" style="color:var(--zhusha-d)">부족: ${c.missing.slice(0,3).map(esc).join(',')}${c.missing.length>3?'…':''}</div>
-            </div>
           `).join('')}
         </div>
       </div>
@@ -5882,25 +6110,99 @@ function openDecoctModal(roomId, room, me, opp){
 }
 
 // 전탕 판정
+// v7.2g: 본초 부족 = 오답과 완전 동일 처리 (페널티 증상 공개 + 턴 손실).
+//   26회 brute-force 차단. 어떤 본초가 부족한지는 노출하지 않음.
 async function attemptDecoct(roomId, room, me, opp, formulaId){
   const f = FORMULAS.find(x => x.id === formulaId);
   if(!f){ toast('처방 데이터 없음','red'); return; }
-  // 본초 모두 보드에 있는지 재확인
-  const board = new Set(room.board||[]);
-  if(!f.composition.every(h => board.has(h))){
-    toast('보드에 본초 부족','red'); return;
-  }
-  const oppFid = SYNDROME_BY_ID[opp.syndromeChosen]?.formulaId;
-  const correct = (formulaId === oppFid);
-  appendCardLog(roomId, room, `${me.name}: 전탕 시도 — ${f.han} → ${correct?'✓ 정답':'✗ 오답'}`);
+  const board   = new Set(room.board||[]);
+  const haveAll = f.composition.every(h => board.has(h));
+  const oppFid  = SYNDROME_BY_ID[opp.syndromeChosen]?.formulaId;
+  const correct = haveAll && (formulaId === oppFid);
+
+  // 로그 — 본초 부족도 시도 횟수에 포함, 공개 로그에 별도 표기
+  let logTag;
+  if(correct)       logTag = '✓ 정답';
+  else if(!haveAll) logTag = '✗ 본초 부족';
+  else              logTag = '✗ 오답';
+  appendCardLog(roomId, room, `${me.name}: 전탕 시도 — ${f.han} → ${logTag}`);
+
   if(correct){
-    // 승리 — settleCardBattle
     await settleCardBattle(roomId, room, S.userId, 'attack', formulaId);
-  } else {
-    // 오답 → 자동 턴 종료
-    toast(`✗ 오답: ${f.han} (상대 證 = ${SYNDROME_BY_ID[opp.syndromeChosen]?.han||'?'})`, 'red');
-    await endCardTurn(roomId, room);
+    return;
   }
+  // 본초 부족 + 오답 둘 다 → 페널티 (자기 증상 강제 공개) + 턴 손실
+  const msg = haveAll
+    ? `✗ 오답 — 자기 증상 1개를 공개해야 합니다`
+    : `✗ 본초 부족 — 자기 증상 1개를 공개해야 합니다`;
+  toast(msg, 'red');
+  const mySyn = SYNDROME_BY_ID[me.syndromeChosen];
+  await openPenaltyRevealModal(roomId, room, me, mySyn, f);
+  await endCardTurn(roomId, room);
+}
+
+// v7.3: 페널티 공개 모달 — 자기 미공개 증상 중 1개 강제 선택
+//   黃帝 fakeSymptomNext 가 있으면 모달 표시 후 자동 적용 (사용자 선택 무의미)
+//   타임아웃 6초 — 응답 없으면 무작위 선택
+function openPenaltyRevealModal(roomId, room, me, mySyn, attemptedFormula){
+  return new Promise((resolve) => {
+    const remaining = (mySyn.symptoms||[]).filter(s => !(me.revealedSymptoms||[]).includes(s));
+    const hasFake = !!me.fakeSymptomNext;
+    // 더 공개할 게 없고 fake 도 없으면 즉시 resolve (게임 막바지)
+    if(!remaining.length && !hasFake){
+      toast('공개할 증상이 더 없습니다','gold');
+      resolve(); return;
+    }
+
+    const m = document.createElement('div');
+    m.className = 'overlay';
+    m.innerHTML = `
+      <div class="modal" style="max-width:520px">
+        <div class="modal-title" style="color:var(--zhusha-d)">⚠ 페널티 — 자기 증상 1개 공개</div>
+        <div class="modal-body">
+          <div style="margin-bottom:10px;font-size:12.5px;color:var(--mo)">
+            전탕 시도 (<b>${esc(attemptedFormula.han)}</b>)가 빗나갔습니다.
+            추측 리스크로 <b style="color:var(--zhusha-d)">자기 證 증상 1개</b>를 골라 상대에게 공개해야 합니다.
+          </div>
+          ${hasFake ? `<div class="cb-fake-banner" style="margin-bottom:8px">黃帝 欺症 발동 중 — 어느 것을 골라도 <b>거짓 증상 "${esc(me.fakeSymptomNext)}"</b> 가 공개됩니다.</div>` : ''}
+          <div style="margin:6px 0;font-size:11.5px;color:var(--mo-l)">남은 증상 (6초 안에 선택 — 미선택 시 무작위):</div>
+          <div class="cb-sym-grid" id="cb-penalty-grid">
+            ${remaining.length
+              ? remaining.map(s => `<button class="cb-sym-btn" type="button" data-sym="${esc(s)}">${esc(s)}</button>`).join('')
+              : '<div style="color:var(--gutong);padding:8px">남은 미공개 증상 없음 (fake 만 공개)</div>'}
+          </div>
+          <div style="margin-top:8px;font-size:11px;color:var(--gutong);text-align:right" id="cb-penalty-timer">6초</div>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+
+    let done = false;
+    let remain = 6;
+    const timerEl = m.querySelector('#cb-penalty-timer');
+    const tick = setInterval(() => {
+      remain--;
+      if(timerEl) timerEl.textContent = `${remain}초`;
+      if(remain <= 0){
+        clearInterval(tick);
+        if(!done){ done = true; finish(null); }
+      }
+    }, 1000);
+
+    const finish = async (pick) => {
+      if(m.parentNode) m.remove();
+      try{
+        await autoRevealOneSymptom(roomId, room, me, mySyn, {kind:'penalty', pick: pick||undefined});
+      }catch(_){}
+      resolve();
+    };
+
+    m.querySelectorAll('.cb-sym-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if(done) return; done = true; clearInterval(tick);
+        finish(btn.dataset.sym);
+      });
+    });
+  });
 }
 
 // 턴 종료 (덱 1장 보드로 + 상대로 턴 넘김)
@@ -5954,6 +6256,9 @@ async function settleCardBattle(roomId, room, winnerUid, reason, attackedFormula
 
 // 결과 화면
 async function renderCardResult(roomId, room, me, opp){
+  // v7.2: 결과 화면 진입 — 탭 이탈 가드 해제
+  _inBattleSession = false;
+  _battleSessionMeta = null;
   if(_cardChooseTimer){ clearInterval(_cardChooseTimer); _cardChooseTimer=null; }
   const stage = $('#cb-stage');
   const res = room.result || {};
