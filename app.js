@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v8.8';                  // ★ 로비 표시용 (2026-05) — v8.8 critical: FB.subscribe active polling (iOS Safari SSE 비회복 픽스)
-const APP_BUILD   = '2026.05.17u';
+const APP_VERSION = 'v8.9';                  // ★ 로비 표시용 (2026-05) — v8.9 critical: FB.subscribe SSE 완전 제거, paideia 패턴 polling-only (2s)
+const APP_BUILD   = '2026.05.17v';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -252,164 +252,56 @@ const FB = (() => {
       await tryGet('lobby_idle');  await tryPut('lobby_idle');
       return results;
     },
-    // v2.2.2: Firebase RTDB SSE 스트리밍 — 실시간 매칭/대기자 동기화
-    //   const sub = FB.subscribe('lobby/small', snap => updateUI(snap));
-    //   sub.close();
-    // EventSource 미지원·실패 시 폴링으로 자동 폴백.
-    // 콜백은 path 의 현재 스냅샷(객체 or null)을 전달, put/patch 적용 후마다 호출.
+    // v8.9 critical 재작성: paideia 패턴 — polling-only (SSE 완전 제거).
+    //   기존 (v2.2~v8.8): EventSource SSE + 복잡한 폴백 + active polling 병행.
+    //     iOS Safari 에서 SSE 가 첫 메시지 후 끊기면 자동 회복 실패 → cross-client
+    //     변경 안 보이는 근본 문제. v8.8 의 병행 polling 도 SSE 부분이 잔존하여
+    //     race + 중복 emit.
+    //   v8.9: paideia-pwa-v60 의 검증된 패턴을 채택 — 매 2초 fetch GET 으로
+    //     full snapshot 동기화. SSE 없음. AbortController 4초 timeout 으로 hang 방지.
+    //     close() 가 깨끗하게 polling 종료.
+    //   호출처 API 동일 (subscribe(path, onUpdate, opts) → {close, snapshot}).
     subscribe: (path, onUpdate, opts) => {
-      const o = Object.assign({fallbackPollMs: SSE_FALLBACK_POLL_MS}, opts||{});
+      const o = Object.assign({pollMs: 2000, timeoutMs: 4000}, opts||{});
       const url = `${base}/${path}.json`;
       let snapshot = null;
       let closed = false;
-      let es = null;
       let pollTimer = null;
-      let gotFirst = false;
 
-      // v8.5: emit() 렌더 에러를 콘솔에 명시 — 기존 try{}catch(_){} 가 무한 로딩의 원인 (silent fail)
       const emit = () => {
         if(closed) return;
         try{ onUpdate(snapshot); }
         catch(e){
           try{ console.error('[FB.subscribe] onUpdate error', path, e); }catch(_){}
-          // 진단을 위해 마지막 에러를 sub 객체에 노출
           try{ _lastSubError = {path, err: e && e.message || String(e), at: Date.now()}; }catch(_){}
         }
       };
 
-      // 상대 path("/", "/key", "/key/sub")에 put/patch 적용
-      const applyEvent = (type, raw) => {
-        let parsed;
-        try{ parsed = JSON.parse(raw); }catch(_){ return; }
-        const rel = (parsed && parsed.path) || '/';
-        const data = parsed && 'data' in parsed ? parsed.data : null;
-        const parts = rel.split('/').filter(Boolean);
-        if(type === 'put'){
-          if(parts.length === 0){
-            snapshot = data;
-          } else {
-            if(snapshot === null || typeof snapshot !== 'object') snapshot = {};
-            let cur = snapshot;
-            for(let i=0; i<parts.length-1; i++){
-              const k = parts[i];
-              if(cur[k] === null || cur[k] === undefined || typeof cur[k] !== 'object'){
-                cur[k] = {};
-              }
-              cur = cur[k];
-            }
-            const lastK = parts[parts.length-1];
-            if(data === null) delete cur[lastK];
-            else              cur[lastK] = data;
-          }
-        } else if(type === 'patch'){
-          // patch: data 의 키만 merge. value === null 이면 해당 키 삭제.
-          let cur;
-          if(parts.length === 0){
-            if(snapshot === null || typeof snapshot !== 'object') snapshot = {};
-            cur = snapshot;
-          } else {
-            if(snapshot === null || typeof snapshot !== 'object') snapshot = {};
-            cur = snapshot;
-            for(const k of parts){
-              if(cur[k] === null || cur[k] === undefined || typeof cur[k] !== 'object'){
-                cur[k] = {};
-              }
-              cur = cur[k];
-            }
-          }
-          for(const k of Object.keys(data || {})){
-            if(data[k] === null) delete cur[k];
-            else                 cur[k] = data[k];
-          }
-        }
-        emit();
-      };
-
-      const startPolling = async () => {
-        if(pollTimer) return;
-        const tick = async () => {
-          if(closed) return;
-          try{
-            const v = await (async () => {
-              try{
-                const r = await fetch(`${base}/${path}.json`);
-                if(!r.ok) return null;
-                return await r.json();
-              }catch(_){ return null; }
-            })();
-            snapshot = v;
-            emit();
-          }catch(_){}
-          if(!closed) pollTimer = setTimeout(tick, o.fallbackPollMs);
-        };
-        tick();
-      };
-
-      const startSSE = () => {
-        if(typeof EventSource === 'undefined'){ startPolling(); return; }
-        try{ es = new EventSource(url); }
-        catch(_){ startPolling(); return; }
-        es.addEventListener('put',   e => { gotFirst = true; applyEvent('put',   e.data); });
-        es.addEventListener('patch', e => { gotFirst = true; applyEvent('patch', e.data); });
-        es.addEventListener('keep-alive', () => {});
-        es.addEventListener('cancel', () => {
-          try{ es.close(); }catch(_){}
-          if(!closed) startPolling();
-        });
-        es.addEventListener('auth_revoked', () => {
-          try{ es.close(); }catch(_){}
-          if(!closed) startPolling();
-        });
-        es.onerror = () => {
-          // 첫 메시지 전 에러면 SSE 미지원 가능성 → 폴링 폴백.
-          // 그 외엔 브라우저가 자동 재연결하므로 무시.
-          if(!gotFirst){
-            try{ es.close(); }catch(_){}
-            es = null;
-            setTimeout(() => { if(!closed) startPolling(); }, 1200);
-          }
-        };
-      };
-
-      startSSE();
-
-      // v8.8 critical 픽스: SSE 와 병행하는 active polling (5초 주기).
-      // ─────────────────────────────────────────────────────────────────
-      //   iOS Safari (iPad/iPhone) 의 EventSource 는 첫 메시지 후 끊기면
-      //   onerror 가 발화해도 자동 재연결이 실패하는 케이스가 흔함.
-      //   v8.7 까지의 폴백은 onerror + !gotFirst 조건 → 첫 메시지 후
-      //   끊기면 polling 발화 안 함 → cross-client 변경 안 보임.
-      //   해결: 5초마다 무조건 GET 으로 snapshot 강제 동기화.
-      //   SSE 가 정상이면 같은 데이터 → emit 중복 (render 멱등성 의존).
-      //   SSE 가 끊겨도 5초 안에 cross-client 변경 감지 → "상대 결과 대기"
-      //   무한 멈춤 + 카드 방 진입 안 됨 + 매칭 실패 모두 동시 해결.
-      let activePollTimer = null;
-      const ACTIVE_POLL_MS = 3000;  // v8.8: 3초 주기 (critical path 응답성)
-      const activePoll = async () => {
+      const tick = async () => {
         if(closed) return;
+        const ctl = new AbortController();
+        const tm = setTimeout(() => { try{ ctl.abort(); }catch(_){} }, o.timeoutMs);
         try{
-          const ctl = new AbortController();
-          const tm = setTimeout(() => { try{ ctl.abort(); }catch(_){} }, 4500);
-          const r = await fetch(`${base}/${path}.json`, {signal: ctl.signal});
+          const r = await fetch(url, {signal: ctl.signal});
           clearTimeout(tm);
           if(r.ok){
             const v = await r.json();
-            // 깊은 diff 없이 직접 갱신 → emit. 같은 데이터면 onUpdate 가 멱등이므로 무해.
-            snapshot = v;
+            snapshot = (v === null || v === undefined) ? null : v;
             emit();
           }
-        }catch(_){}
-        if(!closed) activePollTimer = setTimeout(activePoll, ACTIVE_POLL_MS);
+        }catch(_){
+          clearTimeout(tm);
+          // 일시적 실패 — 다음 tick 에서 재시도
+        }
+        if(!closed) pollTimer = setTimeout(tick, o.pollMs);
       };
-      // 첫 활성 폴링은 5초 후 시작 (SSE 가 빠르게 자리 잡을 시간 줌)
-      activePollTimer = setTimeout(activePoll, ACTIVE_POLL_MS);
+      // 즉시 첫 fetch (초기 snapshot 빠르게 확보)
+      tick();
 
       return {
         close: () => {
           closed = true;
-          if(es){ try{ es.close(); }catch(_){} es = null; }
           if(pollTimer){ clearTimeout(pollTimer); pollTimer = null; }
-          if(activePollTimer){ clearTimeout(activePollTimer); activePollTimer = null; }
         },
         get snapshot(){ return snapshot; },
       };
@@ -3025,9 +2917,8 @@ async function renderBattleGame(roomId){
     //   기존 v8.5: 1500ms × 50회 = 75초 폴링만. 양측 done 감지가 평균 0.75초 지연.
     //   v8.6: SSE 구독으로 done 변화 즉시 감지 (지연 0) + 폴링 800ms × 31회 = ~25초 백오프 (forfeit 임계 단축)
     //         양측 정상 종료 시 SSE 가 거의 즉시 결과 화면 전이.
-    //   v8.8: active polling (FB.subscribe 3초 주기) 가 SSE 끊겨도 cross-client 변경 감지 → forfeit 30초로 여유.
-    const POLL_MS = 1000;
-    const MAX_TRIES = 30;             // 1000ms × 30 = 30초 (v8.8: 25초 → 30초, active polling 백업 활용)
+    const POLL_MS = 800;
+    const MAX_TRIES = 31;             // 800ms × 31 ≈ 25초 (75초 → 25초)
     const DISCONNECT_FAILS = 3;
     const FORFEIT_AFTER_FAIL_MS = 5000;
     let tries = 0;
