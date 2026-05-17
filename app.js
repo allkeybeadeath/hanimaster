@@ -1,4 +1,4 @@
-/* app.js — 方劑學 v2.0
+/* app.js — 方劑學 v4
  * ============================================================================
  * 中華 帝王風 방제학 학습 PWA
  *
@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v3';                  // ★ 로비 표시용 (2026-05)
-const APP_BUILD   = '2026.05.17';
+const APP_VERSION = 'v5';                    // ★ 로비 표시용 (2026-05) — v5: 四象 진영
+const APP_BUILD   = '2026.05.17d';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -36,7 +36,8 @@ const EXAM_META = {
 
 const PRESENCE_REFRESH_MS = 30 * 1000;     // 30초마다 presence 갱신
 const PRESENCE_FRESH_MS   = 90 * 1000;     // 90초 이내면 "온라인"
-const BATTLE_INTRO_MS     = 5000;          // 인트로 컷 자동 진행
+const BATTLE_INTRO_MS     = 9000;          // v4: 5000→9000 (양측 동시 한문 낭독)
+const BATTLE_INTRO_FORFEIT_MS = 5000;      // v4: 이순재 등 무음 측만 있을 때 단축
 const LOBBY_REFRESH_MS    = 4000;          // (legacy) SSE 실패 시 폴링 fallback 주기
 const LOBBY_FRESH_MS      = 45 * 1000;     // 45초 이내면 대기중 (v2.2.2: 60→45)
 const MATCH_TIMEOUT_MS    = 75 * 1000;     // 75초 매칭 실패 시 자동 환불
@@ -52,6 +53,7 @@ let S = {
   userId: null,           // 익명 ID (한번 생성하면 영구)
   name: '',               // 닉네임 (사용자 편집)
   character: 'qibo',      // 선택 캐릭터 id (기본 岐伯 — 학습 지도자)
+  faction: '',            // v5: 四象 진영 id (taeyang/soyang/taeum/soeum) — 최초 진입 시 랜덤
   qi: 0,                  // 누적 氣 (= XP)
   unlockedDivine: [],     // 구매한 神階 id 배열
   bookmarks: [],          // 처방 북마크
@@ -72,6 +74,10 @@ function loadState(){
   }catch(_){}
   if(!S.userId) S.userId = 'u_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4);
   if(!S.name)   S.name = '익명의'+(['醫工','學徒','弟子','선비'][Math.floor(Math.random()*4)]);
+  // v5: 진영이 없으면 랜덤 부여 (기존 사용자도 다음 로드 때 1회 부여됨)
+  if(!S.faction || !FACTION_BY_ID[S.faction]){
+    S.faction = (typeof randomFactionId === 'function') ? randomFactionId() : 'taeyang';
+  }
 }
 let _saveTimer = null;
 function saveState(){
@@ -290,6 +296,15 @@ const $ = (sel, root=document) => root.querySelector(sel);
 const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 function esc(s){ return String(s||'').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
 
+// v5: 四象 진영 헬퍼 (data-factions.js 의 getFaction 래핑) — S.faction 미설정 안전망
+function _curFaction(){ return (typeof getFaction === 'function') ? getFaction(S.faction) : {id:'',han:'',han2:'',ko:'',color:'#666',passive:''}; }
+function _factionChip(id, size){
+  const f = (typeof getFaction === 'function') ? getFaction(id) : null;
+  if(!f) return '';
+  const cls = size === 'tiny' ? ' tiny' : (size === 'big' ? ' big' : '');
+  return `<span class="faction-chip${cls}" style="background:${esc(f.color)}" title="${esc(f.han)} (${esc(f.ko)}) — ${esc(f.passive)}">${esc(f.han2)}</span>`;
+}
+
 function toast(msg, kind){
   const el = document.getElementById('toast');
   if(!el) return;
@@ -379,6 +394,33 @@ function qidOf(q){
   return 'auto:' + (h >>> 0).toString(36);
 }
 
+// ─── v3 기출/자작 분리 헬퍼 ───────────────────────────────────────────────
+// PAST_EXAMS (진짜 22학번 기출, src: '22-2 ...', id: 'past_*')
+// BULK_QUESTIONS (v3 자작 350+, src: '신규-수시범위', id: 'bq_*')
+// 두 풀은 같은 스키마이나 의미가 다르므로 화면별로 명확히 구분.
+function isPastQ(q){
+  if(!q) return false;
+  if(q.id && /^past_/.test(q.id)) return true;
+  if(q.src && /수시$|학번|기출/.test(q.src) && !/^신규/.test(q.src)) return true;
+  return false;
+}
+function isNewQ(q){
+  if(!q) return false;
+  if(q.id && /^bq_/.test(q.id)) return true;
+  if(q.src && /^신규/.test(q.src)) return true;
+  return false;
+}
+// 통합 풀 — 기본 'all', 'past'면 기출만, 'new'면 자작만.
+// 의미상 어떤 풀이 필요한지 호출부에서 명시. 호환성 위해 'all' default 유지.
+function questionPool(mode){
+  const past = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const bulk = (typeof BULK_QUESTIONS !== 'undefined') ? BULK_QUESTIONS : [];
+  if(mode === 'past') return past;
+  if(mode === 'new')  return bulk;
+  return past.concat(bulk);
+}
+window.isPastQ = isPastQ; window.isNewQ = isNewQ; window.questionPool = questionPool;
+
 // ───── 4. 메달리온 (CSS only — 인물 SVG 폐기 v2.2) ────────────────────────
 // charOrId: 객체 또는 id 문자열
 // size: 픽셀
@@ -402,27 +444,34 @@ function _charMedallion(charOrId, size){
 }
 window._charMedallion = _charMedallion;
 
-// 사진 있는 캐릭터는 사진을 덮어 표시. 사진 onerror 시 CSS 메달리온이 자동 노출.
+// 사진 있는 캐릭터는 사진을 덮어 표시.
+// v2.3 chained fallback: meta.url (로컬 우선) → meta.fallback (Wikimedia 등 원격) → CSS init 메달리온
+//   url 로드 실패 → fallback 시도 → 그것마저 실패 → display:none 으로 SVG init 노출
 function _charPhotoMedallion(charOrId, size){
   const c = (typeof charOrId === 'string') ? PHYSICIAN_BY_ID[charOrId] : charOrId;
   if(!c) return _charMedallion(charOrId, size);
   const imgs = (typeof CHARACTER_IMAGES !== 'undefined') ? CHARACTER_IMAGES : {};
   const meta = imgs[c.id];
   if(!meta || !meta.url) return _charMedallion(c, size);
-  // 메달리온을 안쪽에 깔고 사진을 위에 덮음. 사진 onerror → 숨김 → CSS 메달리온 노출.
+  // 메달리온을 안쪽에 깔고 사진을 위에 덮음.
   const showName = size >= 80;
   const init = c.init || (c.han && c.han[0]) || '?';
   const initSize = showName ? Math.round(size * 0.42) : Math.round(size * 0.55);
   const nameSize = Math.max(8, Math.round(size * 0.105));
   const pad = Math.max(2, Math.round(size * 0.06));
   const labelEsc = `${esc(c.ko)} — ${esc(c.han)}`;
+  // onerror 핸들러: 1차 실패 → fallback url 시도, 2차 실패 → 숨김 (SVG init 노출)
+  const fb = meta.fallback || '';
+  const onerr = fb
+    ? `if(!this.dataset.fb){this.dataset.fb='1';this.src='${esc(fb)}'}else{this.style.display='none'}`
+    : `this.style.display='none'`;
   return `<div role="img" aria-label="${labelEsc}" title="${labelEsc} · ${esc(meta.caption||'')}" style="position:relative;display:inline-block;width:${size}px;height:${size}px;vertical-align:middle">
     <div class="cmedal cat-${esc(c.cat||'ancient')}" style="position:absolute;inset:0;width:100%;height:100%">
       <div class="cmedal-init" style="font-size:${initSize}px">${esc(init)}</div>
       ${showName ? `<div class="cmedal-name" style="font-size:${nameSize}px">${esc(c.ko)}</div>` : ''}
     </div>
     <img src="${esc(meta.url)}" alt="${labelEsc}" loading="lazy" decoding="async"
-         onerror="this.style.display='none'"
+         onerror="${onerr}"
          class="cmedal-photo"
          style="top:${pad}px;left:${pad}px;width:calc(100% - ${pad*2}px);height:calc(100% - ${pad*2}px)">
     ${showName ? `<div style="position:absolute;left:0;right:0;bottom:0;padding:3px 2px 4px;background:linear-gradient(to bottom, transparent 0%, rgba(28,20,10,.85) 80%);color:var(--mi-w);font-size:${nameSize}px;text-align:center;font-family:var(--font-display);font-weight:600;letter-spacing:.04em;pointer-events:none;border-radius:0 0 50%/0 0 100%">${esc(c.ko)}</div>` : ''}
@@ -487,6 +536,89 @@ function refreshHeader(){
 }
 
 // ───── 6. BGM (Web Audio 五聲音階 古琴) ─────────────────────────────────────
+
+// ─── v4: TTS (인트로 한문 낭독) ──────────────────────────────────────────
+//   A안 — zh-CN voice 통일. 양측이 거의 동시에 발화하도록 speak() 동시 호출.
+//   브라우저별 직렬화 정책 차이로 완전 동시는 보장 안 되나, voice 두 개를 다르게
+//   잡으면 일부 브라우저(Firefox·일부 Chrome)는 병렬 재생. 직렬화되더라도 두
+//   utterance가 차례로 즉시 재생되므로 인트로 9초 안에 양측 모두 들림.
+//   이순재(id='leesoonjae') 는 명시적으로 무음 (시트콤 외래 캐릭터).
+const tts = {
+  voicesReady: null,   // Promise<SpeechSynthesisVoice[]>
+  zhVoices: [],        // zh-CN voice 캐시
+  supported: typeof window !== 'undefined' && 'speechSynthesis' in window,
+
+  init(){
+    if(!this.supported) return Promise.resolve([]);
+    if(this.voicesReady) return this.voicesReady;
+    this.voicesReady = new Promise((resolve) => {
+      const grab = () => {
+        const list = speechSynthesis.getVoices() || [];
+        this.zhVoices = list.filter(v => /^zh(-|_)?(CN|HK|TW)/i.test(v.lang) || /Chinese|普通话|國語|Mandarin|Cantonese/i.test(v.name||''));
+        // zh-CN 우선 정렬
+        this.zhVoices.sort((a,b) => {
+          const A = /zh.CN/i.test(a.lang) ? 0 : (/zh.TW/i.test(a.lang) ? 1 : 2);
+          const B = /zh.CN/i.test(b.lang) ? 0 : (/zh.TW/i.test(b.lang) ? 1 : 2);
+          return A - B;
+        });
+        resolve(list);
+      };
+      const cur = speechSynthesis.getVoices();
+      if(cur && cur.length){ grab(); return; }
+      speechSynthesis.addEventListener('voiceschanged', grab, { once:true });
+      // 1.5초 폴백
+      setTimeout(grab, 1500);
+    });
+    return this.voicesReady;
+  },
+
+  // 단일 한문 발화. opts.voiceIndex 로 voice 다르게 (양측 구분)
+  speak(text, opts){
+    if(!this.supported || !text) return null;
+    opts = opts || {};
+    try{
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'zh-CN';
+      u.rate = opts.rate != null ? opts.rate : 0.85;
+      u.pitch = opts.pitch != null ? opts.pitch : 1.0;
+      u.volume = opts.volume != null ? opts.volume : 0.95;
+      if(this.zhVoices.length){
+        const idx = ((opts.voiceIndex|0) % this.zhVoices.length + this.zhVoices.length) % this.zhVoices.length;
+        u.voice = this.zhVoices[idx];
+      }
+      speechSynthesis.speak(u);
+      return u;
+    } catch(e){ return null; }
+  },
+
+  // 양측 동시 발화. me/opp 두 quote 객체. id가 leesoonjae 면 그 측은 무음.
+  speakIntroPair(meId, meText, oppId, oppText){
+    if(!this.supported) return Promise.resolve();
+    return this.init().then(() => {
+      this.cancel();
+      // 양측 다 무음이면 그냥 종료
+      const meSilent = (meId === 'leesoonjae');
+      const oppSilent = (oppId === 'leesoonjae');
+      if(meSilent && oppSilent) return;
+      // 약간 다른 pitch/voice 로 구별 — 동시 재생 시 청각적 분리
+      if(!oppSilent && oppText){
+        this.speak(oppText, { rate: 0.82, pitch: 0.92, voiceIndex: 0 });
+      }
+      if(!meSilent && meText){
+        // 두 번째 utterance — 다른 voice index 또는 다른 pitch
+        // speak() 거의 동시 호출. Firefox 는 병렬, Chrome 은 순차이지만 끊김 없이 이어 재생.
+        this.speak(meText, { rate: 0.82, pitch: 1.08, voiceIndex: this.zhVoices.length > 1 ? 1 : 0 });
+      }
+    });
+  },
+
+  cancel(){
+    if(!this.supported) return;
+    try{ speechSynthesis.cancel(); } catch(_){}
+  }
+};
+if(typeof window !== 'undefined') window.tts = tts;
+
 // 中華 古風 BGM — Web Audio API 로 五聲音階 (宫商角徵羽) 합성
 // 古琴 시뮬레이션: sine + saw mix, 부드러운 attack, 긴 decay
 const bgm = {
@@ -914,8 +1046,9 @@ function renderHome(){
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span class="seal-stamp tiny" style="background:${rk.color}">${rk.seal}</span>
             <span class="seal" style="font-size:18px;font-weight:600">${esc(S.name)}</span>
+            <span class="faction-chip" style="background:${esc(_curFaction().color)}" title="${esc(_curFaction().han)} (${esc(_curFaction().ko)}) — ${esc(_curFaction().passive)}">${esc(_curFaction().han2)}</span>
             <span style="font-size:11px;color:var(--gutong)" class="han">${esc(rk.han)}·${esc(rk.ko)}</span>
-            <button class="btn btn-sm btn-ghost" id="edit-name-btn" type="button" style="margin-left:auto">이름</button>
+            <button class="btn btn-sm btn-ghost" id="edit-name-btn" type="button" style="margin-left:auto">이름·진영</button>
           </div>
           <div style="font-size:12.5px;color:var(--mo-l);margin-top:4px">
             누적 <b class="seal" style="color:var(--zhusha-d)">${S.qi.toLocaleString()} 氣</b>
@@ -1002,23 +1135,59 @@ function renderHome(){
     </div>
   `;
 
-  // 이름 편집
+  // 이름 + 진영 편집
   $('#edit-name-btn').addEventListener('click', () => {
+    const curF = (S.faction || 'taeyang');
     openModal(`
-      <h3 class="seal" style="margin:0 0 10px;color:var(--zhusha-d)">닉네임 변경</h3>
+      <h3 class="seal" style="margin:0 0 10px;color:var(--zhusha-d)">닉네임 · 四象 진영</h3>
       <div style="font-size:12px;color:var(--mo-l);margin-bottom:8px">멀티 對決·명예의 전당에서 표시됩니다.</div>
       <label>닉네임</label>
       <input id="name-input" value="${esc(S.name)}" maxlength="20">
-      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px">
+
+      <div style="margin-top:12px">
+        <label>四象 진영 (체질별 패시브)</label>
+        <div class="faction-grid" id="faction-grid">
+          ${FACTIONS.map(f => `
+            <button type="button" class="faction-cell ${f.id===curF?'selected':''}"
+                    data-fid="${esc(f.id)}"
+                    style="--ftc:${esc(f.color)}">
+              <div class="ft-head">
+                <span class="faction-chip" style="background:${esc(f.color)}">${esc(f.han2)}</span>
+                <span class="ft-han">${esc(f.han)}</span>
+                <span class="ft-ko">${esc(f.ko)}</span>
+              </div>
+              <div class="ft-pas">${esc(f.passive)}</div>
+            </button>
+          `).join('')}
+        </div>
+        <div style="font-size:10.5px;color:var(--gutong);margin-top:6px;font-style:italic;line-height:1.5">
+          東武 李濟馬 「東醫壽世保元」 사상의학 4 체질 · 패시브 즉시 적용
+        </div>
+      </div>
+
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:14px">
         <button class="btn btn-o btn-sm" onclick="closeModal()">취소</button>
         <button class="btn btn-sm" id="name-save">저장</button>
       </div>
     `);
+    let pickedF = curF;
+    $$('#faction-grid .faction-cell').forEach(cell => {
+      cell.addEventListener('click', () => {
+        pickedF = cell.dataset.fid;
+        $$('#faction-grid .faction-cell').forEach(c => c.classList.toggle('selected', c.dataset.fid === pickedF));
+      });
+    });
     $('#name-save').addEventListener('click', () => {
       const v = $('#name-input').value.trim().slice(0,20);
       if(!v) return toast('이름을 입력하세요');
-      S.name = v; saveState(); refreshHeader();
-      closeModal(); toast('저장됨','gold');
+      const changedF = pickedF !== S.faction;
+      S.name = v;
+      if(FACTION_BY_ID[pickedF]) S.faction = pickedF;
+      saveState(); refreshHeader();
+      // presence 즉시 갱신 (영토 반영)
+      if(typeof recordPresence === 'function'){ try{ recordPresence(); }catch(_){} }
+      closeModal();
+      toast(changedF ? `${getFaction(S.faction).han} 진영으로 변경` : '저장됨','gold');
       renderHome();
     });
   });
@@ -1043,6 +1212,7 @@ async function recordPresence(){
   const p = {
     name: S.name || '익명',
     character: S.character,
+    faction: S.faction || '',   // v5: 영토 집계용
     qi: S.qi,
     ts: Date.now(),
   };
@@ -1051,7 +1221,7 @@ async function recordPresence(){
   // 주기적 갱신 타이머 (중복 셋업 방지)
   if(!_presenceTimer){
     _presenceTimer = setInterval(async () => {
-      try{ await FB.put(`presence/${S.userId}`, {...p, ts: Date.now()}); }catch(_){}
+      try{ await FB.put(`presence/${S.userId}`, {...p, faction: S.faction || '', qi: S.qi, ts: Date.now()}); }catch(_){}
     }, PRESENCE_REFRESH_MS);
   }
 }
@@ -1214,9 +1384,15 @@ function renderHall(){
       <div style="display:flex;align-items:center;gap:14px">
         <div style="flex-shrink:0;cursor:pointer" onclick="openCharacterPicker()" title="캐릭터 변경">${_charPhotoMedallion(cur, 96)}</div>
         <div style="flex:1;min-width:0">
-          <div style="font-family:var(--font-display);font-size:20px;color:var(--mo)">${esc(S.name)}</div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span style="font-family:var(--font-display);font-size:20px;color:var(--mo)">${esc(S.name)}</span>
+            ${_factionChip(S.faction)}
+          </div>
           <div style="font-size:13px;color:var(--gutong);margin-top:2px"><span class="han">${esc(cur.han)}</span> · ${esc(cur.ko)}</div>
           <div style="font-size:10.5px;color:var(--gutong);margin-top:1px">${esc(cur.work_han)}<br>${esc(cur.work_ko)}</div>
+          <div style="font-size:10.5px;color:${esc(_curFaction().colorDim||'#666')};margin-top:3px;font-style:italic">
+            ${esc(_curFaction().han)} 패시브 · ${esc(_curFaction().passive)}
+          </div>
         </div>
         <div style="flex-shrink:0;text-align:center">
           <span class="seal-stamp big" style="background:${rk.color}">${rk.seal}</span>
@@ -1231,6 +1407,23 @@ function renderHall(){
         <div class="rank-bar"><div class="rank-bar-fill" style="width:${(prog*100).toFixed(1)}%"></div></div>
         <!-- v3: 내 전적 -->
         <div id="my-record" style="margin-top:6px;text-align:right;min-height:14px"></div>
+      </div>
+    </div>
+
+    <!-- v5: 四象 영토 (territory) — 진영별 氣 점유율 -->
+    <div class="card fade-in territory-card" id="territory-card">
+      <div class="card-title">
+        <span class="han">四象 領土</span>
+        <span style="float:right;font-size:11px;color:var(--gutong);font-family:var(--font-body);font-weight:400">진영별 氣 점유율</span>
+      </div>
+      <div class="territory-bar" id="territory-bar">
+        <div class="territory-seg empty" style="flex:1">
+          <span class="t-han">─</span><span class="t-pct">불러오는 중…</span>
+        </div>
+      </div>
+      <div class="territory-legend" id="territory-legend"></div>
+      <div style="font-size:10.5px;color:var(--gutong);margin-top:8px;font-style:italic;line-height:1.5">
+        東醫壽世保元 四象人 — 太陽·少陽·太陰·少陰 · 누적 氣 합산 기준
       </div>
     </div>
 
@@ -1303,7 +1496,75 @@ function renderHall(){
     }
     loadGlobalRank(recs);
     loadLadderUsers(recs);
+    loadTerritory();   // v5: 四象 영토 비동기 로드
   })();
+}
+
+// v5: 四象 영토 — presence 의 faction·qi 합산 → 점유율 바·범례 렌더
+async function loadTerritory(){
+  const barEl = document.getElementById('territory-bar');
+  const lgEl  = document.getElementById('territory-legend');
+  if(!barEl) return;
+
+  // presence 데이터 수집 — Firebase 없으면 본인만으로라도 표시 (로컬 모드)
+  let presence = null;
+  if(FB){
+    try{ presence = await FB.get('presence'); }catch(_){ presence = null; }
+  }
+  if(!presence){
+    // 로컬 모드 fallback — 본인만 표시
+    presence = { [S.userId]: {name: S.name, qi: S.qi, faction: S.faction} };
+  } else {
+    // 본인 데이터가 presence 에 아직 안 올라갔을 경우 (recordPresence 전) 강제 합산
+    if(!presence[S.userId]){
+      presence[S.userId] = {name: S.name, qi: S.qi, faction: S.faction};
+    }
+  }
+
+  const agg = (typeof aggregateFactions === 'function')
+    ? aggregateFactions(presence)
+    : [];
+  const grandTotal = agg.reduce((s,a) => s + a.totalQi, 0);
+
+  // 바: 점유 0 인 진영도 최소폭 (4%) 확보해 한자 보이게
+  if(grandTotal <= 0){
+    // 全 진영 미참가 (사실상 발생 X) — 균등 분할
+    barEl.innerHTML = FACTIONS.map(f => `
+      <div class="territory-seg empty" style="flex:1">
+        <span class="t-han">${esc(f.han2)}</span><span class="t-pct">0%</span>
+      </div>
+    `).join('');
+  } else {
+    // 표시는 원본 FACTIONS 순서 유지 (좌→우 일관성)
+    const byId = Object.fromEntries(agg.map(a => [a.id, a]));
+    barEl.innerHTML = FACTIONS.map(f => {
+      const a = byId[f.id] || {totalQi:0, share:0, count:0};
+      const sharePct = (a.share * 100);
+      // flex-grow 는 점유 비율 + 최소 시각 보장 (zero-faction 도 4% 폭)
+      const flex = Math.max(a.share, 0.04);
+      const isEmpty = a.totalQi <= 0;
+      return `<div class="territory-seg ${isEmpty?'empty':''}"
+                   style="flex:${flex.toFixed(4)};${isEmpty?'':`background-color:${esc(f.color)}`}"
+                   title="${esc(f.han)} · ${a.totalQi.toLocaleString()} 氣 (${sharePct.toFixed(1)}%) · ${a.count}명">
+        <span class="t-han">${esc(f.han2)}</span>
+        <span class="t-pct">${sharePct.toFixed(1)}%</span>
+      </div>`;
+    }).join('');
+  }
+
+  // 범례 — 진영별 총 氣·인원·1위 표시 (점유율 큰 순)
+  if(lgEl){
+    lgEl.innerHTML = agg.map(a => {
+      const isMine = a.id === S.faction;
+      const sharePct = (a.share * 100).toFixed(1);
+      return `<div class="territory-legend-row ${isMine?'is-mine':''}">
+        <span class="dot" style="background:${esc(a.color)}"></span>
+        <span class="lg-han">${esc(a.han2)}</span>
+        <span class="lg-meta">${a.totalQi.toLocaleString()} 氣 · ${a.count}명 · ${sharePct}%</span>
+        ${isMine?'<span class="territory-mybadge">我</span>':''}
+      </div>`;
+    }).join('');
+  }
 }
 
 // 등급 사다리 각 행에 해당 등급에 오른 사용자 표시 (v2.2) — v3: 전적 inline
@@ -1366,12 +1627,14 @@ async function loadGlobalRank(recs){
 }
 
 // ───── 11. 멀티 對決 (氣博 베팅) ────────────────────────────────────────────
-// 베팅 레벨
+// 베팅 레벨 — v4: diffProfile = [D1, D2, D3, D4] 비율 (합=1.0)
+//   小博 = 빈출/기초 (D1·D2 중심)    中博 = 응용 (D2 중심)
+//   大博 = 심화 (D2·D3 중심)          賭命 = 지옥 (D3·D4 중심, 함정 선지)
 const BET_LEVELS = [
-  { id:'small',  han:'小博', ko:'소박', pct:0.05, min:20,  desc:'5% · 최소 20 氣' },
-  { id:'medium', han:'中博', ko:'중박', pct:0.15, min:50,  desc:'15% · 최소 50 氣' },
-  { id:'large',  han:'大博', ko:'대박', pct:0.30, min:150, desc:'30% · 최소 150 氣' },
-  { id:'allin',  han:'賭命', ko:'도명', pct:0.50, min:500, desc:'50% · 최소 500 氣' },
+  { id:'small',  han:'小博', ko:'소박', pct:0.05, min:20,  desc:'5% · 최소 20 氣',  diffProfile:[0.60, 0.30, 0.10, 0.00] },
+  { id:'medium', han:'中博', ko:'중박', pct:0.15, min:50,  desc:'15% · 최소 50 氣', diffProfile:[0.20, 0.50, 0.25, 0.05] },
+  { id:'large',  han:'大博', ko:'대박', pct:0.30, min:150, desc:'30% · 최소 150 氣',diffProfile:[0.05, 0.30, 0.45, 0.20] },
+  { id:'allin',  han:'賭命', ko:'도명', pct:0.50, min:500, desc:'50% · 최소 500 氣',diffProfile:[0.00, 0.10, 0.40, 0.50] },
 ];
 function calcBet(level){
   const lv = BET_LEVELS.find(l => l.id === level) || BET_LEVELS[0];
@@ -1431,6 +1694,9 @@ function openBattleLobby(){
             <div class="han">${esc(o.han)} <span style="font-size:11.5px;color:var(--gutong);font-family:var(--font-body)">${esc(o.ko)}</span></div>
             <div class="pct">${(o.pct*100)|0}%</div>
             <div class="min">${o.can?`= ${o.bet.toLocaleString()} 氣`:`氣 부족 (≥${o.min})`}</div>
+            <div class="bet-diff-strip" title="이 레벨의 출제 난이도 분포 (D1·D2·D3·D4)">
+              ${(o.diffProfile||[]).map((p, i) => p > 0 ? `<span class="bet-diff-seg d${i+1}" style="flex:${Math.max(p, 0.04)}" title="D${i+1} ${Math.round(p*100)}%">${Math.round(p*100)}</span>` : '').join('')}
+            </div>
             <div class="waiting-list" data-list="${o.id}">
               <span class="w-empty">대기자 없음</span>
             </div>
@@ -1772,7 +2038,7 @@ async function joinBattleQueue(level){
           [S.userId]:  { userId:S.userId,  name:S.name,  character:S.character,  score:0, qi:S.qi+bet, bet, done:false },
           [opp.userId]:{ userId:opp.userId,name:opp.name,character:opp.character,score:0, qi:opp.qi,    bet, done:false },
         },
-        questions: generateBattleQuestions(5),
+        questions: generateBattleQuestions(5, level),
         createdAt: Date.now()
       };
       const created = await FB.putRetry(`battles/${roomId}`, room, {tries:3, backoffMs:300});
@@ -1883,10 +2149,31 @@ function renderBattleIntro(room, onContinue){
       if(opEl) opEl.innerHTML = recordChip(or, 'large');
     }).catch(_=>{});
   }
+  // v4: 양측 동시 한문 낭독 (zh-CN TTS). 이순재는 무음 — 그러면 인트로 단축.
+  const meSilent = (meChar.id === 'leesoonjae');
+  const oppSilent = (oppChar.id === 'leesoonjae');
+  const bothSilent = meSilent && oppSilent;
+  // 시각적 동시 펄스 클래스 부여 — 발화 동안 말풍선 강조
+  const bubbles = view.querySelectorAll('.intro-bubble');
+  bubbles.forEach(b => b.classList.add('intro-speaking'));
+  setTimeout(() => bubbles.forEach(b => b.classList.remove('intro-speaking')), 4500);
+  // TTS 발화 (300ms 후 — 인트로 fade-in 끝난 뒤)
+  if(!bothSilent && tts.supported){
+    setTimeout(() => {
+      tts.speakIntroPair(meChar.id, meQ.han, oppChar.id, oppQ.han);
+    }, 300);
+  }
   let advanced = false;
-  const advance = () => { if(advanced) return; advanced = true; clearTimeout(tm); onContinue(); };
+  const advance = () => {
+    if(advanced) return; advanced = true;
+    clearTimeout(tm);
+    tts.cancel();  // v4: skip 또는 자동 진행 시 TTS 즉시 정지
+    onContinue();
+  };
   $('#intro-skip').addEventListener('click', advance);
-  const tm = setTimeout(advance, BATTLE_INTRO_MS);
+  // 양측 다 무음이면 5초로 단축 (낭독 대기 불필요)
+  const introMs = bothSilent ? BATTLE_INTRO_FORFEIT_MS : BATTLE_INTRO_MS;
+  const tm = setTimeout(advance, introMs);
 }
 
 async function renderBattleGame(roomId){
@@ -2043,6 +2330,7 @@ async function renderBattleGame(roomId){
     let outcome = 'draw';
     let deltaQi = 0;          // 사용자 노출용: 진입 전 대비 변화
     let qiAdjust = 0;          // 에스크로 후 추가 조정량
+    let factionBonus = 0;     // v5: 진영 패시브 보너스 (별도 추적·UI 노출)
 
     if(forfeit && (!opp.done)){
       outcome = 'win';
@@ -2056,6 +2344,17 @@ async function renderBattleGame(roomId){
       outcome = 'draw'; deltaQi = 0;   qiAdjust = bet;            // 환불
     }
 
+    // v5: 四象 패시브 — 太陽人 (勝 +10%) / 少陽人 (敗 緩衝 10%)
+    if(outcome === 'win' && S.faction === 'taeyang'){
+      factionBonus = Math.round(bet * 0.10);
+      qiAdjust += factionBonus;
+      deltaQi  += factionBonus;
+    } else if(outcome === 'lose' && S.faction === 'soyang'){
+      factionBonus = Math.round(bet * 0.10);
+      qiAdjust += factionBonus;
+      deltaQi  += factionBonus;   // -bet + bonus → 손실 완화
+    }
+
     // 氣 정산 (에스크로 후 추가 조정)
     S.qi += qiAdjust;
     if(S.qi < 0) S.qi = 0;
@@ -2065,7 +2364,7 @@ async function renderBattleGame(roomId){
       ts: Date.now(), win: outcome === 'win', draw: outcome === 'draw', forfeit: !!forfeit,
       myScore: me.score, oppScore: opp.score||0,
       opponentName: opp.name, opponentChar: opp.character,
-      bet, deltaQi
+      bet, deltaQi, factionBonus, faction: S.faction
     });
     if(S.battleHistory.length > 20) S.battleHistory = S.battleHistory.slice(0, 20);
     saveState(); refreshHeader();
@@ -2133,6 +2432,12 @@ async function renderBattleGame(roomId){
           <div style="font-size:30px;font-family:var(--font-display);color:${deltaQi>0?'var(--feicui)':(deltaQi<0?'var(--zhusha)':'var(--gutong)')}">
             ${deltaQi>0?'+':''}${deltaQi} 氣
           </div>
+          ${factionBonus > 0 ? `
+            <div style="margin-top:4px;font-size:11.5px;color:${esc(_curFaction().colorDim||'#666')};font-weight:600">
+              ${_factionChip(S.faction,'tiny')}
+              <span style="margin-left:4px">${esc(_curFaction().han)} 패시브 +${factionBonus} 氣</span>
+              <span style="color:var(--gutong);font-weight:400">(${outcome==='win'?'勝':'敗'} 보너스)</span>
+            </div>` : ''}
           <div style="margin-top:4px;font-size:12px;color:var(--mo-l)">현재 ${S.qi.toLocaleString()} 氣${forfeit?'<br><span style="color:var(--gutong);font-size:10.5px;font-style:italic">(상대 응답 없음 — 부전승)</span>':''}</div>
         </div>
       </div>
@@ -2155,6 +2460,10 @@ function renderStats(){
 
     <!-- 메뉴 -->
     <div class="tile-grid fade-in">
+      <button class="tile gold" type="button" data-stab="personal">
+        <span class="han">私</span><span class="ttl">私的 약점 분석</span>
+        <span class="desc">내 오답으로 본 章·처방·유형·난이도별 약점 → 학습 연결</span>
+      </button>
       <button class="tile" type="button" data-stab="wrongs">
         <span class="han">難題</span><span class="ttl">전체 오답 랭킹</span>
         <span class="desc">가장 많이 틀린 문제 TOP 30 · 클릭하면 해당 문제</span>
@@ -2178,12 +2487,13 @@ function renderStats(){
   $$('.tile[data-stab]').forEach(b => {
     b.addEventListener('click', () => renderStatDetail(b.dataset.stab));
   });
-  // 기본은 wrongs
-  renderStatDetail('wrongs');
+  // v4: 기본은 개인 약점 분석 (가장 학습-동기 직결)
+  renderStatDetail('personal');
 }
 
 async function renderStatDetail(kind){
   const det = $('#stat-detail');
+  if(kind === 'personal') return renderPersonalAnalysis(det);
   if(kind === 'wrongs')  return renderWrongsRank(det);
   if(kind === 'exam')    return renderExamAnalysis(det);
   if(kind === 'formula') return renderFormulaIndex(det);
@@ -2499,6 +2809,311 @@ async function renderFormulaIndex(det){
   });
 }
 
+// ─── v4: 개인 약점 분석 ─────────────────────────────────────────────────
+//   S.wrongIds (개인 오답 누적) 와 question metadata (chapter / formula / type / difficulty)
+//   를 교차 분석하여 약점 영역을 산출한다. 章·처방·유형·난이도 4축.
+//   章 크기 보정: 절대 카운트가 아닌 "章 내 처방 수 대비 오답 비율" 로 정규화.
+//   자동생성 문제(id 없음/auto:*) 는 분석에서 제외 — 章/처방 메타가 일관되지 않음.
+//   각 약점 카드에 액션 버튼:
+//     (1) "이 章 자동 출제" → startQuizSession('auto', 2, 10, {chapter})
+//     (2) "이 처방 심층 분석" → openFormulaDeep(formulaId)
+//     (3) "학습 탭 (이 章 필터)" → quiz.sel.v1 에 chapter 박아 setTab('quiz')
+async function renderPersonalAnalysis(det){
+  const pastAll = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const bulkAll = (typeof BULK_QUESTIONS !== 'undefined') ? BULK_QUESTIONS : [];
+  const formulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
+  const allExams = pastAll.concat(bulkAll);
+  const examById = new Map(allExams.map(e => [e.id, e]));
+
+  // 개인 오답 — id 기반 lookup. auto:* qid 는 metadata 없으므로 제외.
+  const wrongIds = (S.wrongIds || []).filter(id => examById.has(id));
+  const wrongExams = wrongIds.map(id => examById.get(id));
+
+  if(!wrongExams.length){
+    det.innerHTML = `
+      <div class="card fade-in imperial">
+        <div class="card-title"><span class="han">私</span> 私的 약점 분석</div>
+        <div style="text-align:center;padding:24px;color:var(--gutong);font-size:12.5px">
+          <div class="han" style="font-size:28px;color:var(--feicui-d);margin-bottom:10px">空</div>
+          아직 분석할 오답 기록이 없습니다.<br>
+          기출·암기 탭에서 문제를 풀면 오답이 누적되어 약점 분석이 가능해집니다.
+        </div>
+        <div style="text-align:center;margin-top:12px">
+          <button class="btn btn-gold" type="button" onclick="setTab('quiz')">
+            <span class="han" style="margin-right:6px">問</span>기출·암기 시작
+          </button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  // 축별 집계
+  const byChapter  = new Map();   // chapter (1차 분류 — 章) → count
+  const byFormula  = new Map();   // formula 한자 이름 → count
+  const byType     = new Map();   // 문제 유형 → count
+  const byDiff     = {1:0, 2:0, 3:0, 4:0};
+  wrongExams.forEach(e => {
+    const ch = (e.chapter || '').split('-')[0] || '기타';
+    const fo = e.formula || '기타';
+    const ty = e.type || '기타';
+    const d  = e.difficulty || 1;
+    byChapter.set(ch, (byChapter.get(ch)||0) + 1);
+    byFormula.set(fo, (byFormula.get(fo)||0) + 1);
+    byType.set(ty,    (byType.get(ty)||0)    + 1);
+    byDiff[d] = (byDiff[d]||0) + 1;
+  });
+
+  // 章별 정규화: 章 내 처방 수 대비 오답 비율 (큰 章이 자연스럽게 오답 많은 점을 보정)
+  // 또는 章 내 문항 수 대비 — 후자가 더 정확하므로 채택.
+  const chapterQCount = new Map();
+  allExams.forEach(e => {
+    const ch = (e.chapter || '').split('-')[0] || '기타';
+    chapterQCount.set(ch, (chapterQCount.get(ch)||0) + 1);
+  });
+  const chapterRows = Array.from(byChapter.entries()).map(([ch, n]) => {
+    const total = chapterQCount.get(ch) || 1;
+    return { ch, n, total, rate: n/total };
+  }).sort((a,b) => b.rate - a.rate);
+
+  // 처방별 정규화: 해당 처방 문항 수 대비
+  const formulaQCount = new Map();
+  allExams.forEach(e => {
+    const fo = e.formula || '기타';
+    formulaQCount.set(fo, (formulaQCount.get(fo)||0) + 1);
+  });
+  const formulaRows = Array.from(byFormula.entries()).map(([fo, n]) => {
+    const total = formulaQCount.get(fo) || 1;
+    return { fo, n, total, rate: n/total };
+  }).sort((a,b) => (b.rate - a.rate) || (b.n - a.n)).slice(0, 12);
+
+  const typeRows = Array.from(byType.entries())
+    .map(([ty, n]) => ({ ty, n }))
+    .sort((a,b) => b.n - a.n)
+    .slice(0, 8);
+
+  // formula 한자 이름 → id 매핑 (FORMULAS 의 han 필드와 매칭)
+  const formulaByHan = new Map();
+  formulas.forEach(f => { if(f.han) formulaByHan.set(f.han, f); });
+
+  // 추천 난이도 — 가장 많이 틀린 난이도가 약점
+  const weakestDiff = Object.entries(byDiff).sort((a,b) => b[1]-a[1])[0];
+  const weakestDiffN = weakestDiff ? +weakestDiff[0] : 2;
+
+  // 上位 약점 章 3개 (rate 기준) + 上位 처방 5개
+  const topChapters = chapterRows.slice(0, 3);
+  const topFormulas = formulaRows.slice(0, 5);
+
+  // 막대 헬퍼
+  const maxBar = Math.max(1, ...chapterRows.map(r => r.n), ...formulaRows.map(r => r.n));
+  const bar = (n) => `<div class="pa-bar"><div class="pa-bar-fill" style="width:${Math.round((n/maxBar)*100)}%"></div></div>`;
+
+  // 난이도 분포 — DIFFICULTY_META 의 색상 사용
+  const diffStrip = [1,2,3,4].map(d => {
+    const m = DIFFICULTY_META[d];
+    const n = byDiff[d] || 0;
+    const w = Math.max(8, Math.round((n / Math.max(1, wrongExams.length)) * 100));
+    return `<div class="pa-diff-seg" style="flex:${w};background:${m.color}" title="${m.han} ${m.ko} ${n}회">
+      <b>${m.han}</b><span>${n}</span>
+    </div>`;
+  }).join('');
+
+  det.innerHTML = `
+    <div class="card fade-in imperial">
+      <div class="card-title">
+        <span class="han">私</span> 私的 약점 분석
+        <span style="float:right;font-size:11px;color:var(--gutong);font-weight:400;font-family:var(--font-body)">
+          총 ${wrongExams.length}회 오답 (자동생성 제외)
+        </span>
+      </div>
+      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:10px;line-height:1.55">
+        본인의 오답 기록을 章·처방·유형·난이도 4축으로 분석합니다.
+        章·처방별 비율은 <b>해당 영역 문항 수 대비</b> 정규화 — 큰 章의 오답이 부풀려 보이는 편향을 제거.
+      </div>
+
+      <!-- 난이도 축 -->
+      <div class="pa-section">
+        <div class="pa-section-title"><span class="han">難</span> 난이도별 오답 분포</div>
+        <div class="pa-diff-strip">${diffStrip}</div>
+        <div style="font-size:11px;color:var(--gutong);margin-top:6px;text-align:center">
+          ⇒ 가장 자주 막히는 난이도: <b style="color:${DIFFICULTY_META[weakestDiffN].color}">
+          ${DIFFICULTY_META[weakestDiffN].han} ${DIFFICULTY_META[weakestDiffN].ko} (${byDiff[weakestDiffN]}회)</b>
+        </div>
+      </div>
+
+      <!-- 章 축 -->
+      <div class="pa-section">
+        <div class="pa-section-title">
+          <span class="han">章</span> 章별 약점 <span class="pa-hint">(章 내 문항 수 대비 오답률)</span>
+        </div>
+        <div class="pa-rows">
+          ${chapterRows.slice(0, 6).map((r, i) => {
+            const isWeak = i < 3;
+            return `<div class="pa-row ${isWeak?'weak':''}">
+              <div class="pa-row-name"><span class="han">${esc(r.ch)}</span></div>
+              <div class="pa-row-bar">
+                ${bar(r.n)}
+                <div class="pa-row-meta">${r.n}/${r.total} = <b>${(r.rate*100).toFixed(0)}%</b></div>
+              </div>
+              <button class="pa-row-act" data-act="chapter-auto" data-chapter="${esc(r.ch)}" title="이 章 자동 출제 (10문)">
+                <span class="han">出</span>
+              </button>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <!-- 처방 축 -->
+      <div class="pa-section">
+        <div class="pa-section-title">
+          <span class="han">方</span> 처방별 약점 TOP ${topFormulas.length} <span class="pa-hint">(처방 내 문항 수 대비)</span>
+        </div>
+        <div class="pa-rows">
+          ${topFormulas.map((r, i) => {
+            const fmeta = formulaByHan.get(r.fo);
+            const isWeak = i < 3;
+            return `<div class="pa-row ${isWeak?'weak':''}">
+              <div class="pa-row-name"><span class="han">${esc(r.fo)}</span>${fmeta?`<span class="pa-row-sub">${esc(fmeta.ko||'')}</span>`:''}</div>
+              <div class="pa-row-bar">
+                ${bar(r.n)}
+                <div class="pa-row-meta">${r.n}/${r.total} = <b>${(r.rate*100).toFixed(0)}%</b></div>
+              </div>
+              ${fmeta ? `<button class="pa-row-act" data-act="formula-deep" data-formula="${esc(r.fo)}" title="이 처방 심층 분석">
+                <span class="han">析</span>
+              </button>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <!-- 유형 축 -->
+      <div class="pa-section">
+        <div class="pa-section-title">
+          <span class="han">類</span> 자주 틀리는 문제 유형
+        </div>
+        <div class="pa-type-chips">
+          ${typeRows.map(r => `<span class="pa-type-chip"><b>${esc(r.ty)}</b>·${r.n}회</span>`).join('')}
+        </div>
+      </div>
+
+      <!-- 처방안 (액션) -->
+      <div class="pa-section pa-actions">
+        <div class="pa-section-title"><span class="han">策</span> 처방안 — 약점 보강</div>
+        <div class="pa-action-grid">
+          ${topChapters[0] ? `
+            <button class="pa-action-btn primary" data-act="chapter-auto-lg" data-chapter="${esc(topChapters[0].ch)}">
+              <div class="pa-action-han">出</div>
+              <div class="pa-action-ttl">${esc(topChapters[0].ch)} 자동 출제</div>
+              <div class="pa-action-sub">${DIFFICULTY_META[weakestDiffN].han}·${DIFFICULTY_META[weakestDiffN].ko} 10문</div>
+            </button>` : ''}
+          ${topFormulas[0] && formulaByHan.get(topFormulas[0].fo) ? `
+            <button class="pa-action-btn" data-act="formula-deep-lg" data-formula="${esc(topFormulas[0].fo)}">
+              <div class="pa-action-han">析</div>
+              <div class="pa-action-ttl">${esc(topFormulas[0].fo)} 심층</div>
+              <div class="pa-action-sub">구성·君臣佐使·기출</div>
+            </button>` : ''}
+          ${topChapters[0] ? `
+            <button class="pa-action-btn" data-act="quiz-tab" data-chapter="${esc(topChapters[0].ch)}">
+              <div class="pa-action-han">問</div>
+              <div class="pa-action-ttl">학습 탭 (${esc(topChapters[0].ch)} 필터)</div>
+              <div class="pa-action-sub">난이도·풀 직접 선택</div>
+            </button>` : ''}
+          <button class="pa-action-btn" data-act="wrong-mode">
+            <div class="pa-action-han">錯</div>
+            <div class="pa-action-ttl">오답함 풀이</div>
+            <div class="pa-action-sub">틀린 문제만 다시</div>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // 스타일 한 번만 주입
+  if(!document.getElementById('pa-style')){
+    const st = document.createElement('style');
+    st.id = 'pa-style';
+    st.textContent = `
+      .pa-section{margin-top:14px;padding-top:12px;border-top:1px solid var(--mi-d)}
+      .pa-section:first-of-type{border-top:0;margin-top:8px;padding-top:0}
+      .pa-section-title{font-family:var(--font-display);font-size:13px;color:var(--zhusha-d);margin-bottom:8px;letter-spacing:.04em}
+      .pa-section-title .han{margin-right:6px;color:var(--zhusha)}
+      .pa-section-title .pa-hint{float:right;font-size:10px;color:var(--gutong);font-weight:400;font-family:var(--font-body);letter-spacing:0}
+      .pa-diff-strip{display:flex;gap:2px;height:36px;border-radius:6px;overflow:hidden;border:1px solid var(--mi-d)}
+      .pa-diff-seg{display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-family:var(--font-display);min-width:0;padding:3px 0}
+      .pa-diff-seg b{font-size:14px;line-height:1;letter-spacing:.02em;text-shadow:0 1px 2px rgba(0,0,0,.35)}
+      .pa-diff-seg span{font-size:10px;opacity:.92;margin-top:2px}
+      .pa-rows{display:flex;flex-direction:column;gap:4px}
+      .pa-row{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--mi-w);border-radius:5px;border-left:3px solid var(--mi-d);transition:background .12s}
+      .pa-row.weak{border-left-color:var(--zhusha);background:#FFF8E8}
+      .pa-row-name{flex:0 0 28%;font-size:12.5px;display:flex;flex-direction:column;line-height:1.25}
+      .pa-row-name .han{font-family:var(--font-han);color:var(--zhusha-d);font-weight:600}
+      .pa-row-name .pa-row-sub{font-size:10px;color:var(--gutong);font-weight:400}
+      .pa-row-bar{flex:1;display:flex;align-items:center;gap:6px;min-width:0}
+      .pa-bar{flex:1;height:8px;background:var(--mi-d);border-radius:4px;overflow:hidden;min-width:30px}
+      .pa-bar-fill{height:100%;background:linear-gradient(90deg,var(--huang),var(--zhusha));transition:width .3s}
+      .pa-row-meta{font-size:10.5px;color:var(--mo-l);min-width:64px;text-align:right;font-family:var(--font-display)}
+      .pa-row-meta b{color:var(--zhusha-d)}
+      .pa-row-act{background:var(--mi-w);border:1px solid var(--zhusha);color:var(--zhusha-d);border-radius:5px;padding:4px 8px;font-family:var(--font-han);font-size:13px;cursor:pointer;flex-shrink:0;transition:all .12s}
+      .pa-row-act:hover{background:var(--zhusha);color:var(--mi-w)}
+      .pa-type-chips{display:flex;flex-wrap:wrap;gap:5px}
+      .pa-type-chip{background:rgba(42,112,96,.12);border:1px solid rgba(42,112,96,.35);color:var(--mo-l);font-size:11px;padding:3px 9px;border-radius:11px}
+      .pa-type-chip b{color:var(--feicui-d);margin-right:2px}
+      .pa-actions{background:linear-gradient(180deg,rgba(201,162,39,.05),rgba(201,162,39,0));border-radius:6px;padding:12px 8px;margin:14px -8px -8px;border-top:2px solid var(--huang-l)}
+      .pa-action-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:4px}
+      .pa-action-btn{background:var(--mi-w);border:1.5px solid var(--gutong);border-radius:8px;padding:10px 8px;text-align:center;cursor:pointer;color:var(--mo);transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:2px}
+      .pa-action-btn:hover{transform:translateY(-1px);border-color:var(--zhusha);box-shadow:var(--sh-sm)}
+      .pa-action-btn.primary{background:linear-gradient(180deg,var(--huang-l),var(--huang));border-color:var(--zhusha);color:var(--mo)}
+      .pa-action-han{font-family:var(--font-han);font-size:22px;color:var(--zhusha-d);line-height:1}
+      .pa-action-btn.primary .pa-action-han{color:var(--zhusha-d)}
+      .pa-action-ttl{font-size:12px;font-weight:600;margin-top:2px;line-height:1.25}
+      .pa-action-sub{font-size:10px;color:var(--gutong);margin-top:1px}
+      .pa-action-btn.primary .pa-action-sub{color:var(--mo-l)}
+    `;
+    document.head.appendChild(st);
+  }
+
+  // 액션 핸들러
+  det.querySelectorAll('[data-act]').forEach(el => {
+    el.addEventListener('click', () => {
+      const act = el.dataset.act;
+      if(act === 'chapter-auto' || act === 'chapter-auto-lg'){
+        const ch = el.dataset.chapter;
+        // chapter 메타데이터가 question에는 '8장-補氣' 형식이지만 처방의 chapter는 '8장-補氣-補氣' 형식.
+        // generateQuizQuestions의 opts.chapter는 formula의 chapter 와 매칭하므로 startsWith 패턴은 사용 못함.
+        // 대신 wrongExams 에서 해당 章의 formula 들을 추출하여 formulaIds 옵션으로 전달.
+        const formIds = [];
+        wrongExams.forEach(e => {
+          const eCh = (e.chapter||'').split('-')[0];
+          if(eCh === ch){
+            const f = formulaByHan.get(e.formula);
+            if(f && !formIds.includes(f.id)) formIds.push(f.id);
+          }
+        });
+        if(!formIds.length){ toast('해당 章의 처방 데이터가 부족합니다','gold'); return; }
+        toast(`${ch} 자동 출제 시작 — ${DIFFICULTY_META[weakestDiffN].ko} 10문`,'gold');
+        startQuizSession('auto', weakestDiffN, 10, {formulaIds: formIds});
+      } else if(act === 'formula-deep' || act === 'formula-deep-lg'){
+        const formulaName = el.dataset.formula;
+        if(typeof openFormulaDeep === 'function') openFormulaDeep(formulaName);
+        else toast('처방 심층 모달을 열 수 없습니다');
+      } else if(act === 'quiz-tab'){
+        // 章 필터를 quiz.sel.v1 에 박고 quiz 탭 이동.
+        // 학습 탭은 chapter 필터를 UI로 노출하지 않으므로 일회성 사전 설정 후 toast 안내.
+        const ch = el.dataset.chapter;
+        const sel = JSON.parse(localStorage.getItem('quiz.sel.v1')||'{}');
+        sel._chapterHint = ch;  // 자체적으론 무시되지만 다음 startQuizSession 호출 시 toast로 안내 표시 가능
+        localStorage.setItem('quiz.sel.v1', JSON.stringify(sel));
+        toast(`학습 탭으로 이동 — ${ch} 약점 보강 추천`,'gold');
+        setTab('quiz');
+      } else if(act === 'wrong-mode'){
+        const sel = JSON.parse(localStorage.getItem('quiz.sel.v1')||'{}');
+        sel.mode = 'wrong'; sel.diff = weakestDiffN; sel.count = sel.count || 5;
+        localStorage.setItem('quiz.sel.v1', JSON.stringify(sel));
+        setTab('quiz');
+      }
+    });
+  });
+}
+
 // v2.2.2: 오답 빈도 분석 — qid lookup, 클릭 → 문제 모달
 async function renderWrongsRank(det){
   det.innerHTML = `<div class="card fade-in"><div class="card-title"><span class="han">難題</span> 전체 학습자 오답 랭킹</div><div style="text-align:center;padding:20px;color:var(--gutong)">불러오는 중…</div></div>`;
@@ -2615,14 +3230,23 @@ function openWrongDetailModal(ex, globalCount){
   openModal(html);
 }
 
-// ─── 기출 분석 v2.2 ──────────────────────────────────────────────────────
+// ─── 기출 분석 v2.3 ──────────────────────────────────────────────────────
 // 모든 년도 기출 + 유형·章·처방·난이도별 분포. sub-tabs 로 5종 차트 전환.
+// v2.3: 기출(PAST_EXAMS) / 자작(BULK_QUESTIONS) / 통합 소스 토글 추가. 기본 '기출만'.
+let _examSrcMode = 'past';  // 'past' | 'new' | 'all'
 function renderExamAnalysis(det){
-  const exams = (typeof PAST_EXAMS !== 'undefined') ? ((typeof BULK_QUESTIONS !== 'undefined') ? [...PAST_EXAMS, ...BULK_QUESTIONS] : PAST_EXAMS) : [];
-  if(!exams.length){
+  const pastAll  = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const bulkAll  = (typeof BULK_QUESTIONS !== 'undefined') ? BULK_QUESTIONS : [];
+  const exams = _examSrcMode === 'past' ? pastAll
+              : _examSrcMode === 'new'  ? bulkAll
+              : pastAll.concat(bulkAll);
+  if(!pastAll.length && !bulkAll.length){
     det.innerHTML = `<div class="card"><div class="card-title"><span class="han">問</span> 기출 분석</div><div style="font-size:12.5px;color:var(--gutong);text-align:center;padding:16px">data-formulas.js 에 PAST_EXAMS 배열이 필요합니다.</div></div>`;
     return;
   }
+
+  // 소스별 카운트 (헤더용)
+  const nPast = pastAll.length, nNew = bulkAll.length;
 
   // 년도·시험 추출 (src: "22-2 1차수시", "22-1 기말고사", "심화" 등)
   function srcYear(src){
@@ -2670,8 +3294,13 @@ function renderExamAnalysis(det){
 
   det.innerHTML = `
     <div class="card fade-in">
-      <div class="card-title"><span class="han">問</span> 기출 ${exams.length}문 종합 분석</div>
-      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:8px">${Object.keys(byExam).length}회 시험 · ${Object.keys(byFormula).length}처방 · ${Object.keys(byType).length}유형</div>
+      <div class="card-title"><span class="han">問</span> ${_examSrcMode==='past'?'기출':_examSrcMode==='new'?'자작':'전체'} ${exams.length}문 종합 분석</div>
+      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:6px">${Object.keys(byExam).length}회 · ${Object.keys(byFormula).length}처방 · ${Object.keys(byType).length}유형</div>
+      <div class="subtab-row" id="exam-src-tab" style="margin-bottom:8px">
+        <button class="subtab-btn${_examSrcMode==='past'?' on':''}" data-src="past" title="22학번 1·2차 수시 등 진짜 기출">舊 기출 ${nPast}</button>
+        <button class="subtab-btn${_examSrcMode==='new'?' on':''}" data-src="new" title="v3에서 신규 생성된 자작 문항 (기출 아님)">新 자작 ${nNew}</button>
+        <button class="subtab-btn${_examSrcMode==='all'?' on':''}" data-src="all">全 통합 ${nPast+nNew}</button>
+      </div>
       <div class="subtab-row" id="exam-subtab">
         <button class="subtab-btn on" data-k="exam">시험회차</button>
         <button class="subtab-btn" data-k="year">년도별</button>
@@ -2683,6 +3312,12 @@ function renderExamAnalysis(det){
       <div id="exam-detail"></div>
     </div>
   `;
+
+  // 소스 토글 핸들러
+  $$('#exam-src-tab .subtab-btn').forEach(b => b.addEventListener('click', () => {
+    _examSrcMode = b.dataset.src;
+    renderExamAnalysis(det);
+  }));
 
   const detEl = $('#exam-detail');
   const charts = {
@@ -2725,16 +3360,20 @@ function renderExamAnalysis(det){
   showChart('exam');
 }
 
-// v2.2.2: 처방별 심층 분석 — 모달 (구성·작용·기출 문제·유형 분포·글로벌 오답률)
+// v2.3: 처방별 심층 분석 — 기출(PAST)과 신규자작(BULK)을 명확히 분리
 async function openFormulaDeep(formulaName){
-  const exams    = (typeof PAST_EXAMS !== 'undefined') ? ((typeof BULK_QUESTIONS !== 'undefined') ? [...PAST_EXAMS, ...BULK_QUESTIONS] : PAST_EXAMS) : [];
+  const pastAll  = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const bulkAll  = (typeof BULK_QUESTIONS !== 'undefined') ? BULK_QUESTIONS : [];
+  const exams    = pastAll.concat(bulkAll);  // 행 클릭 시 검색용
   const formulas = (typeof FORMULAS    !== 'undefined') ? FORMULAS    : [];
   // 처방 데이터 (한글명 매칭 — 가감방은 ko 와 정확히 일치, 변형은 contains)
   const f = formulas.find(x => x.ko === formulaName) ||
             formulas.find(x => x.han === formulaName) ||
             formulas.find(x => x.ko && formulaName.includes(x.ko));
-  const relExams = exams.filter(e => (e.formula || '').trim() === formulaName);
-  // 글로벌 오답 (해당 처방의 past_* qid 들만)
+  const relPast = pastAll.filter(e => (e.formula || '').trim() === formulaName);
+  const relNew  = bulkAll.filter(e => (e.formula || '').trim() === formulaName);
+  const relExams = relPast;  // 통계는 기출 기준
+  // 글로벌 오답 (기출+자작 모두)
   let wrongMap = {};
   if(FB){
     try{
@@ -2742,15 +3381,18 @@ async function openFormulaDeep(formulaName){
       if(w) wrongMap = w;
     }catch(_){}
   }
-  // 집계
+  // 집계 (기출 기준)
   const byType = {}, bySrc = {}, byDiff = {};
-  relExams.forEach(e => {
+  relPast.forEach(e => {
     byType[e.type||'기타'] = (byType[e.type||'기타']||0)+1;
     bySrc[e.src||'기타']   = (bySrc[e.src||'기타']||0)+1;
     byDiff[e.difficulty||1] = (byDiff[e.difficulty||1]||0)+1;
   });
-  const totalWrong = relExams.reduce((s, e) => s + (Number(wrongMap[e.id])||0), 0);
-  const examsRanked = relExams.slice().map(e => ({...e, _w: Number(wrongMap[e.id])||0}))
+  const totalWrongPast = relPast.reduce((s, e) => s + (Number(wrongMap[e.id])||0), 0);
+  const totalWrongNew  = relNew.reduce((s, e) => s + (Number(wrongMap[e.id])||0), 0);
+  const pastRanked = relPast.slice().map(e => ({...e, _w: Number(wrongMap[e.id])||0}))
+    .sort((a,b) => b._w - a._w);
+  const newRanked  = relNew.slice().map(e => ({...e, _w: Number(wrongMap[e.id])||0}))
     .sort((a,b) => b._w - a._w);
 
   const sort = (o) => Object.entries(o).sort((a,b) => b[1]-a[1]);
@@ -2762,6 +3404,19 @@ async function openFormulaDeep(formulaName){
         <div class="bar-track"><div class="bar-fill" style="width:${v/max*100}%">${v}</div></div>
       </div>`).join('')}</div>`;
   };
+  const examRow = (e, badge) => `
+    <div class="fdeep-exam-row" data-qid="${esc(e.id)}">
+      <div class="ex-meta">
+        ${badge ? `<span class="ex-src" style="background:${badge.bg};color:${badge.fg}">${badge.label}</span>` : ''}
+        <span class="ex-src">${esc(e.src||'')}</span>
+        <span class="ex-type">${esc(e.type||'')}</span>
+        <span class="ex-diff diff-${e.difficulty||1}">난이도 ${e.difficulty||1}</span>
+        ${e._w > 0 ? `<span class="ex-w">오답 ${e._w}</span>` : ''}
+      </div>
+      <div class="ex-q">${esc(e.q||'').slice(0,90)}${(e.q||'').length>90?'…':''}</div>
+    </div>`;
+  const badgePast = { label:'舊', bg:'#6E1818', fg:'#FFE08A' };
+  const badgeNew  = { label:'新', bg:'#2A7060', fg:'#E8F4E8' };
 
   const formulaCard = f ? `
     <div class="fdeep-card">
@@ -2790,20 +3445,20 @@ async function openFormulaDeep(formulaName){
 
   const html = `
     <div class="modal-head">
-      <div class="modal-tag">처방 심층 분석 v2.2.2</div>
+      <div class="modal-tag">처방 심층 분석 v2.3</div>
       <h3 class="modal-title"><span class="han" style="margin-right:6px">析</span>${esc(formulaName)}</h3>
       <div class="modal-sub">
-        기출 <b>${relExams.length}</b>문 · 글로벌 누적 오답 <b style="color:var(--zhusha-d)">${totalWrong}</b>회 ·
-        시험 ${Object.keys(bySrc).length}회 · 유형 ${Object.keys(byType).length}종
+        舊기출 <b>${relPast.length}</b>문 · 新자작 <b>${relNew.length}</b>문 ·
+        글로벌 오답 <b style="color:var(--zhusha-d)">${totalWrongPast+totalWrongNew}</b>회
       </div>
     </div>
     <div class="modal-body fdeep-body">
       ${formulaCard}
 
-      ${relExams.length ? `
+      ${relPast.length ? `
         <div class="fdeep-grid">
           <div class="fdeep-block">
-            <div class="fdeep-blk-title"><span class="han">類</span> 자주 묻는 유형</div>
+            <div class="fdeep-blk-title"><span class="han">類</span> 기출 유형 분포</div>
             ${miniBar(sort(byType))}
           </div>
           <div class="fdeep-block">
@@ -2813,27 +3468,28 @@ async function openFormulaDeep(formulaName){
         </div>
 
         <div class="fdeep-block">
-          <div class="fdeep-blk-title"><span class="han">問</span> 실제 기출 — 글로벌 오답 많은 순</div>
-          <div style="font-size:11px;color:var(--gutong);margin-bottom:6px">클릭 시 정답·해설</div>
+          <div class="fdeep-blk-title"><span class="han">舊</span> 진짜 기출 (${relPast.length}문) — 오답 많은 순</div>
+          <div style="font-size:11px;color:var(--gutong);margin-bottom:6px">22학번 1·2차 수시 등. 클릭 시 정답·해설</div>
           <div class="fdeep-exams">
-            ${examsRanked.map(e => `
-              <div class="fdeep-exam-row" data-qid="${esc(e.id)}">
-                <div class="ex-meta">
-                  <span class="ex-src">${esc(e.src||'')}</span>
-                  <span class="ex-type">${esc(e.type||'')}</span>
-                  <span class="ex-diff diff-${e.difficulty||1}">난이도 ${e.difficulty||1}</span>
-                  ${e._w > 0 ? `<span class="ex-w">오답 ${e._w}</span>` : ''}
-                </div>
-                <div class="ex-q">${esc(e.q||'').slice(0,90)}${(e.q||'').length>90?'…':''}</div>
-              </div>
-            `).join('')}
+            ${pastRanked.map(e => examRow(e, badgePast)).join('')}
           </div>
         </div>
       ` : `
-        <div class="fdeep-block" style="text-align:center;color:var(--gutong);padding:16px">
-          이 처방에 대한 기출 문제가 PAST_EXAMS 에 없습니다.
+        <div class="fdeep-block" style="text-align:center;color:var(--gutong);padding:12px">
+          이 처방의 진짜 기출 (PAST_EXAMS) 은 없습니다.
         </div>
       `}
+
+      ${relNew.length ? `
+        <div class="fdeep-block" style="margin-top:8px">
+          <div class="fdeep-blk-title"><span class="han">新</span> v3 자작 (${relNew.length}문) — 오답 많은 순</div>
+          <div style="font-size:11px;color:var(--gutong);margin-bottom:6px">시험 출제 가능성에 따른 신규 자작 문항. 기출이 아님.</div>
+          <div class="fdeep-exams">
+            ${newRanked.slice(0, 30).map(e => examRow(e, badgeNew)).join('')}
+            ${newRanked.length > 30 ? `<div style="font-size:11px;color:var(--gutong);text-align:center;padding:8px">… 외 ${newRanked.length-30}문 (상위 30문만 표시)</div>` : ''}
+          </div>
+        </div>
+      ` : ''}
 
       <div class="modal-actions">
         <button class="btn btn-sm btn-o" onclick="closeModal()">닫기</button>
@@ -2841,7 +3497,7 @@ async function openFormulaDeep(formulaName){
     </div>
   `;
   openModal(html);
-  // 기출 행 클릭 → 문제 상세 모달
+  // 행 클릭 → 문제 상세 모달
   $$('.fdeep-exam-row').forEach(row => {
     row.addEventListener('click', () => {
       const qid = row.dataset.qid;
@@ -3296,7 +3952,9 @@ const DIFFICULTY_META = {
 window.DIFFICULTY_META = DIFFICULTY_META;
 
 function renderQuiz(){
-  const exams = (typeof PAST_EXAMS !== 'undefined') ? ((typeof BULK_QUESTIONS !== 'undefined') ? [...PAST_EXAMS, ...BULK_QUESTIONS] : PAST_EXAMS) : [];
+  const pastAll = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const bulkAll = (typeof BULK_QUESTIONS !== 'undefined') ? BULK_QUESTIONS : [];
+  const exams = pastAll.concat(bulkAll);  // 카운트 표시용 (모든 풀)
   const formulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
   if(!exams.length && !formulas.length){
     view.innerHTML = `
@@ -3307,17 +3965,18 @@ function renderQuiz(){
       </div></div>`;
     return;
   }
-  // 난이도별 기출 카운트
-  const byDiff = {1:0,2:0,3:0,4:0};
-  exams.forEach(e => { byDiff[e.difficulty||1] = (byDiff[e.difficulty||1]||0)+1; });
-  // 4 단계는 기출이 없으면 자동생성으로 채워짐 — UI 표시는 "∞" (생성)
+  // 난이도별 카운트 (기출/자작 분리)
+  const byDiffPast = {1:0,2:0,3:0,4:0};
+  const byDiffNew  = {1:0,2:0,3:0,4:0};
+  pastAll.forEach(e => { byDiffPast[e.difficulty||1] = (byDiffPast[e.difficulty||1]||0)+1; });
+  bulkAll.forEach(e => { byDiffNew[e.difficulty||1]  = (byDiffNew[e.difficulty||1]||0)+1; });
   const totalAuto = formulas.length;  // 자동 생성 가능 풀
 
   // 현재 선택 상태 (localStorage 캐시)
   const sel = JSON.parse(localStorage.getItem('quiz.sel.v1')||'{}');
-  if(!sel.diff) sel.diff = 1;
+  if(!sel.diff)  sel.diff = 1;
   if(!sel.count) sel.count = 5;
-  if(!sel.mode) sel.mode = 'mixed';   // mixed | past | auto | wrong
+  if(!sel.mode)  sel.mode = 'past';   // v2.3: default 'past' (기출만 — v3 자작 제외)
 
   view.innerHTML = `
     <h2 class="view-title"><span class="han">問</span>기출·암기</h2>
@@ -3329,12 +3988,10 @@ function renderQuiz(){
       <div class="diff-grid">
         ${[1,2,3,4].map(d => {
           const m = DIFFICULTY_META[d];
-          const n = byDiff[d];
+          const np = byDiffPast[d], nn = byDiffNew[d];
           const supplyText = d === 4
-            ? `<span style="color:var(--gutong);font-size:10.5px">자동生 ${totalAuto}+</span>`
-            : (n > 0
-                ? `<span style="color:var(--feicui);font-size:10.5px">기출 ${n}문</span>`
-                : `<span style="color:var(--gutong);font-size:10.5px">자동생성</span>`);
+            ? `<span style="color:var(--gutong);font-size:10.5px">舊${np}·新${nn}·自${totalAuto}+</span>`
+            : `<span style="color:var(--feicui);font-size:10.5px">舊${np} · 新${nn}</span>`;
           return `<button class="diff-btn" type="button" data-d="${d}"
             style="border-color:${m.color};${sel.diff===d?`background:${m.color};color:var(--mi-w)`:''}">
             <div class="diff-icon han" style="color:${sel.diff===d?'var(--mi-w)':m.color}">${m.icon}</div>
@@ -3362,16 +4019,19 @@ function renderQuiz(){
     <div class="card fade-in">
       <div class="card-title"><span class="han">源</span> 출제 풀</div>
       <div class="mode-grid">
-        <button class="mode-btn ${sel.mode==='mixed'?'on':''}" type="button" data-m="mixed">
-          <span class="han">混合</span> 혼합 <span class="hint">기출+자동 (권장)</span>
-        </button>
         <button class="mode-btn ${sel.mode==='past'?'on':''}" type="button" data-m="past">
-          <span class="han">舊問</span> 기출만 <span class="hint">22학번 1·2차 복원본</span>
+          <span class="han">舊問</span> 기출만 <span class="hint">22학번 1·2차 ${pastAll.length}문</span>
+        </button>
+        <button class="mode-btn ${sel.mode==='new'?'on':''}" type="button" data-m="new">
+          <span class="han">新問</span> 자작만 <span class="hint">v3 신규 ${bulkAll.length}문</span>
         </button>
         <button class="mode-btn ${sel.mode==='auto'?'on':''}" type="button" data-m="auto">
-          <span class="han">自題</span> 자동만 <span class="hint">26 처방 데이터 기반</span>
+          <span class="han">自題</span> 자동만 <span class="hint">처방 데이터 기반</span>
         </button>
-        <button class="mode-btn ${sel.mode==='wrong'?'on':''}" type="button" data-m="wrong">
+        <button class="mode-btn ${sel.mode==='mixed'?'on':''}" type="button" data-m="mixed">
+          <span class="han">混合</span> 全 혼합 <span class="hint">기출+자작+자동</span>
+        </button>
+        <button class="mode-btn ${sel.mode==='wrong'?'on':''}" type="button" data-m="wrong" style="grid-column:1/-1">
           <span class="han">錯題</span> 오답함 <span class="hint">${S.wrongIds.length}개</span>
         </button>
       </div>
@@ -3426,30 +4086,55 @@ function renderQuiz(){
   });
 }
 
-window.startQuizSession = function(mode, diff, count){
-  mode  = mode  || 'mixed';
+window.startQuizSession = function(mode, diff, count, opts){
+  mode  = mode  || 'past';
   diff  = diff  || 1;
   count = count || 5;
-  const exams = (typeof PAST_EXAMS !== 'undefined') ? ((typeof BULK_QUESTIONS !== 'undefined') ? [...PAST_EXAMS, ...BULK_QUESTIONS] : PAST_EXAMS) : [];
+  opts  = opts  || {};
+  const pastAll = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const bulkAll = (typeof BULK_QUESTIONS !== 'undefined') ? BULK_QUESTIONS : [];
 
-  // 풀 빌드
+  // v4: chapter 또는 formulaIds 필터 — 약점 章/처방 집중 학습용
+  const filterByOpts = (arr) => {
+    let r = arr;
+    if(opts.chapter){
+      r = r.filter(e => e.chapter === opts.chapter);
+    }
+    if(opts.formulaIds && opts.formulaIds.length){
+      const idset = new Set(opts.formulaIds);
+      r = r.filter(e => idset.has(e.formula_id || e.formula));
+    }
+    return r;
+  };
+
+  // 풀 빌드 — v2.3: 'past'와 'new'를 명확히 분리. mixed는 全 합산.
   let pool = [];
   if(mode === 'past'){
-    pool = exams.filter(e => (e.difficulty||1) === diff);
+    // 진짜 22학번 기출만
+    pool = filterByOpts(pastAll).filter(e => (e.difficulty||1) === diff);
     if(!pool.length){
       toast(`${DIFFICULTY_META[diff].ko} 기출이 없습니다. 자동생성으로 전환`);
-      pool = generateQuizQuestions(count*2, diff);
+      pool = generateQuizQuestions(count*2, diff, opts);
+    }
+  } else if(mode === 'new'){
+    // v3 신규 자작만
+    pool = filterByOpts(bulkAll).filter(e => (e.difficulty||1) === diff);
+    if(!pool.length){
+      toast(`${DIFFICULTY_META[diff].ko} 자작 문항이 없습니다`);
+      return;
     }
   } else if(mode === 'wrong'){
-    pool = exams.filter((_,i) => S.wrongIds.includes(exams[i].id || 'past_'+(i+1).toString().padStart(3,'0')));
+    // 오답함 (기출+자작 합산에서)
+    const allExams = pastAll.concat(bulkAll);
+    pool = filterByOpts(allExams).filter(e => S.wrongIds.includes(e.id));
     pool = pool.filter(e => (e.difficulty||1) === diff);
     if(!pool.length){ toast('해당 난이도 오답이 없습니다'); return; }
   } else if(mode === 'auto'){
-    pool = generateQuizQuestions(count*2, diff);
-  } else {  // mixed
-    const pastFiltered = exams.filter(e => (e.difficulty||1) === diff);
-    const autoNeeded = Math.max(count - pastFiltered.length, Math.ceil(count/2));
-    pool = pastFiltered.concat(generateQuizQuestions(autoNeeded, diff));
+    pool = generateQuizQuestions(count*2, diff, opts);
+  } else {  // mixed — 全 합산 + 자동
+    const allFiltered = filterByOpts(pastAll.concat(bulkAll)).filter(e => (e.difficulty||1) === diff);
+    const autoNeeded = Math.max(count - allFiltered.length, Math.ceil(count/3));
+    pool = allFiltered.concat(generateQuizQuestions(autoNeeded, diff, opts));
   }
   pool = pool.sort(()=>Math.random()-0.5).slice(0, count);
   if(!pool.length){ toast('문제를 만들 수 없습니다'); return; }
@@ -3470,8 +4155,24 @@ window.startQuizSession = function(mode, diff, count){
       // 결과 + 氣 보상 (난이도 보너스)
       const baseReward = score * 10;
       const diffMult = [1, 1.5, 2, 3][diff-1] || 1;
-      const earned = Math.round(baseReward * diffMult);
+      const baseEarned = Math.round(baseReward * diffMult);
+      // v5: 四象 패시브 — 太陰人 (+10% 상시) / 少陰人 (全 정답시 N×5×diffMult)
+      let factionBonus = 0;
+      const isPerfect = (score === pool.length && pool.length > 0);
+      if(S.faction === 'taeum'){
+        factionBonus = Math.round(baseEarned * 0.10);
+      } else if(S.faction === 'soeum' && isPerfect){
+        factionBonus = Math.round(pool.length * 5 * diffMult);
+      }
+      const earned = baseEarned + factionBonus;
       S.qi += earned; saveState(); refreshHeader();
+      const fObj = (typeof getFaction === 'function') ? getFaction(S.faction) : null;
+      const factionLine = factionBonus > 0 && fObj ? `
+        <div style="margin-top:6px;font-size:12px;color:${esc(fObj.colorDim||'#666')};font-weight:600">
+          ${_factionChip(S.faction,'tiny')}
+          <span style="margin-left:4px">${esc(fObj.han)} 패시브 +${factionBonus} 氣</span>
+          <span style="color:var(--gutong);font-weight:400;font-size:10.5px">${S.faction==='soeum'?'(全 정답 N='+pool.length+'×5×'+diffMult+')':'(상시 +10%)'}</span>
+        </div>` : '';
       view.innerHTML = `
         <h2 class="view-title fade-in"><span class="han">畢</span>완료</h2>
         <div class="card imperial" style="text-align:center;padding:22px">
@@ -3481,6 +4182,7 @@ window.startQuizSession = function(mode, diff, count){
           </div>
           <div class="seal" style="font-size:42px;color:var(--zhusha-d);line-height:1">${score}<span style="font-size:24px;opacity:.6">/${pool.length}</span></div>
           <div style="margin-top:8px;font-size:14px;color:var(--feicui);font-weight:600">+${earned} 氣 ${diff>1?`<span style="font-size:11px;color:var(--gutong)">(×${diffMult} 난이도 보너스)</span>`:''}</div>
+          ${factionLine}
           <div style="margin-top:6px;font-size:11px;color:var(--gutong)">${Math.round((Date.now()-startedAt)/1000)}초 소요</div>
         </div>
         <div style="display:flex;gap:6px;justify-content:center;margin-top:14px">
@@ -3491,10 +4193,15 @@ window.startQuizSession = function(mode, diff, count){
       return;
     }
     const q = pool[cur];
+    // v2.3: 출처 배지 — 舊(기출) / 新(v3 자작) / 自(자동생성)
+    const srcBadge = isPastQ(q) ? `<span style="background:#6E1818;color:#FFE08A;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;font-family:var(--font-display)" title="22학번 1·2차 수시 등 진짜 기출">舊 기출</span>`
+                    : isNewQ(q) ? `<span style="background:#2A7060;color:#E8F4E8;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;font-family:var(--font-display)" title="v3 신규 자작 — 기출 아님">新 자작</span>`
+                    : `<span style="background:#8C5028;color:#F0DCC4;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;font-family:var(--font-display)" title="처방 데이터 기반 자동생성">自 자동</span>`;
     view.innerHTML = `
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
         <span class="seal-stamp tiny" style="background:${dm.color}">${dm.icon}</span>
         <span class="han" style="font-size:13px;color:${dm.color}">${dm.han}·${dm.ko}</span>
+        ${srcBadge}
         <span style="margin-left:auto;font-size:12px;color:var(--gutong)">${cur+1} / ${pool.length}</span>
       </div>
       <div class="card imperial fade-in">
@@ -3547,11 +4254,22 @@ window.startQuizSession = function(mode, diff, count){
 // difficulty 2: 적응증·가감·君藥 (중간)
 // difficulty 3: 약재 단위 의의·감별·함정 선지 (어려움)
 // difficulty 4: 처방 깊은 이해·약재 4-5개 모두 알아야 (지옥)
-function generateQuizQuestions(n, diff){
+// v4: opts.chapter (string) 또는 opts.formulaIds (array) 로 풀 제한 가능 (오답 분석 → 약점 章 집중 출제용)
+function generateQuizQuestions(n, diff, opts){
   diff = diff || 1;
-  const formulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
-  const herbs    = (typeof HERBS    !== 'undefined') ? HERBS    : [];
-  if(!formulas.length) return [];
+  opts = opts || {};
+  const allFormulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
+  const herbs       = (typeof HERBS    !== 'undefined') ? HERBS    : [];
+  if(!allFormulas.length) return [];
+  // v4: 필터링된 처방 풀 (chapter 또는 formulaIds 제한 시)
+  let formulas = allFormulas;
+  if(opts.chapter){
+    formulas = allFormulas.filter(f => f.chapter === opts.chapter);
+  } else if(opts.formulaIds && opts.formulaIds.length){
+    const idset = new Set(opts.formulaIds);
+    formulas = allFormulas.filter(f => idset.has(f.id));
+  }
+  if(!formulas.length) formulas = allFormulas;  // 필터 결과 없으면 전체로 fallback
 
   const out = [];
   const rand = (a) => a[Math.floor(Math.random()*a.length)];
@@ -3768,13 +4486,41 @@ function generateQuizQuestions(n, diff){
   return out;
 }
 
-// 배틀용 (기존 호환)
-function generateBattleQuestions(n){
-  const exams = (typeof PAST_EXAMS !== 'undefined') ? ((typeof BULK_QUESTIONS !== 'undefined') ? [...PAST_EXAMS, ...BULK_QUESTIONS] : PAST_EXAMS) : [];
-  // 배틀은 중급 위주 + 일부 기출
-  const out = generateQuizQuestions(Math.ceil(n/2), 2);
-  const past = (exams.filter(e => (e.difficulty||1) <= 2)).sort(()=>Math.random()-0.5).slice(0, Math.floor(n/2));
-  return [...past, ...out].sort(()=>Math.random()-0.5).slice(0, n).map(p => {
+// 배틀용 — v4: level 인자에 따른 난이도 분포 차등
+//   profile = BET_LEVELS[level].diffProfile  ex) [0.6, 0.3, 0.1, 0]
+//   각 난이도별로 (PAST_EXAMS + BULK_QUESTIONS) 우선, 부족하면 generateQuizQuestions 보충
+function generateBattleQuestions(n, level){
+  level = level || 'small';
+  const lv = BET_LEVELS.find(l => l.id === level) || BET_LEVELS[0];
+  const profile = lv.diffProfile || [0.6, 0.3, 0.1, 0];
+  const pastAll = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const bulkAll = (typeof BULK_QUESTIONS !== 'undefined') ? BULK_QUESTIONS : [];
+  const allExams = [...pastAll, ...bulkAll];
+
+  // 난이도별 목표 문항수 산출 (잔차 보정)
+  const targets = profile.map(p => Math.floor(n * p));
+  let remain = n - targets.reduce((a,b)=>a+b, 0);
+  // 잔차를 큰 비율 칸부터 +1 씩 분배
+  const order = profile.map((p,i)=>({p,i})).sort((a,b)=>b.p-a.p);
+  for(let k=0; k<order.length && remain>0; k++){ targets[order[k].i] += 1; remain--; }
+
+  const out = [];
+  const shuf = (a) => a.slice().sort(()=>Math.random()-0.5);
+  for(let d=1; d<=4; d++){
+    const t = targets[d-1];
+    if(t <= 0) continue;
+    // 1) 기출 + 자작 풀에서 해당 난이도 sample
+    const pool = shuf(allExams.filter(e => (e.difficulty||1) === d));
+    const fromPool = pool.slice(0, t);
+    out.push(...fromPool);
+    // 2) 부족하면 자동 생성으로 보충
+    const need = t - fromPool.length;
+    if(need > 0){
+      out.push(...generateQuizQuestions(need, d));
+    }
+  }
+  // 셔플 후 옵션 셔플
+  return shuf(out).slice(0, n).map(p => {
     const correctTxt = p.options[p.answer||0];
     const shuffled = p.options.slice().sort(() => Math.random()-0.5);
     return {...p, options: shuffled, answer: shuffled.indexOf(correctTxt)};
@@ -3812,6 +4558,7 @@ function init(){
 
   // v3: 첫 user-gesture 감지 — AudioContext.resume()이 안전해지는 시점.
   //     capture phase에서 1회만 잡고 제거. 이후 hall 진입 시 BGM 자동 재생 가능.
+  //     v4: 동시에 SpeechSynthesis voice 목록 prefetch (voiceschanged 이벤트 대기).
   const markGesture = () => {
     bgm.userGestureSeen = true;
     document.removeEventListener('pointerdown', markGesture, true);
@@ -3820,6 +4567,8 @@ function init(){
     if(!bgm.userDisabled && !bgm.on && (S.lastTab === 'hall' || S.lastTab === 'home')){
       try{ bgm.autoStartAmbient(); }catch(_){}
     }
+    // v4: TTS voice 사전 로딩
+    try{ tts.init(); }catch(_){}
   };
   document.addEventListener('pointerdown', markGesture, true);
   document.addEventListener('keydown', markGesture, true);

@@ -1,4 +1,4 @@
-/* data-physicians.js — v2.0
+/* data-physicians.js — v4
  * ============================================================================
  * 中醫史 50인 — 캐릭터·저작·명언 정전 데이터
  *
@@ -675,111 +675,104 @@ if(typeof window !== 'undefined'){
   window.CAT_LABELS = CAT_LABELS;
 }
 
-// ─── CHARACTER_IMAGES — 검증된 Wikimedia / 로컬 사진 ─────────────────────
-// 한 이미지 파일이 확실히 listing 된 것만 등록. 누락된 경우 SVG 폴백.
-// 출처:
-//   - 14인: "Famous medical figures" 시리즈 (1601 明 萬曆刊 本草蒙筌 卷首
-//          「歷代名醫畫姓氏」 — 唐 甘伯宗 그림. 영국 Wellcome Collection 소장,
-//          CC BY 4.0. Wikimedia Commons 의 Category:Traditional_Chinese_medicine
-//          에서 직접 listing 확인.)
-//   - 李時珍: 北京大學 醫學部 동상 (PD-self, Wikimedia File:Li_Shizhen.JPG)
-//   - 이순재: 거침없이 하이킥 (MBC, 2006) 시트콤 스틸 — 로컬 사용 (개인 학습용)
+// ─── CHARACTER_IMAGES — v5: 全人 로컬 우선 + Wikimedia fallback ─────────
+// v5 변경: 모바일 일괄 업로드 편의를 위해 photos/ 하위 폴더를 폐지,
+//          사진을 프로젝트 루트와 동일 디렉토리 ({id}.jpg) 로 평탄화.
 //
-// Greek v60 의 _charPhotoMedallion 함수와 호환: {url, caption, license}.
-// 사진 로드 실패 시 SVG 메달리온이 자동 표시 (onerror 처리).
+// 設計:
+//   • url        : 로컬 파일 ({id}.jpg). app 디렉토리에 두면 자동 인식.
+//   • fallback   : 검증된 (또는 추정된) Wikimedia URL. url 로드 실패 시 시도.
+//   • fallback도 실패하면 SVG init 메달리온이 자동 노출 (안전망).
+//
+// 사용자 작업:
+//   1. 인물별 사진을 {id}.jpg 또는 {id}.png 로 루트 디렉토리에 저장
+//      (예: liuwansu.jpg, heojun.jpg) — 폴더 없이 일괄 업로드 가능
+//   2. 파일이 없거나 로드 실패 시 fallback URL이 자동으로 시도되고,
+//      그것도 실패하면 한자 init 이 표시됨.
+//
+// 검증 출처:
+//   ✓ Wellcome L0039312–L0039324 (14인): 1601 明 萬曆刊 本草蒙筌 卷首
+//                                          「歷代名醫畫姓氏」 — 唐 甘伯宗 그림.
+//                                          CC BY 4.0. 직접 listing 확인.
+//   ✓ Tao_Hongjing.jpg, Li_Shizhen.JPG, Ye_Tianshi.jpg, Tang_Zonghai.jpg:
+//      Wikimedia Commons 에서 직접 listing 확인.
+//   ? 그 외 fallback URL은 추정 또는 미검증 — 작동 안 할 수 있음.
+//      해당 인물은 로컬에 사진을 추가하는 것을 권장.
+//
+// 한 이미지에 한 인물 사진만. 이순재 (게임 캐릭터) 는 로컬 jpeg.
 const _W = (n) => 'https://commons.wikimedia.org/wiki/Special:FilePath/' + n + '?width=320';
+const _LOCAL = (id, ext='jpg') => id + '.' + ext;
 const CHARACTER_IMAGES = {
-  // ═ 神階 ═ (女媧 제외 — 신화 여신이라 Wellcome 의가 시리즈에 없음)
-  huangdi:     { url: _W('Chinese_woodcut,_Famous_medical_figures;_The_Yellow_Emperor_Wellcome_L0039314.jpg'), caption: '黃帝 — Wellcome 의가 시리즈 (1601 明 萬曆刊)', license: 'CC BY 4.0' },
-  shennong:    { url: _W('Chinese_woodcut,_Famous_medical_figures;_Shen_Nong_Wellcome_L0039313.jpg'),         caption: '神農 — Wellcome 의가 시리즈',                license: 'CC BY 4.0' },
-  fuxi:        { url: _W('Chinese_woodcut,_Famous_medical_figures;_Emperor_Fuxi_Wellcome_L0039312.jpg'),      caption: '伏羲 — Wellcome 의가 시리즈',                license: 'CC BY 4.0' },
-  qibo:        { url: _W('Chinese_woodcut,_Famous_medical_figures;_Portrait_of_Qibo_Wellcome_L0039315.jpg'),  caption: '岐伯 — Wellcome 의가 시리즈',                license: 'CC BY 4.0' },
+  // ═ 神階 (5인) ═ Wellcome 의가 시리즈 (검증됨) + 女媧 (한대 백화)
+  huangdi:     { url: _LOCAL('huangdi'),     fallback: _W('Chinese_woodcut,_Famous_medical_figures;_The_Yellow_Emperor_Wellcome_L0039314.jpg'), caption: '黃帝 — Wellcome 의가 시리즈 (1601)', license: 'CC BY 4.0' },
+  shennong:    { url: _LOCAL('shennong'),    fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Shen_Nong_Wellcome_L0039313.jpg'),         caption: '神農 — Wellcome 의가 시리즈',         license: 'CC BY 4.0' },
+  fuxi:        { url: _LOCAL('fuxi'),        fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Emperor_Fuxi_Wellcome_L0039312.jpg'),      caption: '伏羲 — Wellcome 의가 시리즈',         license: 'CC BY 4.0' },
+  nvwa:        { url: _LOCAL('nvwa'),        fallback: _W('Anonymous-Fuxi_and_N%C3%BCwa3.jpg'),                                                  caption: '女媧 (伏羲女媧圖) — 唐 阿斯塔那 출토', license: 'PD-old' },
+  qibo:        { url: _LOCAL('qibo'),        fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Portrait_of_Qibo_Wellcome_L0039315.jpg'),   caption: '岐伯 — Wellcome 의가 시리즈',         license: 'CC BY 4.0' },
 
-  // ═ 古代 ═
-  leigong:     { url: _W('Chinese_woodcut,_Famous_medical_figures;_Portrait_of_Lei_Gong_Wellcome_L0039316.jpg'),  caption: '雷公 — Wellcome 의가 시리즈',           license: 'CC BY 4.0' },
-  bianque:     { url: _W('Chinese_woodcut,_Famous_medical_figures;_Portrait_of_Bian_Que_Wellcome_L0039317.jpg'),  caption: '扁鵲 — Wellcome 의가 시리즈',           license: 'CC BY 4.0' },
-  canggong:    { url: _W('Chinese_woodcut,_Famous_medical_figures;_Chunyu_Yi_Wellcome_L0039318.jpg'),            caption: '倉公(淳于意) — Wellcome 의가 시리즈',   license: 'CC BY 4.0' },
-  zhongjing:   { url: _W('Chinese_woodcut,_Famous_medical_figures;_Zhang_Zhongjing_Wellcome_L0039319.jpg'),      caption: '張仲景 — Wellcome 의가 시리즈',          license: 'CC BY 4.0' },
-  huatuo:      { url: _W('Chinese_woodcut,_Famous_medical_figures;_Portrait_of_Hua_Tuo_Wellcome_L0039320.jpg'),  caption: '華佗 — Wellcome 의가 시리즈',           license: 'CC BY 4.0' },
-  wangshuhe:   { url: _W('Chinese_woodcut,_Famous_medical_figures;_Wang_Shuhe_Wellcome_L0039321.jpg'),           caption: '王叔和 — Wellcome 의가 시리즈',          license: 'CC BY 4.0' },
-  huangfumi:   { url: _W('Chinese_woodcut,_Famous_medical_figures;_Huangfu_Mi_Wellcome_L0039322.jpg'),           caption: '皇甫謐 — Wellcome 의가 시리즈',          license: 'CC BY 4.0' },
-  gehong:      { url: _W('Chinese_woodcut,_Famous_medical_figures;_Portrait_of_Ge_Hong_Wellcome_L0039323.jpg'),  caption: '葛洪 — Wellcome 의가 시리즈',           license: 'CC BY 4.0' },
+  // ═ 先秦~漢魏六朝 (10인) ═ Wellcome 9인 (검증) + 陶弘景
+  leigong:     { url: _LOCAL('leigong'),     fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Portrait_of_Lei_Gong_Wellcome_L0039316.jpg'),  caption: '雷公 — Wellcome 의가 시리즈',           license: 'CC BY 4.0' },
+  bianque:     { url: _LOCAL('bianque'),     fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Portrait_of_Bian_Que_Wellcome_L0039317.jpg'),  caption: '扁鵲 — Wellcome 의가 시리즈',           license: 'CC BY 4.0' },
+  canggong:    { url: _LOCAL('canggong'),    fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Chunyu_Yi_Wellcome_L0039318.jpg'),            caption: '倉公(淳于意) — Wellcome 의가 시리즈',   license: 'CC BY 4.0' },
+  zhongjing:   { url: _LOCAL('zhongjing'),   fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Zhang_Zhongjing_Wellcome_L0039319.jpg'),      caption: '張仲景 — Wellcome 의가 시리즈',         license: 'CC BY 4.0' },
+  huatuo:      { url: _LOCAL('huatuo'),      fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Portrait_of_Hua_Tuo_Wellcome_L0039320.jpg'),  caption: '華佗 — Wellcome 의가 시리즈',           license: 'CC BY 4.0' },
+  wangshuhe:   { url: _LOCAL('wangshuhe'),   fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Wang_Shuhe_Wellcome_L0039321.jpg'),           caption: '王叔和 — Wellcome 의가 시리즈',         license: 'CC BY 4.0' },
+  huangfumi:   { url: _LOCAL('huangfumi'),   fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Huangfu_Mi_Wellcome_L0039322.jpg'),           caption: '皇甫謐 — Wellcome 의가 시리즈',         license: 'CC BY 4.0' },
+  gehong:      { url: _LOCAL('gehong'),      fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Portrait_of_Ge_Hong_Wellcome_L0039323.jpg'),  caption: '葛洪 — Wellcome 의가 시리즈',           license: 'CC BY 4.0' },
+  taohongjing: { url: _LOCAL('taohongjing'), fallback: _W('Tao_Hongjing.jpg'),                                                                     caption: '陶弘景 — 三才圖會 (1607)',              license: 'PD-old' },
+  chaoyuanfang:{ url: _LOCAL('chaoyuanfang'),fallback: _W('Chao_Yuanfang.jpg'),                                                                    caption: '巢元方 — 歷代名醫圖贊 (추정)',          license: 'PD-old' },
 
-  // ═ 神階 추가 (女媧 — 신화 여신, 漢代 帛畫·石刻 등 古代 도상) ═
-  nvwa:        { url: _W('Anonymous-Fuxi_and_N%C3%BCwa3.jpg'),                                                    caption: '女媧 (伏羲女媧圖) — 唐 阿斯塔那 출토',    license: 'PD-old' },
+  // ═ 隋唐 (3인) ═
+  sunsimiao:   { url: _LOCAL('sunsimiao'),   fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Sun_Simiao_Wellcome_L0039324.jpg'),           caption: '孫思邈 — Wellcome 의가 시리즈',         license: 'CC BY 4.0' },
+  wangbing:    { url: _LOCAL('wangbing'),    fallback: _W('Wang_Bing.jpg'),                                                                        caption: '王冰 — 歷代名醫圖贊 (추정)',            license: 'PD-old' },
+  wangtao:     { url: _LOCAL('wangtao'),     fallback: _W('Wang_Tao.jpg'),                                                                         caption: '王燾 — 歷代名醫圖贊 (추정)',            license: 'PD-old' },
 
-  // ═ 南朝 ═
-  taohongjing: { url: _W('Tao_Hongjing.jpg'),                                                                     caption: '陶弘景 — 三才圖會 (1607)',                license: 'PD-old' },
+  // ═ 宋 (4인) ═
+  qianyi:      { url: _LOCAL('qianyi'),      fallback: _W('Qian_Yi.jpg'),                                                                          caption: '錢乙 — 歷代名醫圖贊 (추정)',            license: 'PD-old' },
+  chenziming:  { url: _LOCAL('chenziming'),  fallback: '',                                                                                          caption: '陳自明 — 婦人大全良方 著者 (사용자 제공)', license: 'PD-old' },
+  yanyonghe:   { url: _LOCAL('yanyonghe'),   fallback: _W('Yan_Yonghe.jpg'),                                                                       caption: '嚴用和 — 歷代名醫圖贊 (추정)',          license: 'PD-old' },
+  chenshiwen:  { url: _LOCAL('chenshiwen'),  fallback: _W('Chen_Shiwen.jpg'),                                                                      caption: '陳師文 — 歷代名醫圖贊 (추정)',          license: 'PD-old' },
 
-  // ═ 唐 ═
-  sunsimiao:   { url: _W('Chinese_woodcut,_Famous_medical_figures;_Sun_Simiao_Wellcome_L0039324.jpg'),           caption: '孫思邈 — Wellcome 의가 시리즈',          license: 'CC BY 4.0' },
-  wangbing:    { url: _W('Wang_Bing.jpg'),                                                                        caption: '王冰 — 歷代名醫圖贊',                     license: 'PD-old' },
+  // ═ 金元四大家 + 王好古 (5인) ═
+  liuwansu:    { url: _LOCAL('liuwansu'),    fallback: _W('Liu_Wansu.jpg'),                                                                        caption: '劉完素 (河間) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
+  zhangcongzheng:{url:_LOCAL('zhangcongzheng'),fallback:_W('Zhang_Congzheng.jpg'),                                                                  caption: '張從正 (子和) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
+  ligao:       { url: _LOCAL('ligao'),       fallback: _W('Li_Gao.jpg'),                                                                           caption: '李杲 (東垣) — 歷代名醫圖贊 (추정)',     license: 'PD-old' },
+  zhuzhenheng: { url: _LOCAL('zhuzhenheng'), fallback: _W('Zhu_Zhenheng.jpg'),                                                                     caption: '朱震亨 (丹溪) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
+  wanghaogu:   { url: _LOCAL('wanghaogu'),   fallback: _W('Wang_Haogu.jpg'),                                                                       caption: '王好古 (海藏) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
 
-  // ═ 宋 ═
-  qianyi:      { url: _W('Qian_Yi.jpg'),                                                                          caption: '錢乙 — 歷代名醫圖贊',                     license: 'PD-old' },
+  // ═ 明 (7인) ═
+  xueji:       { url: _LOCAL('xueji'),       fallback: _W('Xue_Ji.jpg'),                                                                           caption: '薛己 (立齋) — 歷代名醫圖贊 (추정)',     license: 'PD-old' },
+  lishizhen:   { url: _LOCAL('lishizhen'),   fallback: _W('Li_Shizhen.JPG'),                                                                       caption: '李時珍 — 北京大學 醫學部 동상',         license: 'PD-self' },
+  gongtingxian:{ url: _LOCAL('gongtingxian'),fallback: _W('Gong_Tingxian.jpg'),                                                                    caption: '龔廷賢 (雲林) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
+  zhangjingyue:{ url: _LOCAL('zhangjingyue'),fallback: _W('Zhang_Jingyue.jpg'),                                                                    caption: '張景岳 (介賓) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
+  zhaoxianke:  { url: _LOCAL('zhaoxianke'),  fallback: _W('Zhao_Xianke.jpg'),                                                                      caption: '趙獻可 (養葵) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
+  wuyouke:     { url: _LOCAL('wuyouke'),     fallback: _W('Wu_Youke.jpg'),                                                                         caption: '吳又可 — 歷代名醫圖贊 (추정)',          license: 'PD-old' },
+  lichan:      { url: _LOCAL('lichan'),      fallback: _W('Li_Chan.jpg'),                                                                          caption: '李梴 (健齋) — 醫學入門 卷首 (추정)',    license: 'PD-old' },
 
-  // ═ 金元四大家 ═
-  liuwansu:    { url: _W('Liu_Wansu.jpg'),                                                                        caption: '劉完素 (河間) — 歷代名醫圖贊',           license: 'PD-old' },
-  zhangcongzheng:{ url: _W('Zhang_Congzheng.jpg'),                                                                caption: '張從正 (子和) — 歷代名醫圖贊',           license: 'PD-old' },
-  ligao:       { url: _W('Li_Gao.jpg'),                                                                           caption: '李杲 (東垣) — 歷代名醫圖贊',             license: 'PD-old' },
-  zhuzhenheng: { url: _W('Zhu_Zhenheng.jpg'),                                                                     caption: '朱震亨 (丹溪) — 歷代名醫圖贊',           license: 'PD-old' },
+  // ═ 清 (9인) ═
+  yujiayan:    { url: _LOCAL('yujiayan'),    fallback: _W('Yu_Chang.jpg'),                                                                         caption: '喻嘉言(喻昌) — 歷代名醫圖贊 (추정)',    license: 'PD-old' },
+  zhanglu:     { url: _LOCAL('zhanglu'),     fallback: '',                                                                                          caption: '張璐 — 局部肖像 (清初, 사용자 제공)',  license: 'PD-old' },
+  yetianshi:   { url: _LOCAL('yetianshi'),   fallback: _W('Ye_Tianshi.jpg'),                                                                       caption: '葉天士 — 歷代名醫圖贊',                 license: 'PD-old' },
+  xuexue:      { url: _LOCAL('xuexue'),      fallback: _W('Xue_Xue.jpg'),                                                                          caption: '薛雪 (生白) — 歷代名醫圖贊 (추정)',     license: 'PD-old' },
+  wujutong:    { url: _LOCAL('wujutong'),    fallback: _W('Wu_Jutong.jpg'),                                                                        caption: '吳鞠通 — 歷代名醫圖贊 (추정)',          license: 'PD-old' },
+  wangmengying:{ url: _LOCAL('wangmengying'),fallback: _W('Wang_Mengying.jpg'),                                                                    caption: '王孟英 (士雄) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
+  wangqingren: { url: _LOCAL('wangqingren'), fallback: _W('Wang_Qingren.jpg'),                                                                     caption: '王清任 — 歷代名醫圖贊 (추정)',          license: 'PD-old' },
+  tangzonghai: { url: _LOCAL('tangzonghai'), fallback: _W('Tang_Zonghai.jpg'),                                                                     caption: '唐宗海 (容川) — 歷代名醫圖贊',          license: 'PD-old' },
+  xudachun:    { url: _LOCAL('xudachun'),    fallback: _W('Xu_Dachun.jpg'),                                                                        caption: '徐大椿 (靈胎) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
 
-  // ═ 明 ═
-  lishizhen:   { url: _W('Li_Shizhen.JPG'),                                                                       caption: '李時珍 — 北京大學 醫學部 동상',         license: 'PD-self' },
-  zhangjingyue:{ url: _W('Zhang_Jingyue.jpg'),                                                                    caption: '張景岳 (介賓) — 歷代名醫圖贊',          license: 'PD-old' },
-  wuyouke:     { url: _W('Wu_Youke.jpg'),                                                                         caption: '吳又可 — 歷代名醫圖贊',                  license: 'PD-old' },
+  // ═ 清末·民國 (5인) ═
+  chengguopeng:{ url: _LOCAL('chengguopeng'),fallback: _W('Cheng_Guopeng.jpg'),                                                                    caption: '程國彭 (鍾齡) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
+  zhangxichun: { url: _LOCAL('zhangxichun'), fallback: _W('Zhang_Xichun.jpg'),                                                                     caption: '張錫純 (壽甫) — 民國 사진 (추정)',      license: 'PD-old' },
+  zhengqinan:  { url: _LOCAL('zhengqinan'),  fallback: _W('Zheng_Qinan.jpg'),                                                                      caption: '鄭欽安 (火神派 시조) — 歷代名醫圖贊 (추정)', license: 'PD-old' },
+  huangyuanyu: { url: _LOCAL('huangyuanyu'), fallback: _W('Huang_Yuanyu.jpg'),                                                                     caption: '黃元御 (玉楸) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
+  feibaixiong: { url: _LOCAL('feibaixiong'), fallback: _W('Fei_Boxiong.jpg'),                                                                      caption: '費伯雄 (晉卿) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
 
-  // ═ 清 ═
-  yetianshi:   { url: _W('Ye_Tianshi.jpg'),                                                                       caption: '葉天士 — 歷代名醫圖贊',                  license: 'PD-old' },
-  wujutong:    { url: _W('Wu_Jutong.jpg'),                                                                        caption: '吳鞠通 — 歷代名醫圖贊',                  license: 'PD-old' },
-  wangqingren: { url: _W('Wang_Qingren.jpg'),                                                                     caption: '王清任 — 歷代名醫圖贊',                  license: 'PD-old' },
-  xudachun:    { url: _W('Xu_Dachun.jpg'),                                                                        caption: '徐大椿 (靈胎) — 歷代名醫圖贊',           license: 'PD-old' },
+  // ═ 朝鮮 (2인) ═
+  heojun:      { url: _LOCAL('heojun'),      fallback: _W('Heo_Jun-Choi_Gwang-su.jpg'),                                                            caption: '許浚 — 최광수 그림 (1989) 표준영정',    license: 'PD/공용' },
+  leejema:     { url: _LOCAL('leejema'),     fallback: _W('Lee_Je-ma.jpg'),                                                                        caption: '李濟馬 — 표준영정',                     license: 'PD-old' },
 
-  // ═ 朝鮮 ═
-  heojun:      { url: _W('Heo_Jun-Choi_Gwang-su.jpg'),                                                             caption: '許浚 — 최광수 그림 (1989)',              license: 'PD/공용' },
-  leejema:     { url: _W('Lee_Je-ma.jpg'),                                                                         caption: '李濟馬 — 표준영정',                       license: 'PD-old' },
-
-  // ═ 番外 ═ (로컬 사진)
-  leesoonjae:  { url: 'leesoonjae-medallion.jpeg',                                                                 caption: '이순재 — 거침없이 하이킥 (MBC 2006)',  license: 'fair-use, 개인 학습용' },
-
-  // ─── v2.2.1 추가 (20인) ─────────────────────────────────────────────────
-  // 歷代名醫圖贊 (1599 楊爾曾編)·三才圖會 (1607)·古今圖書集成 (1726) 계열 도상.
-  // 사진 누락 시 SVG 메달리온이 자동 폴백 (onerror) — 안전한 default.
-  // 각 항목은 Wikimedia Commons File:<name>.jpg 패턴 추정. 검증된 항목은
-  // 우선 표기, 미검증 항목은 fallback 가정으로 등록.
-
-  // ═ 隋·唐 (病因病機學·處方學) ═
-  chaoyuanfang: { url: _W('Chao_Yuanfang.jpg'),    caption: '巢元方 — 歷代名醫圖贊',                  license: 'PD-old' },
-  wangtao:      { url: _W('Wang_Tao.jpg'),         caption: '王燾 — 歷代名醫圖贊',                    license: 'PD-old' },
-
-  // ═ 宋 (婦人科·脾胃·官修方) ═
-  // v2.2.2: chenziming(陳自明) — 동명 현대인 사진 충돌로 제거, SVG 메달리온 자동 폴백
-  // v2.2.2: zhanglu     (張璐)   — 同上
-  yanyonghe:    { url: _W('Yan_Yonghe.jpg'),       caption: '嚴用和 — 歷代名醫圖贊',                  license: 'PD-old' },
-  chenshiwen:   { url: _W('Chen_Shiwen.jpg'),      caption: '陳師文 — 歷代名醫圖贊',                  license: 'PD-old' },
-
-  // ═ 金元 (補土派 외) ═
-  wanghaogu:    { url: _W('Wang_Haogu.jpg'),       caption: '王好古 (海藏) — 歷代名醫圖贊',           license: 'PD-old' },
-
-  // ═ 明 (溫補·命門·入門) ═
-  xueji:        { url: _W('Xue_Ji.jpg'),           caption: '薛己 (立齋) — 歷代名醫圖贊',             license: 'PD-old' },
-  gongtingxian: { url: _W('Gong_Tingxian.jpg'),    caption: '龔廷賢 (雲林) — 歷代名醫圖贊',           license: 'PD-old' },
-  zhaoxianke:   { url: _W('Zhao_Xianke.jpg'),      caption: '趙獻可 (養葵) — 歷代名醫圖贊',           license: 'PD-old' },
-  lichan:       { url: _W('Li_Chan.jpg'),          caption: '李梴 (健齋) — 醫學入門 卷首',            license: 'PD-old' },
-
-  // ═ 清初~清中 (議病·三大家·溫病) ═
-  yujiayan:     { url: _W('Yu_Chang.jpg'),         caption: '喻嘉言(喻昌) — 歷代名醫圖贊',            license: 'PD-old' },
-  // zhanglu(張璐): v2.2.2 동명인 충돌로 제거 (SVG 폴백)
-  xuexue:       { url: _W('Xue_Xue.jpg'),          caption: '薛雪 (生白) — 歷代名醫圖贊',             license: 'PD-old' },
-  wangmengying: { url: _W('Wang_Mengying.jpg'),    caption: '王孟英 (士雄) — 歷代名醫圖贊',           license: 'PD-old' },
-
-  // ═ 清末·民國 (中西匯通·火神·一氣周流·孟河) ═
-  tangzonghai:  { url: _W('Tang_Zonghai.jpg'),     caption: '唐宗海 (容川) — 歷代名醫圖贊',           license: 'PD-old' },
-  chengguopeng: { url: _W('Cheng_Guopeng.jpg'),    caption: '程國彭 (鍾齡) — 歷代名醫圖贊',           license: 'PD-old' },
-  zhangxichun:  { url: _W('Zhang_Xichun.jpg'),     caption: '張錫純 (壽甫) — 民國 사진 (1910–33)',    license: 'PD-old' },
-  zhengqinan:   { url: _W('Zheng_Qinan.jpg'),      caption: '鄭欽安 (火神派 시조) — 歷代名醫圖贊',     license: 'PD-old' },
-  huangyuanyu:  { url: _W('Huang_Yuanyu.jpg'),     caption: '黃元御 (玉楸) — 歷代名醫圖贊',           license: 'PD-old' },
-  feibaixiong:  { url: _W('Fei_Boxiong.jpg'),      caption: '費伯雄 (晉卿) — 歷代名醫圖贊',           license: 'PD-old' }
+  // ═ 番外 (시트콤) ═
+  leesoonjae:  { url: 'leesoonjae-medallion.jpeg',                                                                                                  caption: '이순재 — 거침없이 하이킥 (MBC 2006)',   license: 'fair-use, 개인 학습용' }
 };
 
 if(typeof window !== 'undefined'){

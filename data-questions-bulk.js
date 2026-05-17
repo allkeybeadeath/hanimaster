@@ -1,5 +1,5 @@
 /* ============================================================
- * ✅  COMPLETE FILE — D1+D2+D3+D4 (350+ problems)
+ * ✅  COMPLETE FILE — D1+D2+D3+D4 (350+ problems)  v4
  *     Generated 2026-05-17. All four difficulty bands present.
  *     Array is closed; module exports BULK_QUESTIONS.
  *     Wire-up: add <script src="data-questions-bulk.js"></script>

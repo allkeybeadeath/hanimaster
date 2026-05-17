@@ -1,16 +1,17 @@
-/* sw.js — v2.2 서비스 워커
+/* sw.js — v4 서비스 워커
  * network-first index.html / app.js (개발 편의),
  * cache-first 나머지 정적 파일 (data, icons, manifest).
  *
  * v2.2: icon.svg 제거 (SVG 전면 폐기), 신농 아이콘으로 변경.
  */
-const CACHE = 'bangje-pwa-v3-2026-05';
+const CACHE = 'bangje-pwa-v5-2026-05';
 const PRECACHE = [
   './',
   './index.html',
   './app.js',
   './data-physicians.js',
   './data-ranks.js',
+  './data-factions.js',
   './data-formulas.js',
   './data-questions-bulk.js',
   './manifest.json',

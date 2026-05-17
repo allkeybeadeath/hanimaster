@@ -276,6 +276,57 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
 .cmedal.cat-korean  {--cmed-ring:#9C3030; --cmed-bg1:#F0D0C0; --cmed-bg2:#C04848; --cmed-fg:#3C0C0C; --cmed-init-bg:#3C0C0C; --cmed-init-fg:#F8E8D8}
 .cmedal.cat-gag     {--cmed-ring:#E84E80; --cmed-bg1:#FFCEDC; --cmed-bg2:#FF8FB0; --cmed-fg:#5C0828; --cmed-init-bg:#5C0828; --cmed-init-fg:#FFE0EC}
 
+/* ─── v4: 神階 메달리온 발광 효과 ───────────────────────────────────────── */
+/* 神階 캐릭터 (黃帝·神農·伏羲·女媧·岐伯) 의 메달리온 주변에 황금빛 오로라.
+   2.6초 주기 부드러운 펄스 + 정적 outer glow.
+   부모에 overflow:hidden 이 있는 작은 칩에선 자연스럽게 잘림 (의도).
+   nth-child delay 로 다중 표시 시 파동 효과 */
+.cmedal.cat-divine{
+  box-shadow:
+    0 1px 4px rgba(28,20,10,.28),
+    inset 0 0 0 1px rgba(255,255,255,.18),
+    0 0 12px 2px rgba(255,224,138,.55),
+    0 0 26px 6px rgba(201,162,39,.34);
+  animation: divine-aura 2.6s ease-in-out infinite;
+  position:relative;
+}
+.cmedal.cat-divine::before{
+  content:'';position:absolute;inset:-6px;border-radius:50%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(255,224,138,0) 0%, rgba(255,224,138,.55) 12%,
+    rgba(255,224,138,0) 25%, rgba(255,224,138,.45) 50%,
+    rgba(255,224,138,0) 75%, rgba(255,224,138,.55) 88%,
+    rgba(255,224,138,0) 100%);
+  filter: blur(7px); opacity:.55; z-index:-1;
+  animation: divine-spin 7s linear infinite;
+  pointer-events:none;
+}
+@keyframes divine-aura{
+  0%,100% { box-shadow:
+    0 1px 4px rgba(28,20,10,.28),
+    inset 0 0 0 1px rgba(255,255,255,.18),
+    0 0 12px 2px rgba(255,224,138,.55),
+    0 0 26px 6px rgba(201,162,39,.34); }
+  50%     { box-shadow:
+    0 1px 4px rgba(28,20,10,.28),
+    inset 0 0 0 1px rgba(255,255,255,.28),
+    0 0 22px 4px rgba(255,224,138,.85),
+    0 0 42px 10px rgba(201,162,39,.55); }
+}
+@keyframes divine-spin{ to { transform: rotate(360deg); } }
+/* picker grid 등에서 神階 5인이 나란히 있을 때 위상차로 파동 */
+.char-grid .char-cell:nth-child(1) .cmedal.cat-divine{ animation-delay: 0s; }
+.char-grid .char-cell:nth-child(2) .cmedal.cat-divine{ animation-delay: .52s; }
+.char-grid .char-cell:nth-child(3) .cmedal.cat-divine{ animation-delay: 1.04s; }
+.char-grid .char-cell:nth-child(4) .cmedal.cat-divine{ animation-delay: 1.56s; }
+.char-grid .char-cell:nth-child(5) .cmedal.cat-divine{ animation-delay: 2.08s; }
+/* prefers-reduced-motion 존중 */
+@media (prefers-reduced-motion: reduce){
+  .cmedal.cat-divine{ animation: none; }
+  .cmedal.cat-divine::before{ animation: none; opacity:.3; }
+}
+
 /* ─── 등급 진행 바 ────────────────────────────────────────────────── */
 .rank-bar{height:10px;background:var(--mi-d);border-radius:5px;overflow:hidden;position:relative;margin-top:8px}
 .rank-bar-fill{height:100%;background:linear-gradient(90deg, var(--huang) 0%, var(--zhusha) 100%);transition:width .4s ease}
@@ -291,6 +342,105 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
 }
 .seal-stamp.big{width:64px;height:64px;font-size:38px;border-width:3px}
 .seal-stamp.tiny{width:22px;height:22px;font-size:14px;border-width:1.5px;border-radius:3px}
+
+/* ─── 四象 진영 (faction) ───────────────────────────────────────────── */
+/* 프로필·메달리온 옆 컴팩트 칩 (2자 한자) */
+.faction-chip{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:2px 6px;height:22px;
+  font-family:var(--font-display);font-weight:700;font-size:12px;
+  color:rgba(255,255,255,.96);
+  border:1.5px solid rgba(0,0,0,.18);border-radius:3px;
+  letter-spacing:.04em;flex-shrink:0;line-height:1;
+  text-shadow:0 1px 1px rgba(0,0,0,.35);
+  box-shadow:0 1px 2px rgba(0,0,0,.18),inset 0 0 0 1px rgba(255,255,255,.08);
+}
+.faction-chip.big{height:28px;padding:3px 9px;font-size:15px;border-radius:4px}
+.faction-chip.tiny{height:16px;padding:1px 4px;font-size:10px;border-radius:2px}
+
+/* 라디오형 진영 선택 (이름 변경 모달 내) */
+.faction-grid{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:6px;
+}
+.faction-cell{
+  display:flex;flex-direction:column;align-items:flex-start;gap:3px;
+  padding:8px 10px;border:1.5px solid var(--mi-d);border-radius:6px;
+  background:var(--mi-w);cursor:pointer;text-align:left;
+  transition:transform .08s ease,border-color .12s ease,box-shadow .12s ease;
+}
+.faction-cell:hover{border-color:var(--gutong)}
+.faction-cell.selected{
+  border-color:var(--ftc,var(--zhusha));
+  box-shadow:0 0 0 2px rgba(201,162,39,.18),inset 0 0 0 1px var(--ftc,var(--zhusha));
+  transform:translateY(-1px);
+}
+.faction-cell .ft-head{display:flex;align-items:center;gap:6px;width:100%}
+.faction-cell .ft-han{
+  font-family:var(--font-display);font-weight:700;font-size:14px;
+  color:var(--ftc,var(--mo))
+}
+.faction-cell .ft-ko{font-size:11px;color:var(--mo-l)}
+.faction-cell .ft-pas{
+  font-size:10.5px;color:var(--gutong);line-height:1.35;margin-top:2px
+}
+
+/* 영토 (territory) 바 — 진영별 氣 점유율 시각화 */
+.territory-card{margin-top:14px}
+.territory-bar{
+  display:flex;width:100%;height:64px;
+  border:2px solid var(--mo);border-radius:6px;overflow:hidden;
+  box-shadow:0 2px 8px rgba(28,20,10,.25),inset 0 0 0 1px rgba(255,224,138,.12);
+  background:var(--mi-w);position:relative;
+}
+.territory-seg{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  color:rgba(255,255,255,.96);font-family:var(--font-display);font-weight:700;
+  text-shadow:0 1px 2px rgba(0,0,0,.5);
+  border-right:1px solid rgba(0,0,0,.28);
+  position:relative;overflow:hidden;min-width:0;
+  background-image:
+    repeating-linear-gradient(45deg,
+      rgba(255,255,255,.07) 0 6px,
+      rgba(0,0,0,.04) 6px 12px);
+  transition:flex-grow .6s cubic-bezier(.2,.7,.2,1);
+}
+.territory-seg:last-child{border-right:none}
+.territory-seg .t-han{font-size:18px;letter-spacing:.05em;line-height:1}
+.territory-seg .t-pct{font-size:11px;font-weight:600;opacity:.92;margin-top:3px}
+.territory-seg.empty{
+  background:repeating-linear-gradient(45deg,
+    var(--mi-d) 0 6px,var(--mi-w) 6px 12px);
+  color:var(--gutong);text-shadow:none;
+}
+.territory-seg.empty .t-han{opacity:.55}
+.territory-legend{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:10px;
+  font-size:11.5px
+}
+.territory-legend-row{
+  display:flex;align-items:center;gap:6px;padding:5px 7px;
+  background:var(--mi-w);border:1px solid var(--mi-d);border-radius:4px;
+  min-width:0;
+}
+.territory-legend-row .dot{
+  width:10px;height:10px;border-radius:2px;flex-shrink:0;
+  border:1px solid rgba(0,0,0,.25)
+}
+.territory-legend-row .lg-han{
+  font-family:var(--font-display);font-weight:700;color:var(--mo);
+  flex-shrink:0
+}
+.territory-legend-row .lg-meta{
+  color:var(--gutong);flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:10.5px
+}
+.territory-legend-row.is-mine{
+  background:#FFF8E0;border-color:var(--huang)
+}
+.territory-mybadge{
+  font-size:10px;color:var(--zhusha-d);font-weight:700;flex-shrink:0
+}
 
 /* ─── 사용자 리스트 (presence) ─────────────────────────────────────── */
 .presence-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
@@ -379,6 +529,16 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
   top:-10px;width:0;height:0;border:10px solid transparent;border-bottom-color:var(--zhusha);border-top:0}
 .intro-bubble.bubble-bottom::after{content:'';position:absolute;left:50%;transform:translateX(-50%);
   top:-7px;width:0;height:0;border:8px solid transparent;border-bottom-color:var(--mi-w);border-top:0}
+
+/* v4: TTS 발화 중 말풍선 강조 — 양측 동시 펄스 */
+.intro-bubble.intro-speaking{
+  animation: introSpeak 0.6s ease-in-out infinite alternate;
+  box-shadow: 0 0 0 0 rgba(156,48,48,.0), var(--sh-sm);
+}
+@keyframes introSpeak{
+  from { box-shadow: 0 0 0 0 rgba(201,162,39,.35), 0 2px 6px rgba(0,0,0,.12); transform: scale(1); }
+  to   { box-shadow: 0 0 0 6px rgba(201,162,39,.0),  0 4px 12px rgba(0,0,0,.18); transform: scale(1.025); }
+}
 .intro-han{font-size:17px;color:var(--zhusha-d);line-height:1.45;font-weight:600;font-family:var(--font-han)}
 .intro-ko{font-size:12px;color:var(--mo-l);margin-top:4px;line-height:1.4}
 .intro-src{font-size:10px;color:var(--gutong);font-style:italic;margin-top:4px;letter-spacing:.04em}
@@ -420,6 +580,23 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
 .bet-cell .han{font-family:var(--font-display);font-size:18px;color:var(--zhusha-d);letter-spacing:.04em}
 .bet-cell .pct{font-size:14px;font-weight:700;color:var(--huang-d);margin-top:2px;font-family:var(--font-display)}
 .bet-cell .min{font-size:10.5px;color:var(--gutong);margin-top:1px}
+
+/* v4: 베팅 단계별 출제 난이도 분포 strip (D1·D2·D3·D4 비율 시각화) */
+.bet-cell .bet-diff-strip{
+  display:flex;gap:1px;margin-top:6px;height:10px;border-radius:3px;overflow:hidden;
+  border:1px solid rgba(0,0,0,.08);
+}
+.bet-cell .bet-diff-seg{
+  display:flex;align-items:center;justify-content:center;
+  font-size:8px;font-family:var(--font-display);font-weight:700;
+  color:rgba(255,255,255,.92); text-shadow:0 1px 1px rgba(0,0,0,.4);
+  min-width:0;letter-spacing:0;
+}
+.bet-cell .bet-diff-seg.d1{background:#5A8C4A}
+.bet-cell .bet-diff-seg.d2{background:#C9A227}
+.bet-cell .bet-diff-seg.d3{background:#C04030}
+.bet-cell .bet-diff-seg.d4{background:#3C0C0C;color:var(--huang)}
+
 .bet-cell .waiting-badge{
   position:absolute;top:4px;right:4px;
   background:var(--feicui);color:var(--mi-w);
@@ -894,6 +1071,7 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
 
 <!-- 데이터 + 앱 스크립트 -->
 <script src="data-ranks.js"></script>
+<script src="data-factions.js"></script>
 <script src="data-physicians.js"></script>
 <script src="data-formulas.js"></script>
 <script src="data-questions-bulk.js"></script>
