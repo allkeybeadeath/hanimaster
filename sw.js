@@ -10,7 +10,7 @@
  *   • 캐릭터 사진 → images/characters/ 폴더로 이동
  *   • 캐시 키 갱신
  */
-const CACHE = 'bangje-pwa-v9-7-2026-05b';
+const CACHE = 'bangje-pwa-v10-0-2026-05';
 const PRECACHE = [
   './',
   './index.html',
@@ -25,6 +25,25 @@ const PRECACHE = [
   './bangje-v97-signatures.js',
   './bangje-v97-profile.js',
   './bangje-v97-formuladict.js',
+  // v9.8 모듈
+  './bangje-v98-srs.js',
+  './bangje-v98-drill.js',
+  './bangje-v98-canvas.js',
+  './bangje-v98-diff.js',
+  './bangje-v98-weighted.js',
+  './bangje-v98-hanyin.js',
+  './bangje-v98-herbpop.js',
+  './bangje-v98-dictplus.js',
+  './bangje-v98-resonance.js',
+  './bangje-v98-leeline.js',
+  './bangje-v98-cube-rules.js',
+  './bangje-v98-modal-alert.js',
+  './bangje-v98-home.js',
+  './bangje-v98-bootstrap.js',
+  // v10 모듈
+  './bangje-v99-sichen-clock.js',
+  './bangje-v99-meridian-body.js',
+  './bangje-v99-hotfix.js',
   './data-physicians.js',
   './data-ranks.js',
   './data-factions.js',
@@ -68,7 +87,7 @@ self.addEventListener('fetch', e => {
     url.pathname.endsWith('/') ||
     url.pathname.endsWith('app.js') ||
     url.pathname.endsWith('bangje-cube.js') ||
-    /bangje-v9[67]-[\w-]+\.js$/.test(url.pathname);
+    /bangje-v(9[6789])-[\w-]+\.js$/.test(url.pathname);
   if(networkFirst){
     e.respondWith(
       fetch(req).then(r => {
