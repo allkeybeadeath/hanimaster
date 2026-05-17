@@ -10,7 +10,7 @@
  *   • 캐릭터 사진 → images/characters/ 폴더로 이동
  *   • 캐시 키 갱신
  */
-const CACHE = 'bangje-pwa-v10-0-1-2026-05';
+const CACHE = 'bangje-pwa-v10-0-2-2026-05';
 const PRECACHE = [
   './',
   './index.html',
@@ -44,6 +44,7 @@ const PRECACHE = [
   './bangje-v99-sichen-clock.js',
   './bangje-v99-meridian-body.js',
   './bangje-v99-hotfix.js',
+  './bangje-v99-herbtap.js',
   './data-physicians.js',
   './data-ranks.js',
   './data-factions.js',

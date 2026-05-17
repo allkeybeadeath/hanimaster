@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v9.7';                  // ★ 로비 표시용 (2026-05) — 業績·印章·캐릭터 시그니처 (솔로 三段)
-const APP_BUILD   = '2026.05.18e';           // e: 카드 對決 reveal 픽스 + 큐브 본초 재분포 + 處方 사전
+const APP_VERSION = 'v10.0.2';                // ★ 로비 표시용 (2026-05) — 시진 시계·361穴·通明·본초 학습 토글
+const APP_BUILD   = '2026.05.18.v10.0.2';     // v10.0.2: 본초 단탭 학습 + 「+ 나머지 본초」
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
