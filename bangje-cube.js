@@ -1197,6 +1197,11 @@ function actUndo(){
 
 async function actCommit(){
   if(!LOCAL.isMyTurn){ msg('차례가 아닙니다','warn'); return; }
+  // v9.8: 첫 출패(initial meld) 룰 — 외부 모듈이 있으면 위임
+  if(window.V98CubeRules){
+    const _ck = window.V98CubeRules.validateLocal(LOCAL);
+    if(!_ck.ok){ msg(_ck.msg, 'warn'); return; }
+  }
   for(const s of LOCAL.board){
     if(!isValidSet(s.herbs)){
       msg(`⚠ 미완성 set: ${s.herbs.join('·')}`,'warn');
