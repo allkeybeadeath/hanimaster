@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v8.4';                  // ★ 로비 표시용 (2026-05) — v8.4: 카드 keep-alive + 큐 stale 정리 + 큐 카운트 UI
-const APP_BUILD   = '2026.05.17o';
+const APP_VERSION = 'v8.5';                  // ★ 로비 표시용 (2026-05) — v8.5: 카드 對決 무한로딩 픽스 + 랜덤 초기 캐릭터
+const APP_BUILD   = '2026.05.17p';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -52,7 +52,7 @@ const SSE_FALLBACK_POLL_MS  = 3000;        // SSE 실패 시 폴링 백오프 �
 let S = {
   userId: null,           // 익명 ID (한번 생성하면 영구)
   name: '',               // 닉네임 (사용자 편집)
-  character: 'qibo',      // 선택 캐릭터 id (기본 岐伯 — 학습 지도자)
+  character: null,        // v8.5: 첫 시작 시 神급·이순재 제외 랜덤 부여 (loadState 에서)
   faction: '',            // v5: 四象 진영 id (taeyang/soyang/taeum/soeum) — 최초 진입 시 랜덤
   qi: 0,                  // 누적 氣 (= XP)
   unlockedDivine: [],     // 구매한 神階 id 배열
@@ -62,6 +62,8 @@ let S = {
   lastFcIdx: 0, fcMode: 'action',
   quizScope: 'all', lastTab: 'home',
   battleHistory: [],      // 최근 배틀 결과 (최대 20)
+  cardBattleHistory: [],  // v8.5: 카드 對決 전적 (5지선다 별도)
+  herbLang: 'han',        // v8.5: 본초 표시 언어 ('han'=한자 / 'ko'=한글)
 };
 
 function loadState(){
@@ -78,6 +80,22 @@ function loadState(){
   if(!S.faction || !FACTION_BY_ID[S.faction]){
     S.faction = (typeof randomFactionId === 'function') ? randomFactionId() : 'taeyang';
   }
+  // v8.5: 캐릭터가 없으면 神급(divine) + 이순재 제외하고 랜덤 부여 (첫 시작 전용)
+  if(!S.character){
+    if(typeof PHYSICIANS !== 'undefined' && Array.isArray(PHYSICIANS)){
+      const pool = PHYSICIANS.filter(p => p && p.id && p.cat !== 'divine' && p.id !== 'leesoonjae');
+      if(pool.length){
+        S.character = pool[Math.floor(Math.random() * pool.length)].id;
+      } else {
+        S.character = 'huatuo';  // 안전망 (PHYSICIANS 로드 실패 시 任意 ancient)
+      }
+    } else {
+      S.character = 'huatuo';
+    }
+  }
+  // v8.5: 누적 필드 보강
+  if(!Array.isArray(S.cardBattleHistory)) S.cardBattleHistory = [];
+  if(!S.herbLang) S.herbLang = 'han';
 }
 let _saveTimer = null;
 function saveState(){
@@ -86,6 +104,9 @@ function saveState(){
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(S)); }catch(_){}
   }, 250);
 }
+
+// v8.5: SSE 콜백 에러 진단 (FB.subscribe emit() 에서 갱신)
+let _lastSubError = null;
 
 // Firebase REST 헬퍼 — Greek v60 패턴 단순화
 const FB = (() => {
@@ -232,7 +253,16 @@ const FB = (() => {
       let pollTimer = null;
       let gotFirst = false;
 
-      const emit = () => { if(!closed){ try{ onUpdate(snapshot); }catch(_){} } };
+      // v8.5: emit() 렌더 에러를 콘솔에 명시 — 기존 try{}catch(_){} 가 무한 로딩의 원인 (silent fail)
+      const emit = () => {
+        if(closed) return;
+        try{ onUpdate(snapshot); }
+        catch(e){
+          try{ console.error('[FB.subscribe] onUpdate error', path, e); }catch(_){}
+          // 진단을 위해 마지막 에러를 sub 객체에 노출
+          try{ _lastSubError = {path, err: e && e.message || String(e), at: Date.now()}; }catch(_){}
+        }
+      };
 
       // 상대 path("/", "/key", "/key/sub")에 put/patch 적용
       const applyEvent = (type, raw) => {
@@ -2715,8 +2745,14 @@ async function joinBattleQueue(level){
 
 
 async function startBattle(roomId, isCreator){
-  const room = await FB.get(`battles/${roomId}`);
-  if(!room){ toast('방을 찾을 수 없음'); setTab('hall'); return; }
+  // v8.5: FB.get 재시도 (1회 → 4회, 350·700·1050 ms 백오프). 네트워크 일시 장애에 강함.
+  let room = null;
+  for(let i=0; i<4; i++){
+    try{ room = await FB.get(`battles/${roomId}`); }catch(_){ room = null; }
+    if(room) break;
+    await new Promise(r => setTimeout(r, 350 * (i+1)));
+  }
+  if(!room){ toast('방을 찾을 수 없음 (4회 재시도 실패)','red'); setTab('hall'); return; }
   _battle = { roomId, isCreator, room };
   // v7.2: 배틀 진행 중 플래그 ON — 탭 이탈 가드 활성
   const oppId = Object.keys(room.players||{}).find(k => k !== S.userId) || null;
@@ -5651,11 +5687,11 @@ async function joinCardBattleQueue(){
     try{ await FB.put(`lobby_card/${S.userId}`, {...myEntry, ts: Date.now()}); }catch(_){}
   }, 10 * 1000);
 
-  // STALE 5분
+  // STALE 5분 (v8.5: 5지선다와 통일)
   const STALE_ROOM_MS = 5 * 60 * 1000;
-  // 자기 stale card_battles 정리 — 1분 이상 자기 player 인 not-done 방 모두 즉시 done 마킹
-  // v8.4: 5분 → 1분으로 단축 (stale 방 재진입 방지)
-  const STALE_BATTLE_QUICK_MS = 60 * 1000;
+  // 자기 stale card_battles 정리 — 5분 이상 자기 player 인 not-done 방 모두 즉시 done 마킹
+  // v8.5: 1분 → 5분. 1분은 SSE 지연 환경에서 정상 매칭도 stale 처리되는 버그 유발.
+  const STALE_BATTLE_QUICK_MS = 5 * 60 * 1000;
   (async () => {
     try{
       const all = await FB.get('card_battles');
@@ -5713,7 +5749,7 @@ async function joinCardBattleQueue(){
     const myRoom = Object.values(battles).find(r =>
       r && r.players && r.players[S.userId]
       && r.status !== 'done'
-      && (now - (r.createdAt||0)) < STALE_BATTLE_QUICK_MS  // v8.4: 5분 → 1분
+      && (now - (r.createdAt||0)) < STALE_BATTLE_QUICK_MS  // v8.5: 5분 (1분 stale 버그 회복)
     );
     if(myRoom){
       matching = true;
@@ -5818,6 +5854,8 @@ async function createCardBattleRoom(roomId, me, opp, bet){
 let _cardRoomStream = null;
 let _cardRoomState  = null;
 let _cardChooseTimer= null;
+let _cardLoadWatchdog = null;  // v8.5: 로딩 watchdog timer
+let _cardFirstRenderDone = false;  // v8.5: 첫 렌더 성공 플래그
 async function startCardBattle(roomId, isCreator){
   setTab('battle');
   view.innerHTML = `
@@ -5825,28 +5863,82 @@ async function startCardBattle(roomId, isCreator){
       <div class="han" style="font-size:32px;color:var(--zhusha-d)">對決</div>
       <div style="margin-top:8px">방 ${esc(roomId)}</div>
       <div id="cb-stage" style="margin-top:12px">로딩…</div>
+      <div id="cb-diag" style="margin-top:6px;font-size:11px;color:var(--gutong);min-height:14px"></div>
     </div>
   `;
-  bgm.startBattle && bgm.startBattle();
+  // v8.5: 카드 對決 전용 BGM (없으면 일반 battle BGM 으로 폴백)
+  try{ (bgm.startCardDuel || bgm.startBattle).call(bgm); }catch(_){}
 
   // v7.2: 배틀 진행 중 플래그 ON (탭 이탈 가드용) — oppId 는 첫 SSE 콜백에서 확정
   _inBattleSession = true;
   _battleSessionMeta = { mode:'card', roomId, oppId:null };
+  _cardFirstRenderDone = false;
 
-  // 방 데이터 구독
+  // v8.5: 초기 방 데이터를 FB.get 으로 즉시 패치 (재시도). SSE 의존 제거.
+  //       SSE 가 안 와도 최소 1회 렌더 보장 → 무한 로딩 방지.
+  (async () => {
+    let initial = null;
+    for(let i=0; i<4; i++){
+      try{ initial = await FB.get(`card_battles/${roomId}`); }catch(_){ initial = null; }
+      if(initial) break;
+      await new Promise(r => setTimeout(r, 350 * (i+1)));
+    }
+    if(initial){
+      _cardRoomState = initial;
+      if(_battleSessionMeta && !_battleSessionMeta.oppId && initial.players){
+        _battleSessionMeta.oppId = Object.keys(initial.players).find(k => k !== S.userId) || null;
+      }
+      try{ renderCardBattle(roomId, initial); _cardFirstRenderDone = true; }
+      catch(e){
+        const d = $('#cb-diag'); if(d) d.textContent = '렌더 오류: '+(e&&e.message||e);
+      }
+    } else {
+      const d = $('#cb-diag'); if(d) d.innerHTML = `<span style="color:var(--zhusha-d)">초기 패치 실패 (4회 재시도) — SSE 대기 중</span>`;
+    }
+  })();
+
+  // 방 데이터 구독 (라이브 업데이트용)
   _cardRoomStream = FB.subscribe(`card_battles/${roomId}`, (room) => {
     if(!room){
-      // 방 사라짐 (정상 종료 후 청소되었을 수 있음)
-      $('#cb-stage').innerHTML = '<div style="color:var(--zhusha-d)">방 데이터 없음 (재접속 필요)</div>';
+      $('#cb-stage').innerHTML = '<div style="color:var(--zhusha-d);padding:20px">방 데이터 없음 (정상 종료 후 청소되었을 수 있음)</div>';
       return;
     }
     _cardRoomState = room;
-    // v7.2: oppId 보강 (forfeit 시 상대 식별용)
     if(_battleSessionMeta && !_battleSessionMeta.oppId && room.players){
       _battleSessionMeta.oppId = Object.keys(room.players).find(k => k !== S.userId) || null;
     }
-    renderCardBattle(roomId, room);
+    try{
+      renderCardBattle(roomId, room);
+      _cardFirstRenderDone = true;
+      const d = $('#cb-diag'); if(d && d.textContent && !/렌더 오류/.test(d.textContent)) d.textContent = '';
+    }catch(e){
+      try{ console.error('renderCardBattle error', e); }catch(_){}
+      const d = $('#cb-diag'); if(d) d.textContent = '렌더 오류: ' + (e && e.message || e);
+    }
   });
+
+  // v8.5: 8초 watchdog — 첫 렌더가 안 됐으면 진단 + 수동 새로고침 옵션
+  if(_cardLoadWatchdog){ clearTimeout(_cardLoadWatchdog); }
+  _cardLoadWatchdog = setTimeout(() => {
+    if(_cardFirstRenderDone) return;
+    const stg = $('#cb-stage'); const d = $('#cb-diag');
+    if(stg){
+      stg.innerHTML = `
+        <div style="text-align:center;padding:14px 8px">
+          <div style="color:var(--zhusha-d);font-size:14px;margin-bottom:8px">진입이 지연됩니다</div>
+          <div style="font-size:12px;color:var(--mo-l);margin-bottom:10px">방 ${esc(roomId)} 데이터 패치가 8초 내 완료되지 않았습니다. 네트워크/Firebase 권한 또는 SSE 차단 가능성.</div>
+          <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+            <button class="btn btn-gold" onclick="(async()=>{const r=await FB.get('card_battles/${esc(roomId)}');if(r){_cardRoomState=r;renderCardBattle('${esc(roomId)}',r);_cardFirstRenderDone=true;}else{toast('방을 찾을 수 없음','red');}})()">수동 패치 시도</button>
+            <button class="btn btn-o" onclick="(async()=>{try{await FB.put('card_battles/${esc(roomId)}/status','done');}catch(_){};_inBattleSession=false;_battleSessionMeta=null;stopCardStreams();setTab('hall');})()">포기 (방 폐쇄)</button>
+          </div>
+        </div>
+      `;
+    }
+    if(d){
+      const errStr = _lastSubError ? `· SSE 에러: ${esc(_lastSubError.err||'?')} (${esc(_lastSubError.path||'?')})` : '';
+      d.innerHTML = `watchdog 진단 — 첫 렌더 미완료 ${errStr}`;
+    }
+  }, 8000);
 }
 
 // 화면 렌더링 — status 별로 분기
@@ -6649,6 +6741,7 @@ function stopCardStreams(){
     if(_cardBattlesStream){ _cardBattlesStream.close(); _cardBattlesStream=null; }
     if(_cardRoomStream){ _cardRoomStream.close(); _cardRoomStream=null; }
     if(_cardChooseTimer){ clearInterval(_cardChooseTimer); _cardChooseTimer=null; }
+    if(_cardLoadWatchdog){ clearTimeout(_cardLoadWatchdog); _cardLoadWatchdog=null; }  // v8.5
   }catch(_){}
 }
 
