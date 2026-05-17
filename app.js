@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v8.3';                  // ★ 로비 표시용 (2026-05) — v8.3: 원격 wipe (모든 단말 localStorage 청소)
-const APP_BUILD   = '2026.05.17n';
+const APP_VERSION = 'v8.4';                  // ★ 로비 표시용 (2026-05) — v8.4: 카드 keep-alive + 큐 stale 정리 + 큐 카운트 UI
+const APP_BUILD   = '2026.05.17o';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -2508,8 +2508,12 @@ async function joinBattleQueue(level){
         ${esc(lvlInfo.han)} · ${bet.toLocaleString()} 氣 <span style="color:var(--gutong);font-size:11px">(에스크로)</span>
       </div>
       <div style="font-size:12px;color:var(--mo-l);margin-top:8px" id="queue-status">대기 중…</div>
+      <div style="font-size:11.5px;color:var(--gutong);margin-top:2px;min-height:14px" id="queue-count"></div>
       <div style="font-size:11px;color:var(--gutong);margin-top:4px" id="queue-timer"></div>
-      <button class="btn btn-o btn-sm" id="leave-queue" style="margin-top:18px">취소 (환불)</button>
+      <div style="margin-top:18px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-o btn-sm" id="leave-queue">취소 (환불)</button>
+        <button class="btn btn-o btn-sm" id="rereg-queue">큐 재등록</button>
+      </div>
     </div>
   `;
 
@@ -2537,6 +2541,10 @@ async function joinBattleQueue(level){
       toast(`매칭 실패 — ${bet} 氣 환불`,'gold');
     }
   };
+
+  // v8.4: 자기 stale entry 강제 정리 (이전 세션 잔재 제거)
+  try{ await FB.del(`lobby/${level}/${S.userId}`); }catch(_){}
+  await new Promise(r => setTimeout(r, 150));
 
   // 1) 큐 등록 (재시도)
   const ok = await FB.putRetry(`lobby/${level}/${S.userId}`, myEntry, {tries:3, backoffMs:400});
@@ -2572,6 +2580,17 @@ async function joinBattleQueue(level){
   $('#leave-queue').addEventListener('click', async () => {
     await cleanup(true);
     setTab('hall');
+  });
+  // v8.4: 수동 재등록 (stale 상태로 stuck 됐을 때)
+  $('#rereg-queue').addEventListener('click', async () => {
+    try{
+      $('#queue-status').textContent = '큐 재등록 중…';
+      await FB.del(`lobby/${level}/${S.userId}`);
+      await new Promise(r => setTimeout(r, 200));
+      const rok = await FB.putRetry(`lobby/${level}/${S.userId}`, {...myEntry, ts: Date.now()}, {tries:3, backoffMs:400});
+      if(rok && rok.ok){ $('#queue-status').textContent = '재등록 완료 — 상대 찾는 중'; }
+      else { $('#queue-status').textContent = `재등록 실패 (HTTP ${rok && rok.status||'?'})`; }
+    }catch(e){ $('#queue-status').textContent = '재등록 오류: ' + e.message; }
   });
 
   // 4) 타임아웃 시계 표시
@@ -2642,14 +2661,16 @@ async function joinBattleQueue(level){
   // 6) /lobby/{level} SSE — 상대 발견 시 사전순 작은 쪽이 방 생성
   const onLobbySnap = async (all) => {
     if(!active || matching) return;
+    // v8.4: 큐 카운트 항상 표시
+    const now = Date.now();
+    const fresh = all ? Object.values(all).filter(p => p && (now - (p.ts||0)) < LOBBY_FRESH_MS) : [];
+    const others = fresh.filter(p => p.userId !== S.userId).sort((a,b) => (a.ts||0) - (b.ts||0));
+    const cntEl = $('#queue-count');
+    if(cntEl) cntEl.textContent = `현재 큐 (${esc(lvlInfo.han)}): ${fresh.length}명 · 대기 ${others.length}명`;
     if(!all){
       const status = $('#queue-status'); if(status) status.textContent = '대기 중…';
       return;
     }
-    const now = Date.now();
-    const others = Object.values(all)
-      .filter(p => p && p.userId !== S.userId && (now - (p.ts||0)) < LOBBY_FRESH_MS)
-      .sort((a,b) => (a.ts||0) - (b.ts||0));
     if(others.length === 0){
       const status = $('#queue-status'); if(status) status.textContent = '대기 중…';
       return;
@@ -5544,6 +5565,9 @@ let _cardLobbyStream = null;
 let _cardBattlesStream = null;
 let _cardMatchTimeout = null;
 
+// v8.4: 카드 큐 keep-alive timer (10초마다 ts 갱신) — 45초 fresh 윈도우 안전 유지
+let _cardKeepaliveTimer = null;
+
 async function joinCardBattleQueue(){
   if(!S.userId){ alert('사용자 정보가 없습니다'); return; }
   const bet = calcCardBet();
@@ -5561,22 +5585,43 @@ async function joinCardBattleQueue(){
       <div style="text-align:center;padding:24px 12px">
         <div class="han" style="font-size:48px;color:var(--zhusha-d);margin-bottom:8px">候</div>
         <div id="card-queue-status" style="font-size:14px;color:var(--mo)">큐에 등록 중…</div>
+        <div id="card-queue-count" style="font-size:11.5px;color:var(--gutong);margin-top:4px;min-height:14px"></div>
         <div style="margin-top:8px;font-size:11.5px;color:var(--gutong)">베팅 ${bet.toLocaleString()} 氣 · 카드 對決</div>
-        <div style="margin-top:14px"><button class="btn btn-o" id="card-cancel-btn">취소 (환불)</button></div>
+        <div style="margin-top:14px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+          <button class="btn btn-o" id="card-cancel-btn">취소 (환불)</button>
+          <button class="btn btn-o" id="card-reregister-btn">큐 재등록</button>
+        </div>
       </div>
     </div>
   `;
 
   let matching = false, active = true, cleanedUp = false;
+  const myEntry = {
+    userId: S.userId, name: S.name||'무명', character: S.character||null,
+    faction: S.faction||null, bet, ts: Date.now()
+  };
+
   const cleanup = async (refund) => {
     if(cleanedUp) return; cleanedUp = true; active = false;
     if(_cardMatchTimeout){ clearTimeout(_cardMatchTimeout); _cardMatchTimeout = null; }
+    if(_cardKeepaliveTimer){ clearInterval(_cardKeepaliveTimer); _cardKeepaliveTimer = null; }
     if(_cardLobbyStream){ try{ _cardLobbyStream.close(); }catch(_){} _cardLobbyStream = null; }
     if(_cardBattlesStream){ try{ _cardBattlesStream.close(); }catch(_){} _cardBattlesStream = null; }
     try{ if(FB && S.userId) await FB.del(`lobby_card/${S.userId}`); }catch(_){}
     if(refund){ S.qi += bet; saveState(); renderHall(); }
   };
   $('#card-cancel-btn').addEventListener('click', async () => { await cleanup(true); setTab('hall'); });
+  // v8.4: 수동 재등록 버튼 — stale 상태로 stuck 됐을 때 강제 새로고침
+  $('#card-reregister-btn').addEventListener('click', async () => {
+    try{
+      $('#card-queue-status').textContent = '큐 재등록 중…';
+      await FB.del(`lobby_card/${S.userId}`);
+      await new Promise(r => setTimeout(r, 200));
+      const ok = await FB.putRetry(`lobby_card/${S.userId}`, {...myEntry, ts: Date.now()});
+      if(ok && ok.ok){ $('#card-queue-status').textContent = '재등록 완료 — 상대 찾는 중'; }
+      else { $('#card-queue-status').textContent = '재등록 실패 (HTTP ' + (ok && ok.status||'?') + ')'; }
+    }catch(e){ $('#card-queue-status').textContent = '재등록 오류: ' + e.message; }
+  });
 
   if(!FB){
     $('#card-queue-status').textContent = 'Firebase 없음 — 카드 對決 불가';
@@ -5584,22 +5629,33 @@ async function joinCardBattleQueue(){
     return;
   }
 
-  // 큐에 자기 등록
-  try{
-    await FB.putRetry(`lobby_card/${S.userId}`, {
-      userId: S.userId, name: S.name||'무명', character: S.character||null,
-      faction: S.faction||null, bet, ts: Date.now()
-    });
-  }catch(e){
-    $('#card-queue-status').textContent = '큐 등록 실패: ' + (e && e.message || e);
-    setTimeout(async ()=>{ await cleanup(true); setTab('hall'); }, 1800);
+  // v8.4: 자기 stale entry 강제 정리 (이전 세션 잔재 제거)
+  try{ await FB.del(`lobby_card/${S.userId}`); }catch(_){}
+  await new Promise(r => setTimeout(r, 150));  // Firebase 전파 잠시 대기
+
+  // 큐에 자기 등록 — v8.4: putRetry 결과 명시적 검사
+  const regResult = await FB.putRetry(`lobby_card/${S.userId}`, myEntry, {tries:3, backoffMs:400});
+  if(!regResult || !regResult.ok){
+    const reason = regResult && (regResult.status === 401 || regResult.status === 403)
+      ? '권한 거부 (Firebase 보안 룰 — lobby_card 노드 확인 필요)'
+      : `HTTP ${regResult && regResult.status || '?'} · ${regResult && regResult.message || '네트워크'}`;
+    $('#card-queue-status').textContent = '큐 등록 실패 — ' + reason;
+    setTimeout(async ()=>{ await cleanup(true); setTab('hall'); }, 2500);
     return;
   }
   $('#card-queue-status').textContent = '대기 중 — 상대를 찾는 중';
 
+  // v8.4: keep-alive — 10초마다 ts 갱신 (45초 fresh 윈도우 안전 유지)
+  _cardKeepaliveTimer = setInterval(async () => {
+    if(!active) return;
+    try{ await FB.put(`lobby_card/${S.userId}`, {...myEntry, ts: Date.now()}); }catch(_){}
+  }, 10 * 1000);
+
   // STALE 5분
   const STALE_ROOM_MS = 5 * 60 * 1000;
-  // 자기 stale card_battles 정리
+  // 자기 stale card_battles 정리 — 1분 이상 자기 player 인 not-done 방 모두 즉시 done 마킹
+  // v8.4: 5분 → 1분으로 단축 (stale 방 재진입 방지)
+  const STALE_BATTLE_QUICK_MS = 60 * 1000;
   (async () => {
     try{
       const all = await FB.get('card_battles');
@@ -5607,7 +5663,7 @@ async function joinCardBattleQueue(){
         const now2 = Date.now();
         for(const [rid, r] of Object.entries(all)){
           if(r && r.players && r.players[S.userId] && r.status !== 'done'
-             && (now2 - (r.createdAt||0)) >= STALE_ROOM_MS){
+             && (now2 - (r.createdAt||0)) >= STALE_BATTLE_QUICK_MS){
             try{ await FB.put(`card_battles/${rid}/status`, 'done'); }catch(_){}
           }
         }
@@ -5618,11 +5674,15 @@ async function joinCardBattleQueue(){
   // /lobby_card SSE
   const onLobbySnap = async (q) => {
     if(!active || matching) return;
-    if(!q) return;
+    // v8.4: 큐 카운트 항상 표시 (q 가 null 이어도 카운트 0 표시)
     const now = Date.now();
-    const fresh = Object.values(q).filter(x => x && x.userId && (now - (x.ts||0)) < 45000);
+    const fresh = q ? Object.values(q).filter(x => x && x.userId && (now - (x.ts||0)) < 45000) : [];
+    const others = fresh.filter(x => x.userId !== S.userId);
+    const cnt = $('#card-queue-count');
+    if(cnt) cnt.textContent = `현재 큐: ${fresh.length}명 (나 + 대기 ${others.length}명)`;
+    if(!q) return;
     // 매칭: 자기 외에 다른 fresh 사용자 1명 이상 있고, userId 사전 순 작은 쪽이 방 생성
-    const opp = fresh.find(x => x.userId !== S.userId);
+    const opp = others[0];
     if(opp){
       if(S.userId < opp.userId){
         matching = true;
@@ -5631,12 +5691,14 @@ async function joinCardBattleQueue(){
         try{
           await createCardBattleRoom(roomId, S, opp, bet);
         }catch(e){
-          $('#card-queue-status').textContent = '방 생성 실패: ' + (e && e.message || e);
-          setTimeout(async ()=>{ await cleanup(true); setTab('hall'); }, 1800);
+          matching = false;  // v8.4: 방 생성 실패 시 다음 SSE 콜백에서 재시도 가능하게 flag 해제
+          $('#card-queue-status').textContent = '방 생성 실패: ' + (e && e.message || e) + ' — 재시도 대기';
           return;
         }
         await cleanup(false);  // 환불 안 함
         startCardBattle(roomId, true);
+      } else {
+        $('#card-queue-status').textContent = `상대 발견 (${esc(opp.name||'')}) — 방 생성 대기…`;
       }
       // 큰 쪽은 onBattlesSnap 에서 잡힘
     }
@@ -5651,7 +5713,7 @@ async function joinCardBattleQueue(){
     const myRoom = Object.values(battles).find(r =>
       r && r.players && r.players[S.userId]
       && r.status !== 'done'
-      && (now - (r.createdAt||0)) < STALE_ROOM_MS
+      && (now - (r.createdAt||0)) < STALE_BATTLE_QUICK_MS  // v8.4: 5분 → 1분
     );
     if(myRoom){
       matching = true;
