@@ -1,18 +1,25 @@
-/* sw.js — v4 서비스 워커
- * network-first index.html / app.js (개발 편의),
+/* sw.js — v9.6 서비스 워커
+ * network-first index.html / app.js / bangje-cube.js / bangje-v96-part*.js (개발 편의),
  * cache-first 나머지 정적 파일 (data, icons, manifest).
  *
- * v2.2: icon.svg 제거 (SVG 전면 폐기), 신농 아이콘으로 변경.
+ * v9.6: bangje-v96-part1..5.js 추가 · 캐시 키 갱신
  */
-const CACHE = 'bangje-pwa-v9-4-2026-05';
+const CACHE = 'bangje-pwa-v9-6-2026-05';
 const PRECACHE = [
   './',
   './index.html',
   './app.js',
+  './bangje-cube.js',
+  './bangje-v96-part1.js',
+  './bangje-v96-part2.js',
+  './bangje-v96-part3.js',
+  './bangje-v96-part4.js',
+  './bangje-v96-part5.js',
   './data-physicians.js',
   './data-ranks.js',
   './data-factions.js',
   './data-formulas.js',
+  './data-formulas-extra.js',
   './data-additions.js',
   './data-questions-bulk.js',
   './data-syndromes.js',
@@ -21,7 +28,6 @@ const PRECACHE = [
   './icon-192.png',
   './icon-512.png',
   './apple-touch-icon.png',
-  './shennong.webp',
   './shennong.png',
   './leesoonjae-medallion.jpeg'
 ];
@@ -44,8 +50,13 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if(req.method !== 'GET') return;
   const url = new URL(req.url);
-  // network-first: index.html, app.js (변경이 잦음)
-  const networkFirst = url.pathname.endsWith('index.html') || url.pathname.endsWith('/') || url.pathname.endsWith('app.js');
+  // network-first: index.html, app.js, bangje-cube.js, bangje-v96-part*.js (변경이 잦은 코드)
+  const networkFirst =
+    url.pathname.endsWith('index.html') ||
+    url.pathname.endsWith('/') ||
+    url.pathname.endsWith('app.js') ||
+    url.pathname.endsWith('bangje-cube.js') ||
+    /bangje-v96-part\d+\.js$/.test(url.pathname);
   if(networkFirst){
     e.respondWith(
       fetch(req).then(r => {

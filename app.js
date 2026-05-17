@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v9.5';                  // ★ 로비 표시용 (2026-05) — 方劑Cube 방미큐브 4人 對局 추가
-const APP_BUILD   = '2026.05.17z';
+const APP_VERSION = 'v9.6';                  // ★ 로비 표시용 (2026-05) — 채팅·presence상세·2시간의전사·AI 對決 (카드·큐브)
+const APP_BUILD   = '2026.05.18a';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -68,6 +68,8 @@ let S = {
   flashRated: {},                          // {key: 'easy'|'hard'|'again'} — Spaced repetition 표식
   shortAnswerStats: {ok:0, ng:0, qi:0},    // 누적 주관식 통계
   flashLang: 'han',                        // 플래시카드 표시 언어 ('han' | 'ko')
+  // v9.6: 현재 활동 (presence 클릭 상세 표시용 — Firebase 에 함께 게시)
+  activity: { label:'', sub:'', ts: 0 },
 };
 
 function loadState(){
@@ -107,6 +109,8 @@ function loadState(){
   if(typeof S.shortAnswerStats.ng !== 'number') S.shortAnswerStats.ng = 0;
   if(typeof S.shortAnswerStats.qi !== 'number') S.shortAnswerStats.qi = 0;
   if(!S.flashLang) S.flashLang = 'han';
+  // v9.6: 활동 필드 보강
+  if(!S.activity || typeof S.activity !== 'object') S.activity = { label:'', sub:'', ts:0 };
 }
 let _saveTimer = null;
 function saveState(){
@@ -1090,6 +1094,15 @@ function setTab(name){
   S.lastTab = name; saveState();
   $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   view.scrollTop = 0; window.scrollTo({top:0, behavior:'instant'});
+  // v9.6: 활동 라벨 갱신 (presence detail 모달에서 표시)
+  if(typeof window.V96Activity !== 'undefined'){
+    const labels = {
+      home: '大廳', formula: '處方 학습', herb: '本草 학습', quiz: '기출·암기',
+      flash: '암기·주관식', stats: '통계·분석', hall: '명예의 전당',
+      cube: '방미큐브 對局', warrior2h: '2시간의 전사', battle: '對決 진행 중',
+    };
+    try{ window.V96Activity.set(labels[name] || name, ''); }catch(_){}
+  }
   const r = ROUTES[name] || ROUTES.home;
   view.innerHTML = '';
   r();
@@ -1206,6 +1219,7 @@ const ROUTES = {
   stats: renderStats,
   hall: renderHall,
   cube: (typeof renderCube === 'function') ? renderCube : renderHome,  // v9.5: 방미큐브
+  warrior2h: (typeof window !== 'undefined' && typeof window.V96RenderWarrior2H === 'function') ? window.V96RenderWarrior2H : renderHome,  // v9.6: 2시간의전사
   admin: renderAdminPanel,  // v8.2: PWA 내장 관리자 패널 (#admin URL 또는 hidden 진입)
 };
 
@@ -1465,6 +1479,9 @@ function renderHome(){
       </div>
     </div>
 
+    <!-- v9.6: 매일의 黃帝內經 명언 (명예의 전당에서 이전) -->
+    ${_neijingCardHTML()}
+
     <!-- 캐릭터 인사 (큰 메달리온 + 등급 진행) -->
     <div class="card imperial fade-in" id="hello-card">
       <div style="display:flex;align-items:center;gap:14px">
@@ -1505,6 +1522,10 @@ function renderHome(){
       <button class="tile" type="button" onclick="setTab('quiz')">
         <span class="han">問答</span><span class="ttl">기출·암기</span>
         <span class="desc">작년 기출 · 자동 객관식 · 오답함</span>
+      </button>
+      <button class="tile warrior2h" type="button" onclick="setTab('warrior2h')">
+        <span class="han">勇者</span><span class="ttl">2시간의 전사<span class="new-badge">NEW</span></span>
+        <span class="desc">점수 없는 기출 반복 학습 · 틀린 문제 ×4 가중치</span>
       </button>
       <button class="tile" type="button" onclick="setTab('herb')">
         <span class="han">本草</span><span class="ttl">약재</span>
@@ -1644,19 +1665,25 @@ function renderHome(){
 let _presenceTimer = null;
 async function recordPresence(){
   if(!FB) return;
+  // v9.6: S.activity 가 있으면 함께 기록 (presence 클릭 상세에서 사용)
+  const act = (typeof S !== 'undefined' && S && S.activity) || null;
   const p = {
     name: S.name || '익명',
     character: S.character,
     faction: S.faction || '',   // v5: 영토 집계용
     qi: S.qi,
     ts: Date.now(),
+    activity: act,              // v9.6
   };
   // 우선 즉시 1회 기록
   await FB.put(`presence/${S.userId}`, p);
   // 주기적 갱신 타이머 (중복 셋업 방지)
   if(!_presenceTimer){
     _presenceTimer = setInterval(async () => {
-      try{ await FB.put(`presence/${S.userId}`, {...p, faction: S.faction || '', qi: S.qi, ts: Date.now()}); }catch(_){}
+      try{
+        const curAct = (typeof S !== 'undefined' && S && S.activity) || null;
+        await FB.put(`presence/${S.userId}`, {...p, faction: S.faction || '', qi: S.qi, ts: Date.now(), activity: curAct});
+      }catch(_){}
     }, PRESENCE_REFRESH_MS);
   }
 }
@@ -1680,11 +1707,19 @@ async function loadPresenceList(){
   elList.innerHTML = fresh.slice(0, 24).map(p => {
     const isMe = p.uid === S.userId;
     const med = _charMedallion(p.character || 'qibo', 22);
-    return `<div class="presence-chip" title="${esc(p.character||'')} · ${ago(p.ts||0)}">
+    // v9.6: activity label 짧게 표기
+    const act = p.activity || null;
+    const actStr = act && act.label ? `<span class="presence-act" title="${esc(act.sub||'')}" style="font-size:9.5px;color:var(--feicui);margin-left:2px">· ${esc(act.label)}</span>` : '';
+    return `<div class="presence-chip" data-uid="${esc(p.uid)}" title="${esc(p.character||'')} · ${ago(p.ts||0)}${act&&act.label?' · '+esc(act.label):''}">
       <span class="dot"></span>${med}<span class="nm">${esc(p.name||'익명')}</span>
       ${isMe?'<span style="font-size:9.5px;color:var(--zhusha)">(나)</span>':''}
+      ${actStr}
     </div>`;
   }).join('');
+  // v9.6: presence chip 클릭 → 상세 모달
+  if(typeof window.V96BindPresenceClicks === 'function'){
+    try{ window.V96BindPresenceClicks('#presence-list'); }catch(_){}
+  }
 }
 
 // ─ feedback ─
@@ -1830,7 +1865,7 @@ function renderHall(){
     <h2 class="view-title fade-in"><span class="han">譽</span>명예의 전당</h2>
     <div class="view-sub">9 等級 · 누적 氣 기준 자동 승급</div>
 
-    ${_neijingCardHTML()}
+    <!-- v9.6: 황제내경 명언은 대청(renderHome)으로 이동 -->
 
     <!-- 캐릭터 + 등급 큰 카드 -->
     <div class="card imperial fade-in" style="margin-bottom:14px">
@@ -2156,6 +2191,8 @@ function openBattleLobby(){
   let selected = opts.find(o => o.can)?.id || 'small';
   // v7: 對決 방식 토글 (5지선다 vs 카드 對決)
   let battleMode = 'quiz';  // 'quiz' | 'card'
+  // v9.6: 카드 對決에서 AI 상대 선택 (5지선다 은 AI 없음)
+  let useCardAi = false;
   view.innerHTML = `
     <h2 class="view-title fade-in"><span class="han">對決</span>멀티 배틀</h2>
     <div class="view-sub">같은 베팅 레벨끼리 자동 매칭 · 승자가 패자의 氣 획득</div>
@@ -2276,12 +2313,38 @@ function openBattleLobby(){
           ⑤ <span style="color:var(--zhusha-d)"><b>전탕 빗나가면</b> 페널티로 자기 증상 1개 강제 공개</span><br>
           ⑥ 상대 證에 맞는 처방을 본초로 먼저 구성한 쪽이 승리
         </div>
+        <!-- v9.6: AI 상대 선택 -->
+        <div class="v96-ai-toggle" style="margin-top:10px">
+          <span class="v96-ai-han">AI</span>
+          <label>
+            <input type="checkbox" id="cb-use-ai" ${useCardAi?'checked':''}>
+            AI 의가와 對決 (멀티 매칭 없이 즉시 시작 · 베팅 없음 · 학습용)
+          </label>
+        </div>
       `;
       const ruleCard = view.querySelector('.card[style*="--mi"]');
       if(ruleCard) view.insertBefore(ix, ruleCard);
       else view.appendChild(ix);
+      // AI 토글 이벤트
+      const aiBox = document.getElementById('cb-use-ai');
+      if(aiBox){
+        aiBox.addEventListener('change', () => {
+          useCardAi = aiBox.checked;
+          // 入場 버튼 라벨 갱신
+          const jb = $('#join-battle');
+          if(jb){
+            jb.innerHTML = useCardAi
+              ? '<span class="han" style="margin-right:4px">對</span>AI 對決 시작'
+              : '<span class="han" style="margin-right:4px">入</span>入場';
+          }
+        });
+      }
     } else if(!isCard && modeInfo){
       modeInfo.remove();
+      // 5지선다로 돌아오면 AI 옵션 자동 해제
+      useCardAi = false;
+      const jb = $('#join-battle');
+      if(jb) jb.innerHTML = '<span class="han" style="margin-right:4px">入</span>入場';
     }
   };
   $$('#cb-mode-toggle .cb-mode-btn').forEach(b => {
@@ -2299,7 +2362,12 @@ function openBattleLobby(){
     stopLobbyStreams();
     stopLobbyIdle();
     if(battleMode === 'card'){
-      joinCardBattleQueue();
+      if(useCardAi && typeof window.V96CardAI !== 'undefined'){
+        // v9.6: AI 對決 — 매칭 없이 즉시 진행
+        window.V96CardAI.start();
+      } else {
+        joinCardBattleQueue();
+      }
     } else {
       joinBattleQueue(selected);
     }
@@ -7277,9 +7345,27 @@ async function startCardBattle(roomId, isCreator){
       <div id="cb-stage" style="margin-top:12px">로딩…</div>
       <div id="cb-diag" style="margin-top:6px;font-size:11px;color:var(--gutong);min-height:14px"></div>
     </div>
+    <!-- v9.6: 카드 對決 채팅 호스트 -->
+    <div id="cb-chat-host"></div>
   `;
   // v8.5: 카드 對決 전용 BGM (없으면 일반 battle BGM 으로 폴백)
   try{ (bgm.startCardDuel || bgm.startBattle).call(bgm); }catch(_){}
+
+  // v9.6: 채팅 마운트 — AI 룸이면 로컬, 사람-사람 룸이면 Firebase
+  try{
+    if(typeof window.V96Chat !== 'undefined'){
+      // 기존 채팅 ctx 가 있으면 정리
+      if(window._v96CurrentChatCtx){ V96Chat.unmount(window._v96CurrentChatCtx); window._v96CurrentChatCtx = null; }
+      const isAi = (typeof V96CardAI !== 'undefined') && String(roomId).startsWith('AI_CARD_');
+      window._v96CurrentChatCtx = V96Chat.mount({
+        node: `card_battles/${roomId}/chat`,
+        container: '#cb-chat-host',
+        presets: V96Chat.PRESETS_CARD,
+        isLocal: isAi,
+        max: 30,
+      });
+    }
+  }catch(e){ console.warn('chat mount failed', e); }
 
   // v7.2: 배틀 진행 중 플래그 ON (탭 이탈 가드용) — oppId 는 첫 SSE 콜백에서 확정
   _inBattleSession = true;
@@ -8218,6 +8304,14 @@ function stopCardStreams(){
     if(_cardChooseTimer){ clearInterval(_cardChooseTimer); _cardChooseTimer=null; }
     if(_cardLoadWatchdog){ clearTimeout(_cardLoadWatchdog); _cardLoadWatchdog=null; }  // v8.5
     if(_cardInactivityTimer){ clearTimeout(_cardInactivityTimer); _cardInactivityTimer=null; }  // v8.7
+    // v9.6: 채팅 정리 + AI 룸 정리
+    if(typeof window.V96Chat !== 'undefined' && window._v96CurrentChatCtx){
+      V96Chat.unmount(window._v96CurrentChatCtx);
+      window._v96CurrentChatCtx = null;
+    }
+    if(typeof window.V96CardAI !== 'undefined'){
+      try{ V96CardAI.stop(); }catch(_){}
+    }
   }catch(_){}
 }
 

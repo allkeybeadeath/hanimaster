@@ -315,7 +315,27 @@ async function commitTurn(rid, newBoard, newHand, origHand, origBoard){
   if(room.turnUserId !== u.userId) return {ok:false, msg:'당신의 차례가 아닙니다'};
   const order = room.turnOrder || [];
   const nIdx = (room.turnIdx+1) % order.length;
-  await Promise.all([
+
+  // v9.6: 난이도 점수 누적 — 새 set 가산 + 기존 set 본초 추가분 가산
+  const origById = {};
+  (origBoard||[]).forEach(s => { if(s.id) origById[s.id] = s; });
+  let formDelta = 0;
+  for(const s of labeled){
+    if(!origById[s.id]){
+      // 새로 만든 set
+      formDelta += _bcDifficultyPoints(s);
+    } else if(s.modBy === u.userId){
+      // 기존 set 수정 — 본초 수 증가분만 가산 (가감방 추가 등)
+      const before = origById[s.id];
+      const beforeSize = (before.herbs||[]).length;
+      const afterSize = (s.herbs||[]).length;
+      if(afterSize > beforeSize){
+        formDelta += (afterSize - beforeSize) * 2;   // 추가 본초당 2점
+      }
+    }
+  }
+
+  const tasks = [
     f.put(`${FB_NODE}/${rid}/board`, labeled),
     f.put(`${FB_NODE}/${rid}/hands/${u.userId}`, newHand),
     f.put(`${FB_NODE}/${rid}/players/${u.userId}/handCount`, newHand.length),
@@ -323,9 +343,22 @@ async function commitTurn(rid, newBoard, newHand, origHand, origBoard){
     f.put(`${FB_NODE}/${rid}/turnUserId`, order[nIdx]),
     f.put(`${FB_NODE}/${rid}/turnStartedAt`, nowMs()),
     f.put(`${FB_NODE}/${rid}/lastAction`, {by:u.userId, type:'commit', at:nowMs()}),
-  ]);
+  ];
+  // 난이도 점수 누적 (있을 때만)
+  if(formDelta > 0){
+    const curScore = (room.players && room.players[u.userId] && room.players[u.userId]._formulationScore) || 0;
+    tasks.push(f.put(`${FB_NODE}/${rid}/players/${u.userId}/_formulationScore`, curScore + formDelta));
+  }
+  await Promise.all(tasks);
   if(newHand.length === 0) await declareWin(rid, u.userId);
   return {ok:true};
+}
+
+// v9.6: 본초 set 의 난이도 점수 — base > derive > symptom · 본초 수 가산
+function _bcDifficultyPoints(s){
+  const typePt = s.type === 'base' ? 10 : s.type === 'derive' ? 7 : 5;
+  const sizePt = Math.min(15, (s.herbs||[]).length);
+  return typePt + sizePt;
 }
 
 async function draw(rid, n){
@@ -406,6 +439,9 @@ async function listRooms(){
   const out = [], now = nowMs();
   for(const [rid, r] of Object.entries(all)){
     if(!r || typeof r !== 'object') continue;
+    // v9.6: AI 솔로 룸은 공개 목록에서 제외 (in-memory bridge 룸일 뿐 다른 사람과 무관)
+    if(typeof rid === 'string' && rid.startsWith('AI_CUBE_')) continue;
+    if(r && r.isPublic === false) continue;
     const age = now - (r.createdAt||0);
     if(r.status === 'waiting' && age > ROOM_TTL_WAIT) continue;
     if(r.status === 'done' && age > ROOM_TTL_DONE) continue;
@@ -484,6 +520,16 @@ async function enterRoom(rid){
 
 function exitToLobby(){
   CUR_ROOM = null; LOCAL = null; unsubRoom(); stopTurnTimer();
+  // v9.6: 채팅 ctx 정리 + AI 룸 종료
+  try{
+    if(typeof window.V96Chat !== 'undefined' && window._v96CurrentCubeChatCtx){
+      V96Chat.unmount(window._v96CurrentCubeChatCtx);
+      window._v96CurrentCubeChatCtx = null;
+    }
+    if(typeof window.V96CubeAI !== 'undefined'){
+      V96CubeAI.stop();
+    }
+  }catch(_){}
   renderLobby();
 }
 
@@ -507,7 +553,11 @@ async function renderLobby(){
         <li>보드 처방에 본초 추가 → 가감방 변형 · set 분해 후 재조합 가능</li>
         <li>턴 종료 시 모든 set 유효 + 손패 1장 이상 출패</li>
         <li>위반 시 <b>${PENALTY_DRAW}장 페널티 드로우</b>, 못 내면 1장 뽑고 턴 종료</li>
-        <li>손패 0장 → 승리 · 氣 <b>+${REWARD_WIN}</b></li>
+        <li>손패 0장 → 승리 · <b>v9.6 등수별 보상</b>:
+          <span style="color:var(--zhusha-d)">1등 80</span> ·
+          2등 30 · 3등 20 · 4등 10
+          <span style="font-size:11px;color:var(--gutong)">+ 처방 난이도 보너스 (최대 +40)</span></li>
+        <li><b style="color:var(--feicui)">처방 난이도 점수</b> — 基方 10·派生 7·加減 5 + 본초 수 (가감 추가 ×2)</li>
       </ul>
     </div>
 
@@ -522,6 +572,24 @@ async function renderLobby(){
         </select>
         <input id="bc-name" placeholder="방 이름 (선택)" style="flex:1;min-width:140px" maxlength="20">
         <button class="btn btn-gold" id="bc-create" type="button"><span class="han">設</span>&nbsp;방 만들기</button>
+      </div>
+    </div>
+
+    <!-- v9.6: AI 對局 (사람 안 기다리고 즉시 시작) -->
+    <div class="card fade-in" style="border-left:3px solid var(--feicui)">
+      <div class="card-title"><span class="han" style="color:var(--feicui)">AI 對局</span> AI 의가와 즉시 대국</div>
+      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:8px;line-height:1.6">
+        매칭 없이 바로 시작. <b>AI 휴리스틱:</b> 손패에서 가장 가치 큰 set (基方 > 派生 > 加減)을 우선 출패.
+        <span style="color:var(--feicui)">보상은 동일하게 적용</span> — 학습 목적에 좋습니다.
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <label style="margin:0;font-size:12px">상대 AI 수</label>
+        <select id="bc-ai-num" style="width:auto;flex:0 0 80px">
+          <option value="1">1人</option>
+          <option value="2">2人</option>
+          <option value="3" selected>3人</option>
+        </select>
+        <button class="btn btn-feicui" id="bc-ai-start" type="button"><span class="han">獨</span>&nbsp;AI 對局 시작</button>
       </div>
     </div>
 
@@ -559,6 +627,24 @@ async function renderLobby(){
     $('#bc-create').disabled = false;
     if(rid){ toast_('방 생성 완료','gold'); enterRoom(rid); }
   });
+  // v9.6: AI 對局 시작 — V96CubeAI.start() 호출 (없으면 안내)
+  const aiBtn = $('#bc-ai-start');
+  if(aiBtn){
+    aiBtn.addEventListener('click', async () => {
+      if(typeof window.V96CubeAI === 'undefined'){
+        toast_('AI 모듈 로드 실패. 새로고침 후 다시 시도하세요.','red');
+        return;
+      }
+      const n = parseInt($('#bc-ai-num').value) || 3;
+      aiBtn.disabled = true;
+      try{
+        await window.V96CubeAI.start(n);
+      }catch(e){
+        toast_('AI 시작 실패: '+(e&&e.message||'?'),'red');
+      }
+      aiBtn.disabled = false;
+    });
+  }
   $('#bc-join').addEventListener('click', async () => {
     const code = $('#bc-code').value.trim().toUpperCase();
     if(!code){ toast_('방 코드를 입력하세요','warn'); return; }
@@ -822,6 +908,9 @@ async function renderGame(rid, room){
         <button class="btn btn-sm btn-ghost" id="bc-help" type="button">조작법</button>
         <button class="btn btn-sm btn-ghost" id="bc-leave-game" type="button" style="color:var(--zhusha-d);border-color:var(--zhusha-d)">항복</button>
       </div>
+
+      <!-- v9.6: 對局 채팅 -->
+      <div id="bc-chat-host"></div>
     </div>
   `;
   renderBoard();
@@ -829,6 +918,36 @@ async function renderGame(rid, room){
   renderActions();
   startTurnTimer(room);
   bindHelpAndLeave(rid);
+  // v9.6: 채팅 마운트 (이미 마운트된 ctx 가 있고 같은 룸이면 유지)
+  try{
+    if(typeof window.V96Chat !== 'undefined'){
+      const needNew = !window._v96CurrentCubeChatCtx || window._v96CurrentCubeChatCtx._rid !== rid;
+      if(needNew){
+        if(window._v96CurrentCubeChatCtx){
+          V96Chat.unmount(window._v96CurrentCubeChatCtx);
+          window._v96CurrentCubeChatCtx = null;
+        }
+        const isAi = (typeof window.V96CubeAI !== 'undefined' && window.V96CubeAI.isAiRoom && window.V96CubeAI.isAiRoom())
+          || String(rid).startsWith('AI_CUBE_');
+        window._v96CurrentCubeChatCtx = V96Chat.mount({
+          node: `${FB_NODE}/${rid}/chat`,
+          container: '#bc-chat-host',
+          presets: V96Chat.PRESETS_CUBE,
+          isLocal: isAi,
+          max: 30,
+        });
+        window._v96CurrentCubeChatCtx._rid = rid;
+      } else {
+        // 동일 룸이면 컨테이너만 재바인딩 (위치 이동)
+        const host = document.getElementById('bc-chat-host');
+        if(host && window._v96CurrentCubeChatCtx){
+          // 기존 div 이동
+          const ex = document.querySelector(`.chat-card[data-cid="${window._v96CurrentCubeChatCtx.id}"]`);
+          if(ex && ex.parentNode !== host){ host.appendChild(ex); }
+        }
+      }
+    }
+  }catch(e){ console.warn('cube chat mount failed', e); }
 }
 
 function topbarHTML(room){
@@ -1230,18 +1349,34 @@ function renderResult(rid, room){
   const ps = room.players || {};
   const winner = ps[winnerId] || {};
   const isWin = (winnerId === u);
+
+  // v9.6: 등수 산정 — 승자 1등, 나머지는 손패 적은 순 (동률은 난이도 점수 desc)
+  const others = Object.entries(ps).filter(([uid]) => uid !== winnerId)
+    .map(([uid, p]) => ({uid, ...p, handCount: p.handCount||999, _formulationScore: p._formulationScore||0}));
+  others.sort((a,b) => (a.handCount - b.handCount) || (b._formulationScore - a._formulationScore));
+  const ranking = [{uid: winnerId, place: 1, ...(ps[winnerId]||{})}];
+  others.forEach((p, i) => ranking.push({uid: p.uid, place: i+2, ...p}));
+  const myRank = ranking.find(r => r.uid === u);
+
+  // v9.6: 등수별 기본 보상 + 난이도 보너스
+  //   1등: 80 + score×0.5 (max 40)
+  //   2등: 30 + score×0.4 (max 30)
+  //   3등: 20 + score×0.3 (max 20)
+  //   4등: 10 + score×0.2 (max 10)
+  const PLACE_BASE = { 1:80, 2:30, 3:20, 4:10 };
+  const PLACE_DBONUS_RATE = { 1:0.5, 2:0.4, 3:0.3, 4:0.2 };
+  const PLACE_DBONUS_CAP  = { 1:40, 2:30, 3:20, 4:10 };
+
   // 보상 정산 — 한 번만
-  let reward = 0;
+  let reward = 0, rewardBase = 0, rewardBonus = 0, myFormScore = 0;
   if(!_settled[rid]){
     _settled[rid] = true;
-    if(isWin) reward = REWARD_WIN;
-    else {
-      // 3인+ 게임에서 손패 가장 적은 runner 위로
-      const others = Object.entries(ps).filter(([uid]) => uid !== winnerId);
-      if(others.length >= 2){
-        others.sort((a,b) => (a[1].handCount||999) - (b[1].handCount||999));
-        if(others[0][0] === u) reward = REWARD_RUNNER;
-      }
+    if(myRank){
+      const place = myRank.place;
+      myFormScore = myRank._formulationScore || 0;
+      rewardBase = PLACE_BASE[place] || 0;
+      rewardBonus = Math.min(PLACE_DBONUS_CAP[place]||0, Math.floor(myFormScore * (PLACE_DBONUS_RATE[place]||0)));
+      reward = rewardBase + rewardBonus;
     }
     if(reward > 0 && typeof S !== 'undefined' && S){
       S.qi = (S.qi||0) + reward;
@@ -1253,13 +1388,24 @@ function renderResult(rid, room){
       S.cubeHistory = S.cubeHistory || [];
       S.cubeHistory.unshift({
         ts: nowMs(), roomId: rid,
-        win: isWin, runner: reward === REWARD_RUNNER,
+        win: isWin, place: (myRank&&myRank.place)||null,
+        runner: !isWin && myRank && myRank.place === 2,
         deltaQi: reward,
+        formulationScore: myFormScore,
         opponents: Object.keys(ps).filter(uid => uid !== u).length,
         boardSets: (room.board||[]).length,
       });
       if(S.cubeHistory.length > 20) S.cubeHistory = S.cubeHistory.slice(0, 20);
       if(typeof saveState === 'function') saveState();
+    }
+  } else {
+    // 이미 정산됨 — 표시용 값 복원
+    if(myRank){
+      const place = myRank.place;
+      myFormScore = myRank._formulationScore || 0;
+      rewardBase = PLACE_BASE[place] || 0;
+      rewardBonus = Math.min(PLACE_DBONUS_CAP[place]||0, Math.floor(myFormScore * (PLACE_DBONUS_RATE[place]||0)));
+      reward = rewardBase + rewardBonus;
     }
   }
   // 보드 요약
@@ -1277,16 +1423,50 @@ function renderResult(rid, room){
     <div id="bc-result-root">
       <div class="view-title"><span class="han">${isWin?'勝':'終'}</span> 對局 종료</div>
       <div class="card imperial fade-in" style="text-align:center;padding:18px 12px">
-        <div style="font-size:48px;font-family:var(--font-display);color:${isWin?'var(--zhusha-d)':'var(--gutong)'};line-height:1;letter-spacing:.1em">${isWin?'勝':'敗'}</div>
+        <div style="font-size:48px;font-family:var(--font-display);color:${isWin?'var(--zhusha-d)':'var(--gutong)'};line-height:1;letter-spacing:.1em">${isWin?'勝':myRank?`第 ${myRank.place} 等`:'敗'}</div>
         <div style="font-size:14px;color:var(--mo-l);margin-top:8px">
           ${isWin ? '<b style="color:var(--zhusha-d)">당신의 승리입니다</b>' : `승자: <b>${esc_(winner.name||'?')}</b>`}
         </div>
         ${reward > 0 ? `
-          <div style="margin-top:14px;display:inline-block;padding:8px 16px;background:var(--huang-l);border:1.5px solid var(--huang-d);border-radius:8px">
-            <span class="seal" style="font-size:13px;color:var(--mo)">획득 氣</span>
-            <b class="han" style="font-size:24px;color:var(--zhusha-d);margin-left:6px">+${reward}</b>
+          <div style="margin-top:14px;display:inline-block;padding:10px 18px;background:var(--huang-l);border:1.5px solid var(--huang-d);border-radius:8px">
+            <span class="seal" style="font-size:12.5px;color:var(--mo);display:block;margin-bottom:2px">획득 氣 (${(myRank&&myRank.place)||'-'} 등)</span>
+            <b class="han" style="font-size:28px;color:var(--zhusha-d)">+${reward}</b>
+            ${rewardBonus > 0 ? `
+              <div style="font-size:11px;color:var(--mo-l);margin-top:4px">
+                기본 ${rewardBase} + 난이도 보너스 <b style="color:var(--feicui)">+${rewardBonus}</b>
+                <span style="font-size:10px;color:var(--gutong);display:block">(處方 점수 ${myFormScore})</span>
+              </div>
+            ` : `<div style="font-size:11px;color:var(--mo-l);margin-top:4px">기본 ${rewardBase} 氣</div>`}
           </div>
         ` : ''}
+      </div>
+
+      <!-- v9.6: 등수 및 난이도 점수표 -->
+      <div class="card fade-in">
+        <div class="card-title"><span class="han">榜</span> 최종 순위 · 處方 난이도 점수</div>
+        <div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">
+          ${ranking.map((r, i) => {
+            const isMeRow = r.uid === u;
+            const isW = r.place === 1;
+            const placeSeal = ['🥇','🥈','🥉','4'][r.place-1] || `${r.place}`;
+            return `
+              <div style="display:flex;align-items:center;gap:8px;padding:7px 8px;background:${isW?'var(--huang-l)':isMeRow?'rgba(156,48,48,.06)':'var(--mi)'};border-radius:5px;${isMeRow?'border:1px solid var(--zhusha-d)':''}">
+                <span style="font-size:14px;flex:0 0 28px;text-align:center">${placeSeal}</span>
+                <span style="flex:1;font-size:13px;color:var(--mo);font-weight:${isW?'700':'500'}">
+                  ${esc_(r.name||'?')}${isMeRow?' <span style="font-size:10px;color:var(--zhusha-d)">(나)</span>':''}
+                </span>
+                <span style="font-size:11px;color:var(--gutong)">${r.handCount||0}장</span>
+                <span style="font-size:11.5px;color:var(--feicui);min-width:60px;text-align:right" title="處方 난이도 누적 점수">
+                  ${r._formulationScore||0} <span style="font-size:9.5px;color:var(--gutong)">pt</span>
+                </span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+        <div style="font-size:10.5px;color:var(--gutong);margin-top:8px;font-style:italic;line-height:1.5">
+          v9.6 · 난이도 점수 = 基方 10·派生 7·加減 5 + (본초 수 ×1, 가감 +2 ×n) ·
+          1等 보너스 ×0.5 (max +40) · 2等 ×0.4 (+30) · 3等 ×0.3 (+20) · 4等 ×0.2 (+10)
+        </div>
       </div>
 
       <div class="card fade-in">
@@ -1304,30 +1484,23 @@ function renderResult(rid, room){
         </div>
       </div>
 
-      <div class="card fade-in">
-        <div class="card-title"><span class="han">同道</span> 참가자 최종 손패</div>
-        <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
-          ${Object.entries(ps).sort((a,b) => (a[1].handCount||0) - (b[1].handCount||0)).map(([uid, p]) => {
-            const isW = uid === winnerId;
-            const isMeRow = uid === u;
-            return `
-              <div style="display:flex;align-items:center;padding:6px 8px;background:${isW?'var(--huang-l)':'transparent'};border-radius:4px">
-                <span style="font-weight:${isW?'700':'500'};color:${isW?'var(--zhusha-d)':'var(--mo)'};font-size:13px;flex:1">
-                  ${isW?'🏆 ':''}${esc_(p.name||'?')}${isMeRow?' (나)':''}
-                </span>
-                <span style="font-size:12px;color:var(--gutong)">${p.handCount||0}장 잔여</span>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
-
       <div class="card fade-in" style="display:flex;gap:6px;justify-content:center">
         <button class="btn btn-gold" id="bc-again" type="button"><span class="han">再</span>&nbsp;새 對局</button>
         <button class="btn btn-o" id="bc-home" type="button">로비로</button>
       </div>
+
+      <!-- v9.6: 對局 종료 후에도 채팅 유지 -->
+      <div id="bc-chat-host-result"></div>
     </div>
   `;
+  // v9.6: 채팅 컨테이너 이동 (결과 화면에서도 계속 노출)
+  try{
+    if(window._v96CurrentCubeChatCtx){
+      const host = document.getElementById('bc-chat-host-result');
+      const ex = document.querySelector(`.chat-card[data-cid="${window._v96CurrentCubeChatCtx.id}"]`);
+      if(host && ex){ host.appendChild(ex); }
+    }
+  }catch(_){}
   $('#bc-again').addEventListener('click', () => exitToLobby());
   $('#bc-home').addEventListener('click', () => exitToLobby());
 }
