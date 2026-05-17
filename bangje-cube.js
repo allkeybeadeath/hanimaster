@@ -13,14 +13,21 @@
 // ──────────────────────────────────────────────────────────────────
 // 0. 상수
 // ──────────────────────────────────────────────────────────────────
-const BC_VER          = '1.0';
+const BC_VER          = '1.1';
 const HAND_4P         = 10;
 const HAND_23P        = 12;
 const PENALTY_DRAW    = 3;
 const TURN_SEC        = 90;
 const POLL_MS         = 1800;
-const REWARD_WIN      = 80;
-const REWARD_RUNNER   = 20;
+// v9.9: winner-takes-all — 패자 보상 없음, 1등에게 5개 항 가산
+//   reward = WIN_BASE + diffBonus + countBonus + streakBonus + orderBonus
+const REWARD_WIN_BASE = 60;                  // 기본
+const REWARD_DIFF_RATE = 0.7;                // 난이도 점수 환산율
+const REWARD_DIFF_CAP  = 80;                 // 난이도 보너스 상한
+const REWARD_COUNT_PER = 20;                 // (인원수-2)당 가산  → 2인:0 / 3인:20 / 4인:40
+const REWARD_STREAK_PER = 10;                // 최대 연속 처방 1회당
+const REWARD_STREAK_CAP = 50;                // 연속 보너스 상한
+const REWARD_ORDER_PER  = 8;                 // 첫 출패자(turnIdx=0)에 가장 큰 가산
 const FB_NODE         = 'cube_rooms';
 const ROOM_TTL_WAIT   = 60 * 60 * 1000;
 const ROOM_TTL_DONE   = 30 * 60 * 1000;
@@ -291,6 +298,13 @@ async function startGame(rid){
     turnStartedAt:nowMs(), startedAt:nowMs(), hands,
   };
   for(const uid of order) patches[`players/${uid}/handCount`] = hSize;
+  // v9.9: 첫 출패 보너스 / 연속 처방 보너스 초기화
+  order.forEach((uid, idx) => {
+    patches[`players/${uid}/_orderIdx`]      = idx;   // 0 = 첫 출패자
+    patches[`players/${uid}/_commitCount`]   = 0;     // 총 commit 수
+    patches[`players/${uid}/_currentStreak`] = 0;     // 현재 진행 중 연속 commit
+    patches[`players/${uid}/_maxStreak`]     = 0;     // 최대 연속 commit
+  });
   const tasks = [];
   for(const [k,v] of Object.entries(patches)) tasks.push(f.put(`${FB_NODE}/${rid}/${k}`, v));
   const oks = await Promise.all(tasks);
@@ -364,6 +378,18 @@ async function commitTurn(rid, newBoard, newHand, origHand, origBoard){
     const curScore = (room.players && room.players[u.userId] && room.players[u.userId]._formulationScore) || 0;
     tasks.push(f.put(`${FB_NODE}/${rid}/players/${u.userId}/_formulationScore`, curScore + formDelta));
   }
+  // v9.9: 연속 commit streak 트래킹 — commit 성공 시마다 +1, draw/penalty 에서 0 으로 리셋
+  {
+    const meP = (room.players && room.players[u.userId]) || {};
+    const curStreak = (meP._currentStreak || 0) + 1;
+    const maxStreak = Math.max(meP._maxStreak || 0, curStreak);
+    const cmCount   = (meP._commitCount || 0) + 1;
+    tasks.push(
+      f.put(`${FB_NODE}/${rid}/players/${u.userId}/_currentStreak`, curStreak),
+      f.put(`${FB_NODE}/${rid}/players/${u.userId}/_maxStreak`,     maxStreak),
+      f.put(`${FB_NODE}/${rid}/players/${u.userId}/_commitCount`,   cmCount),
+    );
+  }
   await Promise.all(tasks);
   if(newHand.length === 0) await declareWin(rid, u.userId);
   return {ok:true};
@@ -406,6 +432,8 @@ async function draw(rid, n){
   } else {
     tasks.push(f.put(`${FB_NODE}/${rid}/lastAction`, {by:u.userId, type:'penalty', n, at:nowMs()}));
   }
+  // v9.9: commit 없이 뽑으면 연속 처방 streak 끊김 (정상 draw·페널티 draw 모두)
+  tasks.push(f.put(`${FB_NODE}/${rid}/players/${u.userId}/_currentStreak`, 0));
   await Promise.all(tasks);
   return {ok:true, drawn:taken};
 }
@@ -568,11 +596,16 @@ async function renderLobby(){
         <li>보드 처방에 본초 추가 → 가감방 변형 · set 분해 후 재조합 가능</li>
         <li>턴 종료 시 모든 set 유효 + 손패 1장 이상 출패</li>
         <li>위반 시 <b>${PENALTY_DRAW}장 페널티 드로우</b>, 못 내면 1장 뽑고 턴 종료</li>
-        <li>손패 0장 → 승리 · <b>v9.6 등수별 보상</b>:
-          <span style="color:var(--zhusha-d)">1등 80</span> ·
-          2등 30 · 3등 20 · 4등 10
-          <span style="font-size:11px;color:var(--gutong)">+ 처방 난이도 보너스 (최대 +40)</span></li>
-        <li><b style="color:var(--feicui)">처방 난이도 점수</b> — 基方 10·派生 7·加減 5 + 본초 수 (가감 추가 ×2)</li>
+        <li><b style="color:var(--zhusha-d)">손패 0장 → 1人 勝者 단독 氣 획득 (v9.9)</b> — 2·3·4等 보상 없음
+          <div style="font-size:11px;color:var(--gutong);margin-top:3px;line-height:1.5">
+            기본 ${REWARD_WIN_BASE} + 4가지 가산:
+            <span style="color:var(--feicui)">處方 난이도</span> ×${REWARD_DIFF_RATE} (max +${REWARD_DIFF_CAP}) ·
+            <span style="color:var(--feicui)">人員</span> (n−2)×${REWARD_COUNT_PER} ·
+            <span style="color:var(--feicui)">連續 處方</span> ×${REWARD_STREAK_PER} (max +${REWARD_STREAK_CAP}) ·
+            <span style="color:var(--feicui)">先手</span> 순서당 +${REWARD_ORDER_PER}
+          </div>
+        </li>
+        <li><b style="color:var(--feicui)">處方 난이도 점수</b> — 基方 10·派生 7·加減 5 + 본초 수 (가감 추가 ×2)</li>
       </ul>
     </div>
 
@@ -595,7 +628,7 @@ async function renderLobby(){
       <div class="card-title"><span class="han" style="color:var(--feicui)">AI 對局</span> AI 의가와 즉시 대국</div>
       <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:8px;line-height:1.6">
         매칭 없이 바로 시작. <b>AI 휴리스틱:</b> 손패에서 가장 가치 큰 set (基方 > 派生 > 加減)을 우선 출패.
-        <span style="color:var(--feicui)">보상은 동일하게 적용</span> — 학습 목적에 좋습니다.
+        <span style="color:var(--feicui)">勝者 단독 氣 (v9.9 룰 동일)</span> — 학습 목적에 좋습니다.
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <label style="margin:0;font-size:12px">상대 AI 수</label>
@@ -1371,34 +1404,39 @@ function renderResult(rid, room){
   const winner = ps[winnerId] || {};
   const isWin = (winnerId === u);
 
-  // v9.6: 등수 산정 — 승자 1등, 나머지는 손패 적은 순 (동률은 난이도 점수 desc)
+  // v9.9: 등수 산정은 유지 (표시 목적) — 단, 보상은 1등만 받음
   const others = Object.entries(ps).filter(([uid]) => uid !== winnerId)
     .map(([uid, p]) => ({uid, ...p, handCount: p.handCount||999, _formulationScore: p._formulationScore||0}));
   others.sort((a,b) => (a.handCount - b.handCount) || (b._formulationScore - a._formulationScore));
   const ranking = [{uid: winnerId, place: 1, ...(ps[winnerId]||{})}];
   others.forEach((p, i) => ranking.push({uid: p.uid, place: i+2, ...p}));
   const myRank = ranking.find(r => r.uid === u);
+  const playerCount = ranking.length;
 
-  // v9.6: 등수별 기본 보상 + 난이도 보너스
-  //   1등: 80 + score×0.5 (max 40)
-  //   2등: 30 + score×0.4 (max 30)
-  //   3등: 20 + score×0.3 (max 20)
-  //   4등: 10 + score×0.2 (max 10)
-  const PLACE_BASE = { 1:80, 2:30, 3:20, 4:10 };
-  const PLACE_DBONUS_RATE = { 1:0.5, 2:0.4, 3:0.3, 4:0.2 };
-  const PLACE_DBONUS_CAP  = { 1:40, 2:30, 3:20, 4:10 };
+  // v9.9: winner-takes-all — 1등만 보상, 보상은 4가지 가산을 합산
+  //   reward = WIN_BASE
+  //          + diffBonus   (난이도 점수 × 0.7, max 80)
+  //          + countBonus  (인원수-2) × 20
+  //          + streakBonus (최대 연속 commit) × 10, max 50
+  //          + orderBonus  (인원수-1-자기 turnOrderIdx) × 8
+  const winnerP   = ps[winnerId] || {};
+  const winFormScore = winnerP._formulationScore || 0;
+  const winMaxStreak = winnerP._maxStreak || 0;
+  const winOrderIdx  = (typeof winnerP._orderIdx === 'number') ? winnerP._orderIdx : 0;
 
-  // 보상 정산 — 한 번만
-  let reward = 0, rewardBase = 0, rewardBonus = 0, myFormScore = 0;
+  const diffBonus   = Math.min(REWARD_DIFF_CAP,    Math.floor(winFormScore * REWARD_DIFF_RATE));
+  const countBonus  = Math.max(0, playerCount - 2) * REWARD_COUNT_PER;
+  const streakBonus = Math.min(REWARD_STREAK_CAP,  winMaxStreak * REWARD_STREAK_PER);
+  const orderBonus  = Math.max(0, playerCount - 1 - winOrderIdx) * REWARD_ORDER_PER;
+  const winnerReward = REWARD_WIN_BASE + diffBonus + countBonus + streakBonus + orderBonus;
+
+  let reward = 0;
+  let myFormScore = myRank ? (myRank._formulationScore || 0) : 0;
+
+  // 보상 정산 — 한 번만 (1등에게만 지급)
   if(!_settled[rid]){
     _settled[rid] = true;
-    if(myRank){
-      const place = myRank.place;
-      myFormScore = myRank._formulationScore || 0;
-      rewardBase = PLACE_BASE[place] || 0;
-      rewardBonus = Math.min(PLACE_DBONUS_CAP[place]||0, Math.floor(myFormScore * (PLACE_DBONUS_RATE[place]||0)));
-      reward = rewardBase + rewardBonus;
-    }
+    if(isWin){ reward = winnerReward; }
     if(reward > 0 && typeof S !== 'undefined' && S){
       S.qi = (S.qi||0) + reward;
       if(typeof saveState === 'function') saveState();
@@ -1410,9 +1448,11 @@ function renderResult(rid, room){
       S.cubeHistory.unshift({
         ts: nowMs(), roomId: rid,
         win: isWin, place: (myRank&&myRank.place)||null,
-        runner: !isWin && myRank && myRank.place === 2,
         deltaQi: reward,
         formulationScore: myFormScore,
+        playerCount: playerCount,
+        maxStreak: (myRank && myRank._maxStreak) || 0,
+        orderIdx:  (myRank && (typeof myRank._orderIdx === 'number')) ? myRank._orderIdx : null,
         opponents: Object.keys(ps).filter(uid => uid !== u).length,
         boardSets: (room.board||[]).length,
       });
@@ -1421,13 +1461,7 @@ function renderResult(rid, room){
     }
   } else {
     // 이미 정산됨 — 표시용 값 복원
-    if(myRank){
-      const place = myRank.place;
-      myFormScore = myRank._formulationScore || 0;
-      rewardBase = PLACE_BASE[place] || 0;
-      rewardBonus = Math.min(PLACE_DBONUS_CAP[place]||0, Math.floor(myFormScore * (PLACE_DBONUS_RATE[place]||0)));
-      reward = rewardBase + rewardBonus;
-    }
+    if(isWin){ reward = winnerReward; }
   }
   // 보드 요약
   const finalBoard = (room.board || []).map(s => {
@@ -1446,38 +1480,43 @@ function renderResult(rid, room){
       <div class="card imperial fade-in" style="text-align:center;padding:18px 12px">
         <div style="font-size:48px;font-family:var(--font-display);color:${isWin?'var(--zhusha-d)':'var(--gutong)'};line-height:1;letter-spacing:.1em">${isWin?'勝':myRank?`第 ${myRank.place} 等`:'敗'}</div>
         <div style="font-size:14px;color:var(--mo-l);margin-top:8px">
-          ${isWin ? '<b style="color:var(--zhusha-d)">당신의 승리입니다</b>' : `승자: <b>${esc_(winner.name||'?')}</b>`}
+          ${isWin ? '<b style="color:var(--zhusha-d)">당신의 승리입니다</b>' : `승자: <b>${esc_(winner.name||'?')}</b> <span style="font-size:11px;color:var(--gutong)">(이번 판은 1등만 氣 획득)</span>`}
         </div>
-        ${reward > 0 ? `
+        ${isWin && reward > 0 ? `
           <div style="margin-top:14px;display:inline-block;padding:10px 18px;background:var(--huang-l);border:1.5px solid var(--huang-d);border-radius:8px">
-            <span class="seal" style="font-size:12.5px;color:var(--mo);display:block;margin-bottom:2px">획득 氣 (${(myRank&&myRank.place)||'-'} 등)</span>
+            <span class="seal" style="font-size:12.5px;color:var(--mo);display:block;margin-bottom:2px">획득 氣 (勝者 단독)</span>
             <b class="han" style="font-size:28px;color:var(--zhusha-d)">+${reward}</b>
-            ${rewardBonus > 0 ? `
-              <div style="font-size:11px;color:var(--mo-l);margin-top:4px">
-                기본 ${rewardBase} + 난이도 보너스 <b style="color:var(--feicui)">+${rewardBonus}</b>
-                <span style="font-size:10px;color:var(--gutong);display:block">(處方 점수 ${myFormScore})</span>
-              </div>
-            ` : `<div style="font-size:11px;color:var(--mo-l);margin-top:4px">기본 ${rewardBase} 氣</div>`}
+            <div style="font-size:11px;color:var(--mo-l);margin-top:6px;text-align:left;line-height:1.6">
+              <div>기본 <b>${REWARD_WIN_BASE}</b></div>
+              ${diffBonus   > 0 ? `<div>處方 난이도 <b style="color:var(--feicui)">+${diffBonus}</b> <span style="font-size:10px;color:var(--gutong)">(점수 ${winFormScore} × ${REWARD_DIFF_RATE})</span></div>`   : ''}
+              ${countBonus  > 0 ? `<div>인원수 <b style="color:var(--feicui)">+${countBonus}</b> <span style="font-size:10px;color:var(--gutong)">(${playerCount}人 對局)</span></div>` : ''}
+              ${streakBonus > 0 ? `<div>連續 處方 <b style="color:var(--feicui)">+${streakBonus}</b> <span style="font-size:10px;color:var(--gutong)">(최대 ${winMaxStreak}연속)</span></div>` : ''}
+              ${orderBonus  > 0 ? `<div>先手 <b style="color:var(--feicui)">+${orderBonus}</b> <span style="font-size:10px;color:var(--gutong)">(${winOrderIdx+1}번째 출패자)</span></div>` : ''}
+            </div>
           </div>
         ` : ''}
       </div>
 
-      <!-- v9.6: 등수 및 난이도 점수표 -->
+      <!-- v9.9: 등수 + 처방 점수 + 연속 commit + 출패 순서 표 -->
       <div class="card fade-in">
-        <div class="card-title"><span class="han">榜</span> 최종 순위 · 處方 난이도 점수</div>
+        <div class="card-title"><span class="han">榜</span> 최종 순위 · 處方 점수 · 連續·先手</div>
         <div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">
           ${ranking.map((r, i) => {
             const isMeRow = r.uid === u;
             const isW = r.place === 1;
             const placeSeal = ['🥇','🥈','🥉','4'][r.place-1] || `${r.place}`;
+            const oIdx = (typeof r._orderIdx === 'number') ? r._orderIdx : null;
+            const ms   = r._maxStreak || 0;
             return `
               <div style="display:flex;align-items:center;gap:8px;padding:7px 8px;background:${isW?'var(--huang-l)':isMeRow?'rgba(156,48,48,.06)':'var(--mi)'};border-radius:5px;${isMeRow?'border:1px solid var(--zhusha-d)':''}">
                 <span style="font-size:14px;flex:0 0 28px;text-align:center">${placeSeal}</span>
                 <span style="flex:1;font-size:13px;color:var(--mo);font-weight:${isW?'700':'500'}">
                   ${esc_(r.name||'?')}${isMeRow?' <span style="font-size:10px;color:var(--zhusha-d)">(나)</span>':''}
                 </span>
-                <span style="font-size:11px;color:var(--gutong)">${r.handCount||0}장</span>
-                <span style="font-size:11.5px;color:var(--feicui);min-width:60px;text-align:right" title="處方 난이도 누적 점수">
+                <span style="font-size:11px;color:var(--gutong)" title="남은 손패">${r.handCount||0}장</span>
+                <span style="font-size:11px;color:var(--gutong)" title="최대 연속 처방 commit">連 ${ms}</span>
+                <span style="font-size:11px;color:var(--gutong)" title="출패 순서 (1=先手)">${oIdx!=null?(oIdx+1):'-'}手</span>
+                <span style="font-size:11.5px;color:var(--feicui);min-width:50px;text-align:right" title="處方 난이도 누적 점수">
                   ${r._formulationScore||0} <span style="font-size:9.5px;color:var(--gutong)">pt</span>
                 </span>
               </div>
@@ -1485,8 +1524,11 @@ function renderResult(rid, room){
           }).join('')}
         </div>
         <div style="font-size:10.5px;color:var(--gutong);margin-top:8px;font-style:italic;line-height:1.5">
-          v9.6 · 난이도 점수 = 基方 10·派生 7·加減 5 + (본초 수 ×1, 가감 +2 ×n) ·
-          1等 보너스 ×0.5 (max +40) · 2等 ×0.4 (+30) · 3等 ×0.3 (+20) · 4等 ×0.2 (+10)
+          v9.9 · <b>勝者 단독 보상</b> = 基本 ${REWARD_WIN_BASE}
+          + 難易度 (×${REWARD_DIFF_RATE}, max +${REWARD_DIFF_CAP})
+          + 人員 ((n−2)×${REWARD_COUNT_PER})
+          + 連續 處方 (×${REWARD_STREAK_PER}, max +${REWARD_STREAK_CAP})
+          + 先手 ((n−1−順) × ${REWARD_ORDER_PER})
         </div>
       </div>
 
