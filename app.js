@@ -1051,6 +1051,12 @@ function recordChip(rec, size){
 
 // ───── 7. 라우팅 ─────────────────────────────────────────────────────────────
 function setTab(name){
+  // v9.3: 매치 확인 화면에서는 탭 이동 강제 차단. 사용자는 「對決開始」 또는 「取消」 둘 중 하나만 가능.
+  //   30초 timeout 으로 자동 취소되므로 무한 잠금 아님.
+  if(_inMatchConfirm){
+    toast('매치 확인 중 — 對決開始 또는 取消 를 누르세요','gold');
+    return;
+  }
   // v7.2: 배틀 중 외부 탭 이동 가드 — 확인 모달 + forfeit 처리
   //   결과 화면이거나 명시적으로 'battle' 탭 호출이면 통과.
   //   _inBattleSession 이 true 인데 외부 탭으로 가려고 하면 모달 띄우고 탭 이동 중단.
@@ -1775,6 +1781,22 @@ function openPurchaseDialog(p){
 }
 
 // ───── 10. 명예의 전당 ──────────────────────────────────────────────────────
+// v9.3: 매일 1편의 黃帝內經 명언을 帝王風 카드로 렌더.
+//   data-neijing.js 의 pickDailyAphorism() 결과를 신뢰. fallback 안전.
+//   KST 자정에 자동 변경되므로 별도 갱신 타이머 불필요 (다음 진입 시 새 명언).
+function _neijingCardHTML(){
+  const ap = (typeof pickDailyAphorism === 'function') ? pickDailyAphorism() : null;
+  if(!ap) return '';
+  const koSafe = (ap.ko && ap.ko !== ap.han) ? `<div class="neijing-ko">${esc(ap.ko)}</div>` : '';
+  return `
+    <div class="neijing-card fade-in" role="region" aria-label="오늘의 황제내경 명언">
+      <div class="neijing-label">오늘의 黃帝內經 · 每日一句</div>
+      <div class="neijing-han han">${esc(ap.han)}</div>
+      ${koSafe}
+      <div class="neijing-src">${esc(ap.src)}</div>
+    </div>`;
+}
+
 function renderHall(){
   // v3: 大廳 진입 시 ambient BGM 자동 재생 시도 (user-gesture 후·사용자 OFF 의도 없을 때만)
   try{ bgm.autoStartAmbient(); }catch(_){}
@@ -1786,6 +1808,8 @@ function renderHall(){
   let html = `
     <h2 class="view-title fade-in"><span class="han">譽</span>명예의 전당</h2>
     <div class="view-sub">9 等級 · 누적 氣 기준 자동 승급</div>
+
+    ${_neijingCardHTML()}
 
     <!-- 캐릭터 + 등급 큰 카드 -->
     <div class="card imperial fade-in" style="margin-bottom:14px">
@@ -2086,6 +2110,9 @@ let _battle = null;
 //   showResult / renderCardResult 진입 시 → false (결과 화면에서는 자유 이동)
 let _inBattleSession = false;
 let _battleSessionMeta = null;   // {mode:'quiz'|'card', roomId, oppId}
+// v9.3: 매치 확인 화면 진입 중 — setTab 가드용. 강제로 對決開始 / 取消 만 가능.
+let _inMatchConfirm = false;
+let _matchConfirmMeta = null;    // {roomId, bet} — 가드 모달이나 비상 환불 시 참조
 let _lobbyTimer = null;          // (legacy) 폴링 fallback 시에만 사용
 let _lobbySelfTimer = null;
 // v2.2.2: SSE 스트림 + 둘러보는 중(idle) 프레전스
@@ -2622,13 +2649,17 @@ async function joinBattleQueue(level){
   const STALE_ROOM_MS = 5 * 60 * 1000;
 
   // /battles 폴링 — 누구나 자기가 player 인 fresh room 발견 시 진입
+  //   v9.3: status 별 분기 ─
+  //     'matched'  → renderMatchConfirmation (對決開始 버튼 화면)
+  //     'starting' → startBattle (인트로 + 게임)
+  //     'done'/'cancelled' → 무시
   const onBattlesSnap = (battles) => {
     if(!active || matching) return;
     if(!battles) return;
     const now = Date.now();
     const myRoom = Object.values(battles).find(r =>
       r && r.players && r.players[S.userId]
-      && r.status !== 'done'
+      && r.status !== 'done' && r.status !== 'cancelled'
       && (now - (r.createdAt||0)) < STALE_ROOM_MS
     );
     if(myRoom){
@@ -2636,7 +2667,12 @@ async function joinBattleQueue(level){
       const status = $('#queue-status'); if(status) status.textContent = '매치 발견 — 입장…';
       (async () => {
         await cleanup(false);
-        startBattle(myRoom.roomId, false);
+        if(myRoom.status === 'starting'){
+          startBattle(myRoom.roomId, false);
+        } else {
+          // 'matched' (또는 status 없음 — 구버전 잔재) → 매치 확인 화면
+          renderMatchConfirmation(myRoom.roomId, false);
+        }
       })();
     }
   };
@@ -2658,13 +2694,33 @@ async function joinBattleQueue(level){
     }catch(_){}
   })();
 
-  // /lobby/{level} 폴링 — 선임자만 매치 publish (자율 매치)
+  // /lobby/{level} 폴링 — 선임자만 매치 publish (자율 매치 · v9.3)
+  //
+  // v9.3 변경 (멀티 race 잔재 제거):
+  //   기존 v9.0~v9.2: senior = sortedFresh[0]  (ts 기준 최소)
+  //     문제 — ts 는 keep-alive (15s) 로 RTDB 에서 끊임없이 변동.
+  //            두 클라이언트의 polling 시점이 어긋나면 서로 다른 senior 를
+  //            보게 되어 양쪽이 동시에 매치 publish → 다른 roomId 두 개 생성
+  //            → 한쪽이 다른 방에서 상대 없는 채 대기.
+  //   v9.3: senior = userId 사전순 최소.
+  //     - userId 는 영구 불변 (한 번 발급 후 변동 X).
+  //     - 두 클라이언트가 같은 큐 스냅샷을 어떤 시점에 보아도 동일한 senior 결정.
+  //     - roomId 도 양측 userId 의 결정론적 함수 (sortedUids.join('_'))
+  //       로 만들어 만에 하나 양측이 동시 publish 해도 같은 키에 멱등 PUT.
+  //
+  // 추가 변경 — status 'starting' → 'matched':
+  //   v9.3 부터는 publish 후 곧장 인트로로 가지 않고, 매치 확인 화면을 거침.
+  //   양측 누구든 "對決開始" 버튼을 누르면 status='starting' 으로 전이.
+  //   양측 onBattlesSnap 폴링이 starting 을 감지하면 그때 인트로 진입.
   const onLobbySnap = async (all) => {
     if(!active || matching) return;
     const now = Date.now();
     const fresh = all ? Object.values(all).filter(p => p && (now - (p.ts||0)) < LOBBY_FRESH_MS) : [];
-    // ts 기준 정렬 = 가장 오래 기다린 사람이 [0]
-    const sortedFresh = fresh.slice().sort((a,b) => (a.ts||0) - (b.ts||0));
+    // userId 사전 순 정렬 (결정론적 tiebreaker)
+    const sortedFresh = fresh.slice().sort((a,b) => {
+      const au = String(a.userId||''), bu = String(b.userId||'');
+      return au < bu ? -1 : au > bu ? 1 : 0;
+    });
     const others = sortedFresh.filter(p => p.userId !== S.userId);
     const cntEl = $('#queue-count');
     if(cntEl) cntEl.textContent = `현재 큐 (${esc(lvlInfo.han)}): ${fresh.length}명 · 대기 ${others.length}명`;
@@ -2673,56 +2729,238 @@ async function joinBattleQueue(level){
       return;
     }
 
-    // 자율 매치 결정 룰: 선임자 (ts 최소) 만 매치 publish 책임
-    // 동률 (ts 같음) 시 userId 사전 순 작은 쪽 (결정적 tiebreaker)
+    // 자율 매치 결정 룰: userId 사전순 최소 = senior. senior 만 publish.
     const senior = sortedFresh[0];
-    const isSeniorMe = senior.userId === S.userId
-      || (senior.ts === (myEntry.ts) && S.userId < senior.userId);
-    // (실제로 senior 가 곧 자기 entry 인 경우만 selfPublish 시도)
     if(senior.userId !== S.userId){
-      // 자기가 선임자 아님 — 대기. onBattlesSnap 이 잡아줌.
+      // 자기가 senior 아님 — 대기. onBattlesSnap 이 status='matched' 방을 잡아줌.
       const status = $('#queue-status');
       if(status) status.textContent = `상대 발견 (${esc(others[0].name||'')}) — 매치 대기…`;
       return;
     }
 
-    // 자기가 선임자 — 매치 publish (재진입 가드)
+    // 자기가 senior — 매치 publish (재진입 가드)
     matching = true;
     const status = $('#queue-status');
     if(status) status.textContent = `상대 발견 (${esc(others[0].name||'')}) — 매치 시작…`;
     const opp = others[0];
-    const roomId = 'r_' + Math.random().toString(36).slice(2,8) + Date.now().toString(36).slice(-4);
+
+    // 결정론적 roomId — 양 userId 의 사전순 결합 + level + 1분 단위 시간 슬롯.
+    //   같은 두 사람이 동시 publish 해도 같은 roomId 에 멱등 PUT.
+    //   1분 슬롯은 이전 세션 잔재 (재매칭 시) 와 충돌 방지.
+    const slot = Math.floor(Date.now() / 60000);
+    const uids = [S.userId, opp.userId].sort();
+    const roomId = `r_${uids[0]}_${uids[1]}_${slot}`.replace(/[^a-zA-Z0-9_]/g,'_').slice(0,80);
+
     const room = {
-      roomId, level, bet, status: 'starting',
+      roomId, level, bet, status: 'matched',   // v9.3: 'starting' → 'matched'
       players: {
         [S.userId]:  { userId:S.userId,  name:S.name,  character:S.character,  score:0, qi:S.qi+bet, bet, done:false },
         [opp.userId]:{ userId:opp.userId,name:opp.name,character:opp.character,score:0, qi:opp.qi,    bet, done:false },
       },
       questions: generateBattleQuestions(5, level),
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      startedBy: null,   // v9.3: 對決開始 누른 사용자 id
+      cancelledBy: null  // v9.3: 取消 누른 사용자 id
     };
-    // v9.2 critical 픽스: publish 를 fire-and-forget 으로 → 호스트가 자기 진입 hang 안 됨.
-    //   기존: `await FB.putRetry(...)` 가 응답까지 대기 → 응답 느리면 호스트 cleanup 못 함
-    //         → startBattle 호출 안 됨 → "처음 들어간 사람만 진행 안 됨" 증상
-    //   v9.2: publish 는 백그라운드 promise. 즉시 cleanup + startBattle 진입.
-    //         startBattle 의 FB.get 재시도 + polling subscribe 가 publish 완료를 자동 감지.
+    // v9.2 픽스 유지: publish 는 백그라운드 promise. publish 가 늦어도 호스트는 즉시 매치 확인 화면으로.
+    //   startBattle 의 FB.get 재시도 + polling 이 publish 완료를 자동 감지.
     FB.putRetry(`battles/${roomId}`, room, {tries:3, backoffMs:400, timeoutMs:5000})
       .then(res => {
         if(!res || !res.ok){
           console.warn('[battles publish] background fail:', res);
+          try{ _lastSubError = {path:`battles/${roomId}`, err:'publish fail status='+(res&&res.status), at:Date.now()}; }catch(_){}
         }
       })
       .catch(e => { console.warn('[battles publish] exception:', e); });
     // 자기 큐 entry 만 정리
     try{ await FB.del(`lobby/${level}/${S.userId}`); }catch(_){}
     await cleanup(false);
-    startBattle(roomId, true);
+    // v9.3: 곧장 startBattle 이 아니라 매치 확인 화면 진입
+    renderMatchConfirmation(roomId, true);
   };
   _lobbyQueueStream = FB.subscribe(`lobby/${level}`, onLobbySnap);
 }
 
 // 배틀 문제 생성 (기출/자동) — 데이터가 있으면 사용, 없으면 placeholder
 
+
+// v9.3 신규: 매치 확인 화면.
+//   매칭 직후 양측이 이 화면에서 대기. 누구든 「對決開始」 누르면
+//   battles/{roomId}/status 를 'starting' 으로 패치 → 양측 polling 이
+//   변화 감지 → 인트로 진입. 「取消」 시 'cancelled' + 양측 환불.
+//   30초 미응답 시 자동 취소 (양측 환불).
+//
+//   설계 원칙 — 데드락 없음:
+//     - 누구든 시작 가능 (호스트/입장자 비대칭 없음)
+//     - 멱등성: 양측 동시에 「對決開start」 눌러도 RTDB 가 같은 status='starting'
+//       으로 멱등 PUT. startBattle 도 양측 polling 이 같은 starting 감지.
+//     - 매치 확인 화면에서 한쪽이 페이지 닫으면 30초 timeout 으로 자동 환불.
+//       (active page 가 1명이라도 있으면 그 사람이 「取消」 또는 「對決開始」 로 전이 가능)
+const MATCH_CONFIRM_TIMEOUT_MS = 30 * 1000;
+const MATCH_CONFIRM_POLL_MS    = 1500;  // 자체 status polling 주기 (subscribe 와 별개)
+
+async function renderMatchConfirmation(roomId, isCreator){
+  // 1) room fetch (publish 가 fire-and-forget 이므로 약간의 retry)
+  let room = null;
+  for(let i=0; i<4; i++){
+    try{ room = await FB.get(`battles/${roomId}`); }catch(_){ room = null; }
+    if(room && room.players) break;
+    await new Promise(r => setTimeout(r, 300 * (i+1)));
+  }
+  if(!room || !room.players){
+    toast('방을 찾을 수 없음','red');
+    // 환불 — bet 정보가 없으니 직접 복구 불가. 사용자에게 매칭 재시도 권유.
+    setTab('hall');
+    return;
+  }
+
+  const me  = room.players[S.userId];
+  const oppId = Object.keys(room.players).find(k => k !== S.userId);
+  const opp = oppId ? room.players[oppId] : null;
+  if(!me || !opp){
+    toast('상대 정보 없음','red');
+    setTab('hall');
+    return;
+  }
+
+  // v9.3: 탭 이동 강제 차단. 사용자는 對決開始 또는 取消 둘 중 하나만 가능.
+  _inMatchConfirm = true;
+  _matchConfirmMeta = { roomId, bet: room.bet||0 };
+
+  const meChar  = (typeof PHYSICIAN_BY_ID !== 'undefined' && PHYSICIAN_BY_ID[me.character])  || (typeof PHYSICIANS !== 'undefined' ? PHYSICIANS[0] : {han:'?', ko:'?'});
+  const oppChar = (typeof PHYSICIAN_BY_ID !== 'undefined' && PHYSICIAN_BY_ID[opp.character]) || (typeof PHYSICIANS !== 'undefined' ? PHYSICIANS[0] : {han:'?', ko:'?'});
+  const lvlInfo = (typeof BET_LEVELS !== 'undefined') ? BET_LEVELS.find(l => l.id === room.level) : null;
+
+  view.innerHTML = `
+    <div class="match-confirm fade-in">
+      <h2 class="view-title"><span class="han">遇</span>對手出現</h2>
+      <div class="view-sub">${esc(lvlInfo && lvlInfo.han || room.level)} · ${(room.bet||0).toLocaleString()} 氣 (에스크로)</div>
+
+      <div class="match-confirm-banner">매치 성공</div>
+      <div class="match-confirm-meta">아래 「對決開始」 버튼을 눌러 시작하세요</div>
+
+      <div class="match-confirm-vs">
+        <div class="match-confirm-side is-me">
+          ${_charPhotoMedallion(meChar, 110)}
+          <div class="name">${esc(me.name||'')}</div>
+          <div class="charname han">${esc(meChar.han||'')}</div>
+        </div>
+        <div class="match-confirm-vs-han han">對</div>
+        <div class="match-confirm-side is-opp">
+          ${_charPhotoMedallion(oppChar, 110)}
+          <div class="name">${esc(opp.name||'')}</div>
+          <div class="charname han">${esc(oppChar.han||'')}</div>
+        </div>
+      </div>
+
+      <div class="match-confirm-actions">
+        <button class="btn btn-gold" id="match-start" type="button">對決開始</button>
+        <button class="btn btn-o"    id="match-cancel" type="button">取消 (환불)</button>
+      </div>
+
+      <div class="match-confirm-status is-waiting" id="match-status">상대를 기다리는 중… (누구든 먼저 누르면 시작)</div>
+      <div class="match-confirm-timer" id="match-timer"></div>
+    </div>
+  `;
+
+  // 2) 상태 전이 감시 — battles/{roomId} 자체를 polling
+  let watcherClosed = false;
+  let cleanedUp = false;
+  const startedAt = Date.now();
+
+  const cleanup = () => {
+    if(cleanedUp) return;
+    cleanedUp = true;
+    watcherClosed = true;
+    _inMatchConfirm = false;
+    _matchConfirmMeta = null;
+    try{ statusStream && statusStream.close && statusStream.close(); }catch(_){}
+    clearInterval(timerTick);
+  };
+
+  // 3) 「對決開始」 — status='starting' 패치 + startedBy 기록
+  $('#match-start').addEventListener('click', async () => {
+    const btn = $('#match-start');
+    if(btn){ btn.disabled = true; btn.textContent = '시작 중…'; }
+    const statEl = $('#match-status');
+    if(statEl){ statEl.className = 'match-confirm-status'; statEl.textContent = '시작 신호 송신 중…'; }
+    // 멱등 PUT — 만약 상대가 동시 클릭으로 이미 starting 으로 갔어도 안전.
+    const r = await FB.putRetry(`battles/${roomId}/status`, 'starting', {tries:3, backoffMs:300, timeoutMs:4000});
+    if(r && r.ok){
+      // startedBy 도 기록 (감사 + 디버깅용)
+      try{ FB.put(`battles/${roomId}/startedBy`, S.userId); }catch(_){}
+      // 자기는 즉시 인트로 진입. 상대는 polling 으로 따라옴.
+      cleanup();
+      startBattle(roomId, isCreator);
+    } else {
+      if(btn){ btn.disabled = false; btn.textContent = '對決開始'; }
+      if(statEl){ statEl.className = 'match-confirm-status'; statEl.style.color = 'var(--zhusha)'; statEl.textContent = `송신 실패 (HTTP ${r&&r.status||'?'}) — 다시 시도하세요`; }
+    }
+  });
+
+  // 4) 「取消」 — status='cancelled' 패치 + 자기 환불
+  $('#match-cancel').addEventListener('click', async () => {
+    const btn = $('#match-cancel');
+    if(btn){ btn.disabled = true; btn.textContent = '취소 중…'; }
+    try{ await FB.putRetry(`battles/${roomId}/status`, 'cancelled', {tries:2, backoffMs:300, timeoutMs:3000}); }catch(_){}
+    try{ FB.put(`battles/${roomId}/cancelledBy`, S.userId); }catch(_){}
+    cleanup();
+    // 환불
+    S.qi += (room.bet||0);
+    saveState(); refreshHeader();
+    toast(`매치 취소 — ${room.bet} 氣 환불`,'gold');
+    setTab('hall');
+  });
+
+  // 5) 30초 timeout + 시계
+  const timerTick = setInterval(async () => {
+    if(cleanedUp) return;
+    const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+    const remain = Math.max(0, Math.ceil(MATCH_CONFIRM_TIMEOUT_MS/1000) - elapsed);
+    const el = $('#match-timer');
+    if(el) el.textContent = `경과 ${elapsed}초 · ${remain}초 후 자동 취소 (환불)`;
+    if(elapsed * 1000 >= MATCH_CONFIRM_TIMEOUT_MS){
+      // 자동 취소
+      try{ await FB.putRetry(`battles/${roomId}/status`, 'cancelled', {tries:2, backoffMs:300, timeoutMs:3000}); }catch(_){}
+      cleanup();
+      S.qi += (room.bet||0);
+      saveState(); refreshHeader();
+      toast(`30초 동안 시작 안 됨 — ${room.bet} 氣 환불`,'gold');
+      setTab('hall');
+    }
+  }, 1000);
+
+  // 6) status 변화 감시 — 상대가 「對決開始」 또는 「取消」 누르면 polling 이 잡아냄
+  const onStatusSnap = (r) => {
+    if(watcherClosed) return;
+    if(!r) return;
+    if(r.status === 'starting'){
+      // 상대가 먼저 시작 누름 — 잠깐 안내 후 인트로 진입
+      const statEl = $('#match-status');
+      const btn1 = $('#match-start');
+      const btn2 = $('#match-cancel');
+      if(statEl){
+        statEl.className = 'match-confirm-status is-other-started';
+        statEl.textContent = '상대가 對決開始을 눌렀습니다 — 곧 시작…';
+      }
+      if(btn1) btn1.disabled = true;
+      if(btn2) btn2.disabled = true;
+      // 0.6초 후 인트로
+      setTimeout(() => {
+        cleanup();
+        startBattle(roomId, isCreator);
+      }, 600);
+    } else if(r.status === 'cancelled'){
+      // 상대 (또는 timeout) 취소 — 환불
+      cleanup();
+      S.qi += (room.bet||0);
+      saveState(); refreshHeader();
+      toast(`상대가 취소 — ${room.bet} 氣 환불`,'gold');
+      setTab('hall');
+    }
+  };
+  const statusStream = FB.subscribe(`battles/${roomId}`, onStatusSnap, {pollMs: MATCH_CONFIRM_POLL_MS});
+}
 
 async function startBattle(roomId, isCreator){
   // v9.2: FB.get 4회 재시도 (350·700·1050·1400 ms 백오프, 총 3.5초). publish 가 fire-and-forget 이므로

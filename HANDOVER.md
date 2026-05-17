@@ -540,3 +540,83 @@ character: null,         // ← 'qibo' 기본값 제거 → loadState 에서 랜
 - [ ] 네트워크 음영 환경: fetch 가 5초 안에 abort, 재시도 루프 진행
 
 작성: 2026-05-17 · CIM Lab
+
+---
+
+## v9.3 — 2026-05-17 패치 (CIM Lab)
+
+> v9.2 → v9.3. 사용자 신고 3건 일괄 응답: ① 황제내경 명언 매일 표시 ② 매치 후 "對決開始" 버튼 단계 추가 ③ 멀티 race 잔재 제거.
+
+### A. 黃帝內經 명언 — 매일 1편 로비 상단
+
+신규 데이터 모듈 **`data-neijing.js`** (41 entry). 素問 (上古天眞論·四氣調神大論·生氣通天論·陰陽應象大論·靈蘭秘典論·五臟別論·湯液醪醴論·玉機眞臟論·三部九候論·臟氣法時論·宣明五氣·寶命全形論·評熱病論·擧痛論·風論·六微旨大論·刺法論·至眞要大論) 38 entry + 靈樞 (九鍼十二原·本神·經脈) 3 entry. 출전 검증 원칙: 본문 명문 구문만 채택, 후세 정리 격언 (예: 通則不痛痛則不通) 제외, 篇名 통용 표기 준수.
+
+매일 결정론적 선택: `neijingDayIndexKST(t) = floor((t + 9h) / 24h)`. UTC 에 +9h 보정으로 KST 자정에 dayIndex 가 증가, 같은 날짜의 모든 사용자가 동일한 명언을 본다. 41일 주기 순환.
+
+로비 (`renderHall`) 진입 시 view-sub 직후에 帝王風 카드 (`.neijing-card`) 1장 렌더. 朱砂 좌측 4px stripe + 帝 印 도장 (38×38 朱砂 배경 米色 글씨) + 17px 한문 + 12px 국역 + 11px 출전. 모바일 480px↓ 자동 축소.
+
+### B. 매치 확인 화면 — "對決開始" 버튼 단계 (v9.3 핵심)
+
+기존 v9.2 까지: 매칭 publish 후 곧장 `startBattle` → 인트로 → 게임. 한쪽이 준비되지 않은 상태에서 강제 진입되어 인트로를 못 보거나 첫 문제가 닫히는 UX 문제.
+
+v9.3: **매칭 publish → 매치 확인 화면 (양측 30초 대기) → 누구든 「對決開始」 → 인트로 → 게임**.
+
+데이터 모델 변경 — `battles/{roomId}/status`:
+- `'matched'` (v9.3 신규): 매치 publish 직후. 양측 매치 확인 화면.
+- `'starting'`: 누구든 「對決開始」 누른 후. 양측 인트로 진입.
+- `'done'` / `'cancelled'` (v9.3 신규): 종료.
+
+신규 필드 `startedBy` (對決開始 누른 사용자 id) · `cancelledBy` (取消 누른 사용자 id).
+
+UI (`renderMatchConfirmation`): 帝王風 「對手出現」 헤더 + 對決成功 朱砂 배너 + 가운데 펄스 "對" 한자 + 양측 메달리온 + 양측 이름·캐릭터 + 「對決開始」 (金) · 「取消 (환불)」 (테두리) 버튼 + 30초 카운트다운.
+
+동기화 — `FB.subscribe('battles/{roomId}', onStatusSnap, {pollMs:1500})` 으로 1.5초 주기 polling. 상대가 「對決開始」 누르면 status='starting' 감지 → 0.6초 안내 ("상대가 對決開始을 눌렀습니다") 후 인트로. 상대가 「取消」 누르면 status='cancelled' 감지 → 환불 + setTab('hall').
+
+멱등성: 양측이 동시 「對決開始」 눌러도 RTDB 가 같은 'starting' 으로 멱등 PUT. 양측 polling 이 같은 starting 을 감지하므로 동기화 자동.
+
+타임아웃 30초: 자동 cancelled 전이 + 양측 환불. 무한 잠금 방지.
+
+### C. 강제 매치 결정 (사용자 요청: "강제해")
+
+매치 확인 화면 진입 시 `_inMatchConfirm = true`. setTab 가드가 모든 외부 탭 이동을 차단하고 toast ("매치 확인 중 — 對決開始 또는 取消 를 누르세요") 표시. cleanup 시 `_inMatchConfirm = false`. 30초 timeout 으로 자동 cancel 되므로 무한 잠금 X. 의도: 매치된 상대를 무책임하게 대기시키지 않도록 사용자에게 빠른 결정 강제.
+
+### D. 멀티 race 잔재 제거 — userId 사전순 senior + 결정론적 roomId
+
+**ts 기반 senior 의 race** (v9.0~v9.2 잠재 버그):
+
+기존 코드 — senior = sortedFresh[0] (ts 최소, 가장 오래 기다린 사람).
+
+문제 — `lobby/{level}/{uid}` 의 `ts` 는 15초 keep-alive 로 끊임없이 변동. 두 클라이언트의 polling 시점이 어긋나면 RTDB 가 보고하는 ts 순서가 서로 달라 senior 가 양쪽에서 다르게 결정될 수 있다. 결과: 양쪽이 동시 매치 publish → 서로 다른 roomId 의 방 두 개 → 한쪽이 다른 방에 player 가 없는 채로 대기.
+
+v9.3 픽스: sort 비교 함수가 `userId` 사전순. `userId` 는 영구 불변 (`loadState()` 첫 진입 시 발급되어 localStorage 에 저장). 두 클라이언트가 어떤 시점에 폴링해도 동일한 senior 를 결정한다. 결정론적.
+
+**결정론적 roomId**:
+
+기존: `'r_' + Math.random().toString(36).slice(2,8) + Date.now().toString(36).slice(-4)` — 매 publish 마다 다른 roomId. 양측이 동시 publish 하면 두 방 생성.
+
+v9.3: `r_${uids[0]}_${uids[1]}_${slot}` (uids 는 사전순 정렬, slot 은 1분 단위 시간 슬롯). 양측이 동시 publish 해도 같은 roomId 에 멱등 PUT. RTDB 의 last-write-wins 로 마지막 PUT 만 반영되며 양측 player 정보·questions 는 동일하므로 의미 차이 없음.
+
+### E. 보안 룰
+
+추가 변경 없음. v3.1 이후 `battles`·`lobby` 룰 그대로 사용 가능.
+
+### F. 캐시 키
+
+`bangje-pwa-v9-2-2026-05` → `bangje-pwa-v9-3-2026-05`. SW 자동 갱신.
+
+### G. 인수 체크리스트
+
+- [ ] 大廳 진입 시 상단에 帝王風 명언 카드 1장 표시. 41일 사이클로 매일 변경.
+- [ ] 자정 (KST 00:00) 직후 진입 시 새 명언이 보이는지 확인.
+- [ ] 멀티 매칭 — 두 사용자 매치 시 양측에 매치 확인 화면 ("對手出現") 표시.
+- [ ] 「對決開始」 한쪽이라도 누르면 양측 0.6초 이내 인트로 진입.
+- [ ] 「取消」 누르면 양측 환불 + 명예의 전당 복귀.
+- [ ] 30초 미응답 시 양측 자동 환불.
+- [ ] 매치 확인 화면에서 다른 탭 클릭 시 toast 차단 + 이동 X.
+- [ ] 2인 동시 진입 race — 양측이 같은 roomId 의 같은 방에 합류 (v9.2 의 "두 방 생성" 잔재 제거).
+
+### H. 데이터 검증 (자동)
+
+`v93-verify.js` 가 42 항목을 검증 (구문·와이어업·CSS·정합성·데이터 품질). 모두 PASS 확인.
+
+작성: 2026-05-17 · CIM Lab
