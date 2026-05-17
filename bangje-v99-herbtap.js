@@ -5,10 +5,14 @@
  *   v98-herbpop 의 전체화면 overlay 가 게임을 가려서 진행 불가 → 화면 하단
  *   드로어 (최대 38vh) 로 대체. 위쪽 62vh 는 게임 화면 그대로 사용 가능.
  *
- *   v10.0.4 핵심 수정 — 카드 탭이 학습 측 capture-listener 에서
- *     stopPropagation/preventDefault 로 막혀 큐브 손패 선택이 안 되던 버그.
- *     이제 capture 에서 드로어만 열고 클릭은 bubble 시켜 .bc-card 의 카드별
- *     리스너 (onHandCardClick) 가 정상 발동. 드로어 표시 ∥ 카드 선택 동시.
+ *   v10.0.4 변경 (2건):
+ *     1. 카드 탭이 학습 측 capture-listener 에서 stopPropagation/preventDefault 로
+ *        막혀 큐브 손패 선택이 안 되던 버그 수정. 이제 capture 에서 드로어만
+ *        열고 클릭은 bubble 시켜 .bc-card 의 카드별 리스너 (onHandCardClick) 가
+ *        정상 발동. 드로어 표시 ∥ 카드 선택 동시.
+ *     2. 시험범위밖 처방도 함께 표시 — FORMULAS_EXTRA composition + FORMULA_ADDITIONS·
+ *        EXTRA_ADDITIONS 의 派生方·加減方 모두 검색. chip 옆에 (시험범위밖) 라벨.
+ *        예: 猪膽汁 → 白通加猪膽汁湯 (시험범위밖, 사역탕 派生) 식으로 노출.
  *
  *   동작:
  *     • 학습 ON: .cb-herb-card / .bc-card 클릭 → 하단 드로어 (게임 클릭도 진행)
@@ -38,8 +42,12 @@ function _herbName(it){
   return m ? m[1] : s;
 }
 
+// v10.0.4: 시험범위 안(FORMULAS) vs 밖(FORMULAS_EXTRA) 표시 + 派生方·加減方 노출
 function _formulasContaining(han){
-  const all = (window.FORMULAS || []).concat(window.FORMULAS_EXTRA || []);
+  const FORMULAS_IN  = window.FORMULAS || [];
+  const FORMULAS_OUT = window.FORMULAS_EXTRA || [];
+  const inIds = new Set(FORMULAS_IN.map(f => f && f.id).filter(Boolean));
+  const all = FORMULAS_IN.concat(FORMULAS_OUT);
   const out = { monarch: [], minister: [], common: [] };
   for(const f of all){
     if(!f.composition || !f.composition.length) continue;
@@ -52,9 +60,39 @@ function _formulasContaining(han){
         if(arr.some(h => h === han || String(h).startsWith(han))){ role = r; break; }
       }
     }
-    if(role === '君') out.monarch.push(f);
-    else if(role === '臣' || role === '佐' || role === '使') out.minister.push({ f, role });
-    else out.common.push(f);
+    const outOfScope = !inIds.has(f.id);
+    if(role === '君') out.monarch.push({ f, outOfScope });
+    else if(role === '臣' || role === '佐' || role === '使') out.minister.push({ f, role, outOfScope });
+    else out.common.push({ f, outOfScope });
+  }
+  return out;
+}
+
+// v10.0.4: 派生方(target 처방명 있음) / 加減方(증상 대응 추가) 에서도 본 본초가 등장하는지.
+// parent 가 시험범위 안 처방이라도, 派生方·加減方 자체는 모두 시험범위 밖으로 분류 (학습 강도 분리).
+function _additionsContaining(han){
+  const FORMULAS_IN  = window.FORMULAS || [];
+  const inIds = new Set(FORMULAS_IN.map(f => f && f.id).filter(Boolean));
+  const allFormulasById = {};
+  (window.FORMULAS||[]).concat(window.FORMULAS_EXTRA||[]).forEach(f => { if(f && f.id) allFormulasById[f.id] = f; });
+  const sources = [ window.FORMULA_ADDITIONS || {}, window.EXTRA_ADDITIONS || {} ];
+  const out = [];
+  for(const adds of sources){
+    for(const [fid, obj] of Object.entries(adds)){
+      const parent = allFormulasById[fid];
+      if(!parent) continue;
+      for(const it of (obj.items||[])){
+        const hs = (it.herbs||[]).map(_herbName);
+        if(!hs.some(h => h === han || h.startsWith(han) || han.startsWith(h))) continue;
+        out.push({
+          parent,
+          target: it.target || '',
+          mod: it.mod || '',
+          kind: it.kind || 'symptom',     // 'derive' | 'symptom' | 'compose'
+          parentInScope: inIds.has(fid),  // 視覺 보조 (현재는 일괄 시험범위밖 라벨)
+        });
+      }
+    }
   }
   return out;
 }
@@ -83,7 +121,8 @@ function openFor(han){
   _injectCSS();
   const herb = (window.HERBS || []).find(h => h.han === han || h.ko === han);
   const matches = _formulasContaining(han);
-  const total = matches.monarch.length + matches.minister.length + matches.common.length;
+  const additions = _additionsContaining(han);
+  const total = matches.monarch.length + matches.minister.length + matches.common.length + additions.length;
 
   const headHTML = `
     <div class="v99hd-bar"></div>
@@ -96,10 +135,11 @@ function openFor(han){
     </div>`;
   const bodyHTML = `
     ${herb && herb.meaning ? `<div class="v99hd-meaning">${esc(herb.meaning)}</div>` : ''}
-    ${total === 0 ? '<div class="v99hd-empty">이 본초를 쓰는 처방이 없습니다 (시험 범위 한정)</div>' : ''}
-    ${matches.monarch.length ? `<div class="v99hd-sect"><div class="v99hd-sect-head" style="color:#9C3030">君藥 <span class="v99hd-sect-cnt">${matches.monarch.length}</span></div><div class="v99hd-chips">${matches.monarch.map(f => _chip(f, '#9C3030', '', han)).join('')}</div></div>` : ''}
-    ${matches.minister.length ? `<div class="v99hd-sect"><div class="v99hd-sect-head" style="color:#C9A227">臣·佐·使 <span class="v99hd-sect-cnt">${matches.minister.length}</span></div><div class="v99hd-chips">${matches.minister.map(x => _chip(x.f, '#C9A227', x.role, han)).join('')}</div></div>` : ''}
-    ${matches.common.length ? `<div class="v99hd-sect"><div class="v99hd-sect-head" style="color:#876A36">구성 <span class="v99hd-sect-cnt">${matches.common.length}</span></div><div class="v99hd-chips">${matches.common.map(f => _chip(f, '#876A36', '', han)).join('')}</div></div>` : ''}
+    ${total === 0 ? '<div class="v99hd-empty">이 본초를 쓰는 처방이 시험범위·확장사전·派生方 모두에서 발견되지 않음</div>' : ''}
+    ${matches.monarch.length ? `<div class="v99hd-sect"><div class="v99hd-sect-head" style="color:#9C3030">君藥 <span class="v99hd-sect-cnt">${matches.monarch.length}</span></div><div class="v99hd-chips">${matches.monarch.map(x => _chip(x.f, '#9C3030', '', han, x.outOfScope)).join('')}</div></div>` : ''}
+    ${matches.minister.length ? `<div class="v99hd-sect"><div class="v99hd-sect-head" style="color:#C9A227">臣·佐·使 <span class="v99hd-sect-cnt">${matches.minister.length}</span></div><div class="v99hd-chips">${matches.minister.map(x => _chip(x.f, '#C9A227', x.role, han, x.outOfScope)).join('')}</div></div>` : ''}
+    ${matches.common.length ? `<div class="v99hd-sect"><div class="v99hd-sect-head" style="color:#876A36">구성 <span class="v99hd-sect-cnt">${matches.common.length}</span></div><div class="v99hd-chips">${matches.common.map(x => _chip(x.f, '#876A36', '', han, x.outOfScope)).join('')}</div></div>` : ''}
+    ${additions.length ? `<div class="v99hd-sect"><div class="v99hd-sect-head" style="color:#6B5A8A">派生方·加減方 <span class="v99hd-sect-cnt">${additions.length}</span></div><div class="v99hd-chips">${additions.map(a => _chipDerived(a, han)).join('')}</div></div>` : ''}
   `;
   if(_drawer){
     _drawer.querySelector('.v99hd-head-wrap').innerHTML = headHTML;
@@ -137,14 +177,31 @@ function _attachDrawerHandlers(){
   if(bar) bar.onclick = close;
 }
 
-function _chip(f, color, role, currentHan){
+function _chip(f, color, role, currentHan, outOfScope){
   const adj = _adjuncts(f, currentHan);
   const adjHtml = adj.length === 0
     ? '<span class="v99hd-adj-mark">單方</span>'
     : `<span class="v99hd-adj"><span class="v99hd-adj-plus">+ </span><span class="han">${adj.map(esc).join(' · ')}</span></span>`;
-  return `<button type="button" data-fid="${esc(f.id)}" class="v99hd-chip" style="border-color:${color}66;background:${color}1A;color:${color}">
-    <span class="v99hd-chip-top">${role?'<span class="v99hd-role">'+esc(role)+'</span> ':''}<span class="han v99hd-fhan">${esc(f.han||'')}</span><span class="v99hd-fko"> · ${esc(f.ko||'')}</span></span>
+  const scopeLabel = outOfScope ? '<span class="v99hd-scope">(시험범위밖)</span>' : '';
+  return `<button type="button" data-fid="${esc(f.id)}" class="v99hd-chip${outOfScope?' v99hd-chip-out':''}" style="border-color:${color}66;background:${color}1A;color:${color}">
+    <span class="v99hd-chip-top">${role?'<span class="v99hd-role">'+esc(role)+'</span> ':''}<span class="han v99hd-fhan">${esc(f.han||'')}</span><span class="v99hd-fko"> · ${esc(f.ko||'')}</span>${scopeLabel}</span>
     ${adjHtml}
+  </button>`;
+}
+
+// v10.0.4: 派生方·加減方 chip. target 처방명(있을 때) + parent 처방 표시.
+// 클릭 시 parent 처방 deep view 로 이동 (派生 자체는 별도 페이지가 없으므로).
+function _chipDerived(a, currentHan){
+  const color = '#6B5A8A';                  // 派生·加減 전용 색
+  const parent = a.parent || {};
+  const isDerive = a.kind === 'derive';
+  const kindLabel = isDerive ? '派生' : '加減';
+  // 목표 처방명 (派生이면 보통 있음). 없으면 mod 텍스트로 대체.
+  const targetText = a.target || a.mod || `${parent.ko || ''} 加減`;
+  const modSummary = a.mod ? `<span class="v99hd-adj"><span class="v99hd-adj-plus">${esc(kindLabel)}: </span><span class="han">${esc(a.mod)}</span></span>` : '';
+  return `<button type="button" data-fid="${esc(parent.id||'')}" class="v99hd-chip v99hd-chip-out v99hd-chip-deriv" style="border-color:${color}66;background:${color}1A;color:${color}">
+    <span class="v99hd-chip-top"><span class="v99hd-role">${esc(kindLabel)}</span> <span class="han v99hd-fhan">${esc(targetText)}</span><span class="v99hd-fko"> · ${esc(parent.han||'')} ${esc(parent.ko||'')}</span><span class="v99hd-scope">(시험범위밖)</span></span>
+    ${modSummary}
   </button>`;
 }
 
@@ -202,6 +259,9 @@ function _injectCSS(){
     .v99hd-adj { display:block; font-size:9.5px; opacity:.72; margin-top:1px; line-height:1.32; max-width:240px; font-weight:400; }
     .v99hd-adj-plus { opacity:.55; }
     .v99hd-adj-mark { display:block; font-size:9px; opacity:.5; margin-top:1px; font-style:italic; font-weight:400; }
+    .v99hd-scope { display:inline-block; font-size:9px; opacity:.7; margin-left:5px; padding:1px 5px; border-radius:6px; background:rgba(135,106,54,.18); color:#876A36; font-weight:400; letter-spacing:.02em; }
+    .v99hd-chip-out { opacity:.85; }
+    .v99hd-chip-deriv .v99hd-fhan { font-size:11px; }
     @media (max-height: 600px) { #v99-herbtap-drawer { max-height:50vh; } }
   `;
   document.head.appendChild(st);

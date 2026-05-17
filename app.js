@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v10.0.3';                // ★ 로비 (2026-05) — 본초 드로어·甘草 비율·정렬·이미지 폴더없음·모달 토글
-const APP_BUILD   = '2026.05.18.v10.0.3';     // v10.0.3 통합
+const APP_VERSION = 'v10.0.4';                // ★ 로비 (2026-05) — 신급 스킬 복구·女媧 키·큐브 첫출패 base만·시험범위밖 표시·카드對決 가로 wrap·드로어 통과 클릭
+const APP_BUILD   = '2026.05.18.v10.0.4';     // v10.0.4 패치 5건
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -7149,7 +7149,8 @@ const CARD_SKILLS = {
   huangdi:  { id:'fake_symptom',   han:'欺症',  ko:'거짓 증상', desc:'다음 강제 공개(턴별 자동/페널티)를 무관한 증상으로 대체' },
   shennong: { id:'summon_herb',    han:'召草',  ko:'본초 召喚', desc:'본초 한자 1개 입력 — 덱에 있으면 보드로' },
   fuxi:     { id:'foresee_deck',   han:'卦知',  ko:'八卦 預知', desc:'덱 상위 3장을 자기만 미리 봄' },
-  nuwa:     { id:'transmute_board',han:'造化',  ko:'補天造化', desc:'보드 본초 1장을 덱에서 무작위로 교체' },
+  nuwa:     { id:'transmute_board',han:'造化',  ko:'補天造化', desc:'보드 본초 1장을 덱에서 무작위로 교체' },  // v10.0.4: legacy 키 유지 (혹시 기존 저장 데이터 호환)
+  nvwa:     { id:'transmute_board',han:'造化',  ko:'補天造化', desc:'보드 본초 1장을 덱에서 무작위로 교체' },  // v10.0.4: 실제 캐릭터 id 와 일치하는 정식 키
   qibo:     { id:'reveal_monarch', han:'問難',  ko:'雷公問難', desc:'자기 정답 처방의 君藥 1개를 보드로' }
 };
 
@@ -7689,7 +7690,7 @@ function renderCardPlaying(roomId, room, me, opp){
   const isMyTurn = (room.turn === S.userId);
   const myChar  = (typeof PHYSICIANS !== 'undefined') ? PHYSICIANS.find(p=>p.id===me.character) : null;
   const oppChar = (typeof PHYSICIANS !== 'undefined') ? PHYSICIANS.find(p=>p.id===opp.character) : null;
-  const isDivineMe  = myChar  && myChar.category === 'divine';
+  const isDivineMe  = myChar  && myChar.cat === 'divine';  // v10.0.4: .category → .cat (data-physicians.js 정의와 일치). 이전엔 항상 false 라 신급 스킬 버튼이 안 떴음.
   const skillMeta = isDivineMe ? CARD_SKILLS[me.character] : null;
 
   // ── v9.7: 증상 공개는 모두 "사용자 선택" — 자동/랜덤 폐기 ──
