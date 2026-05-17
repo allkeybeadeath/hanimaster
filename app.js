@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v6';                    // ★ 로비 표시용 (2026-05) — v6: 처방 드릴 + TTS Google fallback + 매칭 stale 정리
-const APP_BUILD   = '2026.05.17e';
+const APP_VERSION = 'v7';                    // ★ 로비 표시용 (2026-05) — v7: 카드 對決 (本草 보드 + 神급 5스킬)
+const APP_BUILD   = '2026.05.17f';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -1035,6 +1035,8 @@ function setTab(name){
   // v2.2.2: 다른 탭으로 이동 시 멀티 로비 SSE/idle 정리
   if(typeof stopLobbyStreams === 'function') stopLobbyStreams();
   if(typeof stopLobbyIdle    === 'function') stopLobbyIdle();
+  // v7: 카드 對決 스트림 정리 (배틀 탭이 아닐 때만 — 배틀 중 자기 화면 갱신은 막지 않음)
+  if(name !== 'battle' && typeof stopCardStreams === 'function') stopCardStreams();
   S.lastTab = name; saveState();
   $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   view.scrollTop = 0; window.scrollTo({top:0, behavior:'instant'});
@@ -1700,9 +1702,28 @@ function openBattleLobby(){
     return {...l, bet, can};
   });
   let selected = opts.find(o => o.can)?.id || 'small';
+  // v7: 對決 방식 토글 (5지선다 vs 카드 對決)
+  let battleMode = 'quiz';  // 'quiz' | 'card'
   view.innerHTML = `
     <h2 class="view-title fade-in"><span class="han">對決</span>멀티 배틀</h2>
     <div class="view-sub">같은 베팅 레벨끼리 자동 매칭 · 승자가 패자의 氣 획득</div>
+
+    <!-- v7: 對決 방식 토글 -->
+    <div class="card fade-in" style="padding:10px 12px">
+      <div style="font-family:var(--font-display);font-size:13px;color:var(--zhusha-d);margin-bottom:6px">對決 방식</div>
+      <div class="cb-mode-toggle" id="cb-mode-toggle">
+        <button class="cb-mode-btn active" type="button" data-mode="quiz">
+          <span class="han">問</span>
+          <span style="font-family:var(--font-display);font-size:14px">5지선다</span>
+          <span style="font-size:10.5px;color:var(--gutong);display:block">기출 + 자동생성 · 60초</span>
+        </button>
+        <button class="cb-mode-btn" type="button" data-mode="card">
+          <span class="han">牌</span>
+          <span style="font-family:var(--font-display);font-size:14px">카드 對決</span>
+          <span style="font-size:10.5px;color:var(--gutong);display:block">證 추리 + 본초 조합 · 25% 베팅</span>
+        </button>
+      </div>
+    </div>
 
     <!-- v2.2.2: 둘러보는 중(idle browsers) 실시간 표시 -->
     <div class="card fade-in idle-banner" id="idle-banner" style="display:none">
@@ -1769,6 +1790,43 @@ function openBattleLobby(){
       setLobbyIdleLevel(selected);
     });
   });
+  // v7: 모드 토글 이벤트 — 카드 모드면 베팅 카드/규칙 카드 분리 표시
+  const applyMode = () => {
+    const isCard = battleMode === 'card';
+    $$('.cb-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === battleMode));
+    // 베팅 그리드 카드 숨기기 (카드 모드는 25% 자동)
+    const betCard = $('#bet-grid')?.closest('.card');
+    if(betCard) betCard.style.display = isCard ? 'none' : '';
+    // 카드 모드 안내 카드
+    let modeInfo = $('#cb-mode-info');
+    if(isCard && !modeInfo){
+      const ix = document.createElement('div');
+      ix.id = 'cb-mode-info';
+      ix.className = 'card fade-in';
+      const bet = calcCardBet();
+      ix.innerHTML = `
+        <div class="card-title"><span class="han">牌</span>카드 對決 (25% 베팅)</div>
+        <div style="font-size:12.5px;line-height:1.6">
+          베팅 <b class="seal" style="color:var(--zhusha-d)">${bet.toLocaleString()} 氣 (현재 氣의 25%)</b><br>
+          ① 양측이 무작위 3개 證 중 1개를 10초 안에 선택<br>
+          ② 공유 1덱(본초 카드) + 보드 초기 3장<br>
+          ③ 매 턴 증상 공개 → 神급 스킬(게임 1회) → 전탕 or 턴 종료<br>
+          ④ 상대 證에 맞는 처방을 본초로 먼저 구성한 쪽이 승리
+        </div>
+      `;
+      const ruleCard = view.querySelector('.card[style*="--mi"]');
+      if(ruleCard) view.insertBefore(ix, ruleCard);
+      else view.appendChild(ix);
+    } else if(!isCard && modeInfo){
+      modeInfo.remove();
+    }
+  };
+  $$('#cb-mode-toggle .cb-mode-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      battleMode = b.dataset.mode;
+      applyMode();
+    });
+  });
   $('#cancel-battle').addEventListener('click', () => {
     stopLobbyStreams();
     stopLobbyIdle();
@@ -1777,11 +1835,16 @@ function openBattleLobby(){
   $('#join-battle').addEventListener('click', () => {
     stopLobbyStreams();
     stopLobbyIdle();
-    joinBattleQueue(selected);
+    if(battleMode === 'card'){
+      joinCardBattleQueue();
+    } else {
+      joinBattleQueue(selected);
+    }
   });
   // v2.2.2: SSE 기반 실시간 동기화 + 둘러보는 중 등록
   startLobbyStreams();
   startLobbyIdle(selected);
+  applyMode();
 }
 window.openBattleLobby = openBattleLobby;
 
@@ -4922,6 +4985,923 @@ function generateBattleQuestions(n, level){
 }
 
 // ───── 14. 초기화 ───────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// v7: 카드 對決 게임 (Card Battle)
+// ════════════════════════════════════════════════════════════════════════════
+// 규칙 요약:
+//   1. 양측 25% 베팅 (calcBet 의 'card' 별도 비율). 매칭은 별도 큐 lobby_card.
+//   2. 시작 시 양측 무작위 證 3 후보, 10초 안에 1 선택 (timeout → 0번 자동).
+//   3. 공유 1덱: 양측 정답 처방 composition 합집합 + 같은 章 노이즈 = 셔플.
+//   4. 초기 보드 3장. 매 턴 종료 시 덱에서 1장 추가 (덱 비면 추가 안 함).
+//   5. 매 턴 액션: 증상 공개(1회 필수) → 神급 스킬(게임 1회) → 전탕 시도 or 턴 종료.
+//   6. 전탕: 26 처방 중 1개 선택 → 그 처방 composition 본초가 보드에 모두 있고
+//           그 처방이 상대의 證에 해당하면 승리. 아니면 정답 처방 X → 자동 턴 종료.
+//   7. 50턴 경과 시 무승부 (양측 베팅 환불).
+//   8. 神급 캐릭터 5종 스킬:
+//      - 黃帝 (huangdi)   : 거짓 증상 1개 공개 (다음 자기 증상 공개에 적용)
+//      - 神農 (shennong)  : 본초 召喚 — 텍스트 입력, 덱에 있으면 보드로
+//      - 伏羲 (fuxi)      : 八卦 預知 — 덱 상위 3장 자기만 미리 봄
+//      - 女媧 (nuwa)      : 補天造化 — 보드 본초 1장을 덱에서 무작위 1장과 교체
+//      - 岐伯 (qibo)      : 雷公問難 — 자기 정답 처방 君藥 1개를 보드로 끌어옴
+//
+// Firebase 스키마: /card_battles/{roomId}
+//   { roomId, status, bet, players: {[uid]: {...}}, deck, board, turn, turnIdx,
+//     log[], result, startedAt, lastActionAt }
+// ────────────────────────────────────────────────────────────────────────────
+
+const CARD_GAME_BET_PCT = 0.25;             // 25% 베팅
+const CARD_CHOOSE_MS    = 10000;            // 證 선택 10초
+const CARD_TURN_MAX     = 50;               // 무승부 한계 턴
+const CARD_NOISE_HERBS  = 10;               // 노이즈 본초 장수
+
+// 신급 캐릭터 → 스킬 매핑
+const CARD_SKILLS = {
+  huangdi:  { id:'fake_symptom',   han:'欺症',  ko:'거짓 증상', desc:'다음 증상 공개에 무관한 증상 1개를 공개' },
+  shennong: { id:'summon_herb',    han:'召草',  ko:'본초 召喚', desc:'본초 한자 1개 입력 — 덱에 있으면 보드로' },
+  fuxi:     { id:'foresee_deck',   han:'卦知',  ko:'八卦 預知', desc:'덱 상위 3장을 자기만 미리 봄' },
+  nuwa:     { id:'transmute_board',han:'造化',  ko:'補天造化', desc:'보드 본초 1장을 덱에서 무작위로 교체' },
+  qibo:     { id:'reveal_monarch', han:'問難',  ko:'雷公問難', desc:'자기 정답 처방의 君藥 1개를 보드로' }
+};
+
+// 카드 對決 베팅액 산정 (기 25%)
+function calcCardBet(){
+  return Math.max(1, Math.floor(S.qi * CARD_GAME_BET_PCT));
+}
+
+// 카드 對決 매칭 큐 진입 (별도 lobby_card 큐 사용)
+let _cardLobbyStream = null;
+let _cardBattlesStream = null;
+let _cardMatchTimeout = null;
+
+async function joinCardBattleQueue(){
+  if(!S.userId){ alert('사용자 정보가 없습니다'); return; }
+  const bet = calcCardBet();
+  if(bet < 1 || S.qi < bet){ toast('氣가 부족합니다','red'); return; }
+
+  // 베팅 차감 (에스크로)
+  S.qi -= bet;
+  saveState();
+  renderHall();
+
+  setTab('battle');
+  view.innerHTML = `
+    <h2 class="view-title fade-in"><span class="han">求</span>對手를 찾는 중…</h2>
+    <div class="card fade-in">
+      <div style="text-align:center;padding:24px 12px">
+        <div class="han" style="font-size:48px;color:var(--zhusha-d);margin-bottom:8px">候</div>
+        <div id="card-queue-status" style="font-size:14px;color:var(--mo)">큐에 등록 중…</div>
+        <div style="margin-top:8px;font-size:11.5px;color:var(--gutong)">베팅 ${bet.toLocaleString()} 氣 · 카드 對決</div>
+        <div style="margin-top:14px"><button class="btn btn-o" id="card-cancel-btn">취소 (환불)</button></div>
+      </div>
+    </div>
+  `;
+
+  let matching = false, active = true, cleanedUp = false;
+  const cleanup = async (refund) => {
+    if(cleanedUp) return; cleanedUp = true; active = false;
+    if(_cardMatchTimeout){ clearTimeout(_cardMatchTimeout); _cardMatchTimeout = null; }
+    if(_cardLobbyStream){ try{ _cardLobbyStream.close(); }catch(_){} _cardLobbyStream = null; }
+    if(_cardBattlesStream){ try{ _cardBattlesStream.close(); }catch(_){} _cardBattlesStream = null; }
+    try{ if(FB && S.userId) await FB.del(`lobby_card/${S.userId}`); }catch(_){}
+    if(refund){ S.qi += bet; saveState(); renderHall(); }
+  };
+  $('#card-cancel-btn').addEventListener('click', async () => { await cleanup(true); setTab('hall'); });
+
+  if(!FB){
+    $('#card-queue-status').textContent = 'Firebase 없음 — 카드 對決 불가';
+    setTimeout(async ()=>{ await cleanup(true); setTab('hall'); }, 1500);
+    return;
+  }
+
+  // 큐에 자기 등록
+  try{
+    await FB.putRetry(`lobby_card/${S.userId}`, {
+      userId: S.userId, name: S.name||'무명', character: S.character||null,
+      faction: S.faction||null, bet, ts: Date.now()
+    });
+  }catch(e){
+    $('#card-queue-status').textContent = '큐 등록 실패: ' + (e && e.message || e);
+    setTimeout(async ()=>{ await cleanup(true); setTab('hall'); }, 1800);
+    return;
+  }
+  $('#card-queue-status').textContent = '대기 중 — 상대를 찾는 중';
+
+  // STALE 5분
+  const STALE_ROOM_MS = 5 * 60 * 1000;
+  // 자기 stale card_battles 정리
+  (async () => {
+    try{
+      const all = await FB.get('card_battles');
+      if(all){
+        const now2 = Date.now();
+        for(const [rid, r] of Object.entries(all)){
+          if(r && r.players && r.players[S.userId] && r.status !== 'done'
+             && (now2 - (r.createdAt||0)) >= STALE_ROOM_MS){
+            try{ await FB.put(`card_battles/${rid}/status`, 'done'); }catch(_){}
+          }
+        }
+      }
+    }catch(_){}
+  })();
+
+  // /lobby_card SSE
+  const onLobbySnap = async (q) => {
+    if(!active || matching) return;
+    if(!q) return;
+    const now = Date.now();
+    const fresh = Object.values(q).filter(x => x && x.userId && (now - (x.ts||0)) < 45000);
+    // 매칭: 자기 외에 다른 fresh 사용자 1명 이상 있고, userId 사전 순 작은 쪽이 방 생성
+    const opp = fresh.find(x => x.userId !== S.userId);
+    if(opp){
+      if(S.userId < opp.userId){
+        matching = true;
+        $('#card-queue-status').textContent = '상대 발견 — 방 생성 중…';
+        const roomId = 'cb_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8);
+        try{
+          await createCardBattleRoom(roomId, S, opp, bet);
+        }catch(e){
+          $('#card-queue-status').textContent = '방 생성 실패: ' + (e && e.message || e);
+          setTimeout(async ()=>{ await cleanup(true); setTab('hall'); }, 1800);
+          return;
+        }
+        await cleanup(false);  // 환불 안 함
+        startCardBattle(roomId, true);
+      }
+      // 큰 쪽은 onBattlesSnap 에서 잡힘
+    }
+  };
+  _cardLobbyStream = FB.subscribe('lobby_card', onLobbySnap);
+
+  // /card_battles SSE — 상대가 방 생성자였을 때
+  const onBattlesSnap = (battles) => {
+    if(!active || matching) return;
+    if(!battles) return;
+    const now = Date.now();
+    const myRoom = Object.values(battles).find(r =>
+      r && r.players && r.players[S.userId]
+      && r.status !== 'done'
+      && (now - (r.createdAt||0)) < STALE_ROOM_MS
+    );
+    if(myRoom){
+      matching = true;
+      $('#card-queue-status').textContent = '방 발견 — 입장 중…';
+      (async () => {
+        await cleanup(false);
+        startCardBattle(myRoom.roomId, false);
+      })();
+    }
+  };
+  _cardBattlesStream = FB.subscribe('card_battles', onBattlesSnap);
+
+  // 75s 매칭 타임아웃
+  _cardMatchTimeout = setTimeout(async () => {
+    if(matching) return;
+    $('#card-queue-status').textContent = '매칭 실패 — 환불 처리';
+    await cleanup(true);
+    setTimeout(()=>setTab('hall'), 1200);
+  }, 75000);
+}
+window.joinCardBattleQueue = joinCardBattleQueue;
+
+// 방 생성자가 호출 — 양측 證 후보 3개씩 부여, 카드패 구성, status='choosing'
+async function createCardBattleRoom(roomId, me, opp, bet){
+  if(!Array.isArray(SYNDROMES) || SYNDROMES.length < 6){
+    throw new Error('SYNDROMES 데이터 부족');
+  }
+  // 1) 양측 證 후보 3개씩 무작위 (겹치지 않게)
+  const all = SYNDROMES.slice();
+  const shuffled = all.slice().sort(()=>Math.random()-0.5);
+  const meOpts  = shuffled.slice(0, 3);
+  const oppOpts = shuffled.slice(3, 6);
+
+  // 2) 정답 처방은 양측이 선택 후 결정되지만, 카드패는 미리 양측 후보 모두 커버하도록 넓게 구성
+  //    실제 정답이 어느 후보일지 모르므로, 양측 모든 6 후보의 합집합 본초 + 章 노이즈 사용.
+  const candidates = [...meOpts, ...oppOpts];
+  const allComp = new Set();
+  candidates.forEach(syn => {
+    const f = FORMULAS.find(x => x.id === syn.formulaId);
+    if(f && Array.isArray(f.composition)) f.composition.forEach(h => allComp.add(h));
+  });
+  // 노이즈: 같은 章의 다른 처방에서 무작위 본초 CARD_NOISE_HERBS 장 추가
+  const chapters = new Set(candidates.map(s => {
+    const f = FORMULAS.find(x => x.id === s.formulaId);
+    return f ? f.chapter : '';
+  }));
+  const noiseSrc = new Set();
+  FORMULAS.forEach(f => {
+    if(chapters.has(f.chapter) && Array.isArray(f.composition)){
+      f.composition.forEach(h => { if(!allComp.has(h)) noiseSrc.add(h); });
+    }
+  });
+  const noiseArr = [...noiseSrc].sort(()=>Math.random()-0.5).slice(0, CARD_NOISE_HERBS);
+  noiseArr.forEach(h => allComp.add(h));
+
+  // 3) 셔플된 덱 (배열). 보드는 처음 3장.
+  const deck = [...allComp].sort(()=>Math.random()-0.5);
+  const board = deck.splice(0, 3);
+
+  // 4) 선공: 사전 순으로 작은 userId
+  const firstTurn = (me.userId < opp.userId) ? me.userId : opp.userId;
+
+  const room = {
+    roomId, bet, status: 'choosing',
+    createdAt: Date.now(), startedAt: 0, lastActionAt: Date.now(),
+    chooseUntil: Date.now() + CARD_CHOOSE_MS + 1500,  // 클라이언트 동기 여유
+    players: {
+      [me.userId]: {
+        userId: me.userId, name: me.name||'무명',
+        character: me.character||null, faction: me.faction||null,
+        syndromeOptions: meOpts.map(s => s.id),
+        syndromeChosen: null,
+        revealedSymptoms: [],
+        skillUsed: false,
+        fakeSymptomNext: null,           // 황제 스킬 결과 (다음 증상 공개에 적용)
+        foreseenDeck: null               // 복희 스킬 결과
+      },
+      [opp.userId]: {
+        userId: opp.userId, name: opp.name||'무명',
+        character: opp.character||null, faction: opp.faction||null,
+        syndromeOptions: oppOpts.map(s => s.id),
+        syndromeChosen: null,
+        revealedSymptoms: [],
+        skillUsed: false,
+        fakeSymptomNext: null,
+        foreseenDeck: null
+      }
+    },
+    deck, board, turn: firstTurn, turnIdx: 0,
+    log: [],
+    result: null
+  };
+  await FB.putRetry(`card_battles/${roomId}`, room);
+  return room;
+}
+
+// 카드 對決 시작 (양측이 동시에 진입)
+let _cardRoomStream = null;
+let _cardRoomState  = null;
+let _cardChooseTimer= null;
+async function startCardBattle(roomId, isCreator){
+  setTab('battle');
+  view.innerHTML = `
+    <div class="card imperial fade-in" style="text-align:center">
+      <div class="han" style="font-size:32px;color:var(--zhusha-d)">對決</div>
+      <div style="margin-top:8px">방 ${esc(roomId)}</div>
+      <div id="cb-stage" style="margin-top:12px">로딩…</div>
+    </div>
+  `;
+  bgm.startBattle && bgm.startBattle();
+
+  // 방 데이터 구독
+  _cardRoomStream = FB.subscribe(`card_battles/${roomId}`, (room) => {
+    if(!room){
+      // 방 사라짐 (정상 종료 후 청소되었을 수 있음)
+      $('#cb-stage').innerHTML = '<div style="color:var(--zhusha-d)">방 데이터 없음 (재접속 필요)</div>';
+      return;
+    }
+    _cardRoomState = room;
+    renderCardBattle(roomId, room);
+  });
+}
+
+// 화면 렌더링 — status 별로 분기
+function renderCardBattle(roomId, room){
+  const stage = $('#cb-stage');
+  if(!stage){ return; }
+  const me   = room.players[S.userId];
+  const oppU = Object.keys(room.players).find(u => u !== S.userId);
+  const opp  = room.players[oppU];
+  if(!me || !opp){
+    stage.innerHTML = '<div style="color:var(--zhusha-d)">플레이어 데이터 불완전</div>';
+    return;
+  }
+
+  if(room.status === 'choosing'){
+    return renderCardChoose(roomId, room, me, opp);
+  }
+  if(room.status === 'playing'){
+    return renderCardPlaying(roomId, room, me, opp);
+  }
+  if(room.status === 'done'){
+    return renderCardResult(roomId, room, me, opp);
+  }
+}
+
+// ── 證 선택 단계 (10초)
+function renderCardChoose(roomId, room, me, opp){
+  const stage = $('#cb-stage');
+  const remain = Math.max(0, Math.floor(((room.chooseUntil||0) - Date.now())/1000));
+  const myDone = !!me.syndromeChosen;
+  const oppDone= !!opp.syndromeChosen;
+
+  const myOpts = (me.syndromeOptions||[]).map(id => SYNDROME_BY_ID[id]).filter(Boolean);
+  stage.innerHTML = `
+    <div style="font-family:var(--font-display);font-size:18px;color:var(--zhusha-d);margin-bottom:6px">證 選擇 (${remain}s)</div>
+    <div style="font-size:12px;color:var(--mo-l);margin-bottom:12px">
+      3개의 證 중 하나를 골라 본인의 證으로 합니다. 시간 내 미선택 시 1번 證 자동 선택.
+    </div>
+    <div class="cb-syn-grid">
+      ${myOpts.map((s, i) => `
+        <button class="cb-syn-card ${me.syndromeChosen===s.id?'chosen':''}"
+                data-sid="${s.id}" type="button" ${myDone?'disabled':''}>
+          <div class="cb-syn-han">${esc(s.han)}</div>
+          <div class="cb-syn-ko">${esc(s.ko)}</div>
+          <div class="cb-syn-sym">${(s.symptoms||[]).slice(0,3).map(x=>`<span class="cb-sym-chip">${esc(x)}</span>`).join('')}</div>
+        </button>
+      `).join('')}
+    </div>
+    <div style="margin-top:14px;font-size:12.5px;color:var(--gutong)">
+      상대: <b>${esc(opp.name)}</b> ${oppDone ? '✓ 선택 완료' : '… 선택 중'}<br>
+      나: ${myDone ? '<b style="color:var(--feicui)">✓ 선택 완료 — 상대 대기</b>' : '<b style="color:var(--zhusha-d)">선택해 주세요</b>'}
+    </div>
+  `;
+  $$('.cb-syn-card').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if(me.syndromeChosen) return;
+      const sid = btn.dataset.sid;
+      try{
+        await FB.put(`card_battles/${roomId}/players/${S.userId}/syndromeChosen`, sid);
+      }catch(e){
+        toast('선택 실패: '+e.message, 'red');
+      }
+    });
+  });
+
+  // 카운트다운 + 자동 진행
+  if(_cardChooseTimer){ clearInterval(_cardChooseTimer); _cardChooseTimer=null; }
+  _cardChooseTimer = setInterval(async () => {
+    if(!_cardRoomState || _cardRoomState.status !== 'choosing'){
+      clearInterval(_cardChooseTimer); _cardChooseTimer=null; return;
+    }
+    const r = _cardRoomState;
+    const left = Math.max(0, Math.floor(((r.chooseUntil||0) - Date.now())/1000));
+    const stg = $('#cb-stage');
+    const titleEl = stg && stg.querySelector('div');
+    if(titleEl && /[0-9]+s/.test(titleEl.textContent||'')){
+      titleEl.textContent = `證 選擇 (${left}s)`;
+    }
+    // 시간 만료 시 자동 1번 선택 (자기 것만 처리, race 회피)
+    if(left === 0){
+      const my = r.players[S.userId];
+      if(my && !my.syndromeChosen){
+        const first = my.syndromeOptions && my.syndromeOptions[0];
+        if(first){ try{ await FB.put(`card_battles/${roomId}/players/${S.userId}/syndromeChosen`, first); }catch(_){} }
+      }
+      clearInterval(_cardChooseTimer); _cardChooseTimer=null;
+
+      // 양측이 모두 선택했는지 1회 확인 → 모두 됐으면 playing 으로 전이
+      // (선공 클라이언트가 transition 책임)
+      setTimeout(async () => {
+        try{
+          const r2 = await FB.get(`card_battles/${roomId}`);
+          if(r2 && r2.status === 'choosing'){
+            const us = Object.values(r2.players);
+            const all = us.every(p => p.syndromeChosen);
+            if(all && r2.turn === S.userId){
+              await FB.put(`card_battles/${roomId}/status`, 'playing');
+              await FB.put(`card_battles/${roomId}/startedAt`, Date.now());
+              await FB.put(`card_battles/${roomId}/lastActionAt`, Date.now());
+            }
+          }
+        }catch(_){}
+      }, 1200);
+    }
+  }, 500);
+
+  // 양측 다 선택했으면 즉시 transition (선공 책임)
+  if(myDone && oppDone && room.turn === S.userId){
+    (async () => {
+      try{
+        await FB.put(`card_battles/${roomId}/status`, 'playing');
+        await FB.put(`card_battles/${roomId}/startedAt`, Date.now());
+        await FB.put(`card_battles/${roomId}/lastActionAt`, Date.now());
+      }catch(_){}
+    })();
+  }
+}
+
+// ── 본 게임 단계
+function renderCardPlaying(roomId, room, me, opp){
+  const stage = $('#cb-stage');
+  if(_cardChooseTimer){ clearInterval(_cardChooseTimer); _cardChooseTimer=null; }
+  const mySyn  = SYNDROME_BY_ID[me.syndromeChosen];
+  const oppSyn = SYNDROME_BY_ID[opp.syndromeChosen];
+  if(!mySyn || !oppSyn){
+    stage.innerHTML = '<div style="color:var(--zhusha-d)">證 데이터 오류</div>';
+    return;
+  }
+  const isMyTurn = (room.turn === S.userId);
+  const myChar  = (typeof PHYSICIANS !== 'undefined') ? PHYSICIANS.find(p=>p.id===me.character) : null;
+  const oppChar = (typeof PHYSICIANS !== 'undefined') ? PHYSICIANS.find(p=>p.id===opp.character) : null;
+  const isDivineMe  = myChar  && myChar.category === 'divine';
+  const skillMeta = isDivineMe ? CARD_SKILLS[me.character] : null;
+
+  // 자기 증상 (남은 미공개 + 황제 스킬 fake 옵션)
+  const myRevealed = me.revealedSymptoms||[];
+  const myRemaining= (mySyn.symptoms||[]).filter(s => !myRevealed.includes(s));
+
+  stage.innerHTML = `
+    <!-- 상단: 상대 (이름·캐릭터·공개 증상) -->
+    <div class="cb-opp">
+      <div class="cb-opp-head">
+        <span class="han">敵</span>
+        <span class="cb-opp-name">${esc(opp.name)}</span>
+        ${opp.skillUsed ? `<span class="cb-skill-used">스킬 사용</span>` : ''}
+      </div>
+      <div class="cb-opp-sym">
+        <div class="cb-opp-sym-title">공개된 증상 (${(opp.revealedSymptoms||[]).length})</div>
+        <div class="cb-opp-sym-list">
+          ${((opp.revealedSymptoms||[]).map(s => `<span class="cb-sym-chip revealed">${esc(s)}</span>`).join('')) || '<span class="cb-empty">아직 없음</span>'}
+        </div>
+      </div>
+    </div>
+
+    <!-- 중앙: 보드 + 덱 -->
+    <div class="cb-board-wrap">
+      <div class="cb-board-meta">
+        턴 ${room.turnIdx+1}/${CARD_TURN_MAX} · 덱 ${room.deck.length}장 ·
+        ${isMyTurn ? '<b style="color:var(--feicui)">나의 턴</b>' : '<b style="color:var(--gutong)">상대 턴</b>'}
+      </div>
+      <div class="cb-board" id="cb-board">
+        ${(room.board||[]).map(h => renderHerbCardHTML(h)).join('')}
+      </div>
+    </div>
+
+    <!-- 하단: 본인 증 + 액션 -->
+    <div class="cb-me">
+      <div class="cb-me-head">
+        <span class="han">己</span>
+        <span class="cb-me-name">${esc(me.name)}</span>
+        <span class="cb-me-syn">— <b>${esc(mySyn.han)}</b> (${esc(mySyn.ko)})</span>
+      </div>
+      <div class="cb-me-sym">
+        <div class="cb-me-sym-title">나의 증상 (공개되지 않은)</div>
+        <div class="cb-me-sym-list">
+          ${myRemaining.map(s => `<span class="cb-sym-chip own ${isMyTurn?'pickable':''}" data-sym="${esc(s)}">${esc(s)}</span>`).join('')}
+          ${myRevealed.map(s => `<span class="cb-sym-chip own revealed-mine">${esc(s)}</span>`).join('')}
+        </div>
+      </div>
+      <div class="cb-me-act">
+        <button class="btn ${isMyTurn?'':'disabled'}" id="cb-act-reveal" ${isMyTurn?'':'disabled'}>증상 공개</button>
+        ${skillMeta && !me.skillUsed ? `<button class="btn btn-gold ${isMyTurn?'':'disabled'}" id="cb-act-skill" ${isMyTurn?'':'disabled'}>${esc(skillMeta.han)} (${esc(skillMeta.ko)})</button>` : ''}
+        <button class="btn btn-o ${isMyTurn?'':'disabled'}" id="cb-act-decoct" ${isMyTurn?'':'disabled'}>전탕 시도</button>
+        <button class="btn btn-o ${isMyTurn?'':'disabled'}" id="cb-act-end" ${isMyTurn?'':'disabled'}>턴 종료</button>
+      </div>
+      ${skillMeta ? `<div class="cb-skill-hint">神급 스킬: <b>${esc(skillMeta.han)}</b> — ${esc(skillMeta.desc)}${me.skillUsed?' <span style="color:var(--zhusha-d)">[사용 완료]</span>':''}</div>` : ''}
+      <div class="cb-action-hint" id="cb-action-hint">
+        ${isMyTurn ? '증상을 공개하거나 전탕을 시도하세요.' : '상대 턴 진행 중…'}
+      </div>
+    </div>
+  `;
+
+  if(isMyTurn){
+    $('#cb-act-reveal') && $('#cb-act-reveal').addEventListener('click', () => openSymptomRevealModal(roomId, room, me, mySyn));
+    if(skillMeta && !me.skillUsed){
+      $('#cb-act-skill') && $('#cb-act-skill').addEventListener('click', () => openSkillModal(roomId, room, me, opp, skillMeta));
+    }
+    $('#cb-act-decoct') && $('#cb-act-decoct').addEventListener('click', () => openDecoctModal(roomId, room, me, opp));
+    $('#cb-act-end') && $('#cb-act-end').addEventListener('click', () => endCardTurn(roomId, room));
+  }
+
+  // 50턴 도달 시 무승부 처리 (선공이 책임)
+  if(room.turnIdx >= CARD_TURN_MAX - 1 && room.turn === S.userId){
+    setTimeout(() => settleCardBattle(roomId, room, null, 'turn_limit'), 800);
+  }
+}
+
+// 본초 카드 SVG HTML
+function renderHerbCardHTML(herb, opts){
+  opts = opts || {};
+  // 약재 카테고리·성미 — HERBS 에서 찾아 색상 결정
+  const h = (typeof HERBS !== 'undefined') ? HERBS.find(x => x.han === herb || x.han_alt === herb) : null;
+  // 성미 색상: 寒=청·熱=홍·溫=주·凉=취·平=황 (대략)
+  let bg = '#F5E6D3', bd = '#876A36', accent = '#9C3030';
+  if(h){
+    const props = (h.properties || h.flavor || '');
+    if(/寒/.test(props))      { bg='#E8F3F5'; bd='#3D6E7E'; accent='#2C5A6E'; }
+    else if(/熱/.test(props)) { bg='#FBE6E2'; bd='#9C3030'; accent='#722020'; }
+    else if(/溫/.test(props)) { bg='#F8DEC9'; bd='#A85A1E'; accent='#7C3D14'; }
+    else if(/凉/.test(props)) { bg='#E0EBE3'; bd='#2A7060'; accent='#1E5043'; }
+    else if(/平/.test(props)) { bg='#F1E5C0'; bd='#876A36'; accent='#5E4920'; }
+  }
+  const ko = (h && h.ko) ? h.ko : '';
+  const click = opts.click ? `data-herb="${esc(herb)}" style="cursor:pointer"` : '';
+  const klass = opts.selected ? 'cb-card-selected' : '';
+  return `
+    <div class="cb-herb-card ${klass}" ${click} style="background:${bg};border-color:${bd};color:${accent}">
+      <div class="cb-herb-han">${esc(herb)}</div>
+      ${ko ? `<div class="cb-herb-ko">${esc(ko)}</div>` : ''}
+    </div>
+  `;
+}
+
+// 증상 공개 모달 (자기 증상 1개 → 공개 OR 황제 스킬 fake 적용)
+function openSymptomRevealModal(roomId, room, me, mySyn){
+  const remaining = (mySyn.symptoms||[]).filter(s => !(me.revealedSymptoms||[]).includes(s));
+  const usingFake = !!me.fakeSymptomNext;
+  if(!remaining.length && !usingFake){ toast('공개할 증상이 없습니다','gold'); return; }
+
+  const m = document.createElement('div');
+  m.className = 'overlay';
+  m.innerHTML = `
+    <div class="modal" style="max-width:520px">
+      <div class="modal-title">증상 공개</div>
+      <div class="modal-body">
+        ${usingFake ? `<div class="cb-fake-banner">黃帝 스킬 발동 중 — <b>거짓 증상: ${esc(me.fakeSymptomNext)}</b> 가 자동 공개됩니다.</div>` : ''}
+        <div style="margin:8px 0 6px;font-size:12px;color:var(--mo-l)">자기 증상 중 하나를 골라 상대에게 공개합니다 (정직).</div>
+        <div class="cb-sym-grid">
+          ${remaining.map(s => `<button class="cb-sym-btn" type="button" data-sym="${esc(s)}">${esc(s)}</button>`).join('')}
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-o" id="cb-modal-close">닫기</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  $('#cb-modal-close').addEventListener('click', () => m.remove());
+  m.querySelectorAll('.cb-sym-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const sym = btn.dataset.sym;
+      m.remove();
+      try{
+        const newRev = (me.revealedSymptoms||[]).slice();
+        // 우선순위: 황제 fake 가 살아있으면 그것을 (자기 증과 무관한 증상으로) 공개, 자기가 고른 sym 은 그대로 노출 X (낭비됨)
+        // 단 명세 단순화: fake 가 있으면 fake 만 공개되고 sym 은 무효 (자기 진짜 증상 보전)
+        if(me.fakeSymptomNext){
+          newRev.push(me.fakeSymptomNext);
+          await FB.put(`card_battles/${roomId}/players/${S.userId}/revealedSymptoms`, newRev);
+          await FB.put(`card_battles/${roomId}/players/${S.userId}/fakeSymptomNext`, null);
+          appendCardLog(roomId, room, `${me.name}: 증상 공개 (黃帝 欺症)`);
+        } else {
+          newRev.push(sym);
+          await FB.put(`card_battles/${roomId}/players/${S.userId}/revealedSymptoms`, newRev);
+          appendCardLog(roomId, room, `${me.name}: 증상 공개 — ${sym}`);
+        }
+        await FB.put(`card_battles/${roomId}/lastActionAt`, Date.now());
+        $('#cb-action-hint') && ($('#cb-action-hint').textContent = '증상 공개 완료. 전탕을 시도하거나 턴을 종료하세요.');
+      }catch(e){ toast('공개 실패: '+e.message, 'red'); }
+    });
+  });
+}
+
+// 神급 스킬 모달
+function openSkillModal(roomId, room, me, opp, skillMeta){
+  const m = document.createElement('div');
+  m.className = 'overlay';
+  let bodyHtml = '';
+  if(skillMeta.id === 'fake_symptom'){
+    // 황제: 거짓 증상 1개 골라 next reveal 에 등록 (자기 證 외의 무작위 풀에서 선택 옵션 5개 표시)
+    const myFid = SYNDROME_BY_ID[me.syndromeChosen]?.formulaId;
+    const otherSyms = [];
+    SYNDROMES.forEach(s => {
+      if(s.formulaId === myFid) return;
+      (s.symptoms||[]).forEach(x => { if(!otherSyms.includes(x)) otherSyms.push(x); });
+    });
+    const pool = otherSyms.sort(()=>Math.random()-0.5).slice(0, 6);
+    bodyHtml = `
+      <div style="font-size:12px;color:var(--mo-l);margin-bottom:8px">하나를 골라 다음 자기 증상 공개에 적용. 상대는 거짓 증상을 진실로 받아들임.</div>
+      <div class="cb-sym-grid">
+        ${pool.map(s => `<button class="cb-sym-btn" type="button" data-fake="${esc(s)}">${esc(s)}</button>`).join('')}
+      </div>
+    `;
+  } else if(skillMeta.id === 'summon_herb'){
+    // 신농: 텍스트 입력으로 본초 호출
+    bodyHtml = `
+      <div style="font-size:12px;color:var(--mo-l);margin-bottom:8px">덱에 있는 본초의 한자명 1개를 입력하면 보드로 호출됩니다.</div>
+      <input type="text" id="cb-summon-input" placeholder="예: 人蔘" style="width:100%;padding:8px;font-size:14px;border:1px solid var(--gutong);border-radius:6px;font-family:var(--font-display)">
+      <div style="font-size:11px;color:var(--gutong);margin-top:6px">덱 잔여: ${room.deck.length}장 (덱 본초만 호출 가능)</div>
+      <div style="margin-top:8px"><button class="btn btn-gold" id="cb-summon-go">召喚</button></div>
+    `;
+  } else if(skillMeta.id === 'foresee_deck'){
+    // 복희: 덱 상위 3장 미리 보기 (이미 본 적 없으면 표시)
+    const top3 = (room.deck||[]).slice(0, 3);
+    bodyHtml = `
+      <div style="font-size:12px;color:var(--mo-l);margin-bottom:8px">덱 상위 3장을 미리 봅니다 (자기만).</div>
+      <div class="cb-board" style="margin-bottom:8px">
+        ${top3.length ? top3.map(h => renderHerbCardHTML(h)).join('') : '<div class="cb-empty">덱이 비었습니다</div>'}
+      </div>
+      <div style="margin-top:8px"><button class="btn btn-gold" id="cb-foresee-go">확인 (스킬 사용)</button></div>
+    `;
+  } else if(skillMeta.id === 'transmute_board'){
+    // 여와: 보드 본초 1장 선택 → 덱에서 무작위 1장과 교체
+    bodyHtml = `
+      <div style="font-size:12px;color:var(--mo-l);margin-bottom:8px">보드의 본초 1장을 골라 덱에서 무작위 1장과 교체. (덱 비어있으면 효과 없음)</div>
+      <div class="cb-board">
+        ${(room.board||[]).map(h => `<div class="cb-herb-card cb-card-pickable" data-herb="${esc(h)}" style="cursor:pointer">${renderHerbCardHTML(h).replace(/<div class="cb-herb-card[^>]*>/,'').replace(/<\/div>$/,'')}</div>`).join('')}
+      </div>
+    `;
+  } else if(skillMeta.id === 'reveal_monarch'){
+    // 기백: 자기 정답 처방의 君藥 중 하나를 보드로
+    const fid = SYNDROME_BY_ID[me.syndromeChosen]?.formulaId;
+    const f = FORMULAS.find(x => x.id === fid);
+    const monarchList = (f && f.monarch_minister && f.monarch_minister['君']) || [];
+    bodyHtml = `
+      <div style="font-size:12px;color:var(--mo-l);margin-bottom:8px">자기 정답 처방의 君藥 중 하나를 보드로 끌어옵니다. 보드에 이미 있는 것은 효과 없이 사용됨.</div>
+      <div class="cb-board">
+        ${monarchList.length ? monarchList.map(h => renderHerbCardHTML(h, {click:true})).join('') : '<div class="cb-empty">君藥 정보 없음</div>'}
+      </div>
+    `;
+  }
+
+  m.innerHTML = `
+    <div class="modal" style="max-width:560px">
+      <div class="modal-title">神급 스킬: ${esc(skillMeta.han)} (${esc(skillMeta.ko)})</div>
+      <div class="modal-body">${bodyHtml}</div>
+      <div class="modal-foot">
+        <button class="btn btn-o" id="cb-skill-close">취소</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  $('#cb-skill-close').addEventListener('click', () => m.remove());
+
+  if(skillMeta.id === 'fake_symptom'){
+    m.querySelectorAll('[data-fake]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const fk = btn.dataset.fake;
+        m.remove();
+        try{
+          await FB.put(`card_battles/${roomId}/players/${S.userId}/fakeSymptomNext`, fk);
+          await FB.put(`card_battles/${roomId}/players/${S.userId}/skillUsed`, true);
+          appendCardLog(roomId, room, `${me.name}: 黃帝 欺症 발동`);
+          await FB.put(`card_battles/${roomId}/lastActionAt`, Date.now());
+        }catch(e){ toast('스킬 실패: '+e.message, 'red'); }
+      });
+    });
+  } else if(skillMeta.id === 'summon_herb'){
+    $('#cb-summon-go').addEventListener('click', async () => {
+      const v = ($('#cb-summon-input').value||'').trim();
+      if(!v){ toast('본초 한자를 입력하세요','gold'); return; }
+      const idx = (room.deck||[]).indexOf(v);
+      if(idx < 0){ toast('덱에 없는 본초입니다','red'); return; }
+      m.remove();
+      try{
+        const newDeck = room.deck.slice(); newDeck.splice(idx, 1);
+        const newBoard = (room.board||[]).slice(); newBoard.push(v);
+        await FB.put(`card_battles/${roomId}/deck`, newDeck);
+        await FB.put(`card_battles/${roomId}/board`, newBoard);
+        await FB.put(`card_battles/${roomId}/players/${S.userId}/skillUsed`, true);
+        appendCardLog(roomId, room, `${me.name}: 神農 召草 — ${v}`);
+        await FB.put(`card_battles/${roomId}/lastActionAt`, Date.now());
+      }catch(e){ toast('스킬 실패: '+e.message, 'red'); }
+    });
+  } else if(skillMeta.id === 'foresee_deck'){
+    $('#cb-foresee-go').addEventListener('click', async () => {
+      m.remove();
+      try{
+        await FB.put(`card_battles/${roomId}/players/${S.userId}/skillUsed`, true);
+        appendCardLog(roomId, room, `${me.name}: 伏羲 卦知 — 덱 預知`);
+        await FB.put(`card_battles/${roomId}/lastActionAt`, Date.now());
+      }catch(e){ toast('스킬 실패: '+e.message, 'red'); }
+    });
+  } else if(skillMeta.id === 'transmute_board'){
+    m.querySelectorAll('.cb-card-pickable').forEach(el => {
+      el.addEventListener('click', async () => {
+        const h = el.dataset.herb;
+        if(!room.deck.length){ toast('덱이 비어 교체 불가','gold'); return; }
+        m.remove();
+        try{
+          const newDeck = room.deck.slice();
+          const dIdx = Math.floor(Math.random()*newDeck.length);
+          const draw = newDeck.splice(dIdx, 1)[0];
+          newDeck.push(h);  // 교체된 보드 본초는 덱 끝으로
+          const newBoard = (room.board||[]).slice();
+          const bIdx = newBoard.indexOf(h);
+          if(bIdx >= 0) newBoard[bIdx] = draw;
+          await FB.put(`card_battles/${roomId}/deck`, newDeck);
+          await FB.put(`card_battles/${roomId}/board`, newBoard);
+          await FB.put(`card_battles/${roomId}/players/${S.userId}/skillUsed`, true);
+          appendCardLog(roomId, room, `${me.name}: 女媧 造化 — ${h} → ${draw}`);
+          await FB.put(`card_battles/${roomId}/lastActionAt`, Date.now());
+        }catch(e){ toast('스킬 실패: '+e.message, 'red'); }
+      });
+    });
+  } else if(skillMeta.id === 'reveal_monarch'){
+    m.querySelectorAll('[data-herb]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const h = el.dataset.herb;
+        m.remove();
+        try{
+          // 보드에 이미 있으면 효과 없이 스킬만 소진
+          let logMsg = `${me.name}: 岐伯 問難 — ${h}`;
+          if(!(room.board||[]).includes(h)){
+            // 덱에서 제거 (있으면)
+            const newDeck = room.deck.slice();
+            const di = newDeck.indexOf(h);
+            if(di >= 0) newDeck.splice(di, 1);
+            const newBoard = (room.board||[]).slice();
+            newBoard.push(h);
+            await FB.put(`card_battles/${roomId}/deck`, newDeck);
+            await FB.put(`card_battles/${roomId}/board`, newBoard);
+          } else {
+            logMsg += ' (이미 보드에 존재, 효과 없음)';
+          }
+          await FB.put(`card_battles/${roomId}/players/${S.userId}/skillUsed`, true);
+          appendCardLog(roomId, room, logMsg);
+          await FB.put(`card_battles/${roomId}/lastActionAt`, Date.now());
+        }catch(e){ toast('스킬 실패: '+e.message, 'red'); }
+      });
+    });
+  }
+}
+
+// 전탕 시도 모달 (26 처방 중 1개 선택)
+function openDecoctModal(roomId, room, me, opp){
+  const board = new Set(room.board||[]);
+  const candidates = FORMULAS.map(f => {
+    const comp = f.composition||[];
+    const have = comp.every(h => board.has(h));
+    return {f, have, missing: comp.filter(h => !board.has(h))};
+  });
+  const available = candidates.filter(c => c.have).sort((a,b)=> (b.f.composition.length - a.f.composition.length));
+
+  const m = document.createElement('div');
+  m.className = 'overlay';
+  m.innerHTML = `
+    <div class="modal" style="max-width:640px">
+      <div class="modal-title">전탕 시도 (煎湯)</div>
+      <div class="modal-body">
+        <div style="font-size:12px;color:var(--mo-l);margin-bottom:8px">
+          처방의 모든 構成 本草가 보드에 있어야 시도 가능. 상대 證에 맞는 처방이면 승리, 아니면 턴 손실.
+        </div>
+        <div style="font-size:12.5px;font-family:var(--font-display);color:var(--zhusha-d);margin-bottom:6px">시도 가능 처방 (${available.length})</div>
+        <div class="cb-formula-grid">
+          ${available.length ? available.map(c => `
+            <button class="cb-formula-btn" type="button" data-fid="${c.f.id}">
+              <div class="cb-formula-han">${esc(c.f.han)}</div>
+              <div class="cb-formula-ko">${esc(c.f.ko)} · ${c.f.composition.length}味</div>
+            </button>
+          `).join('') : '<div class="cb-empty">시도 가능한 처방 없음</div>'}
+        </div>
+        <div style="margin-top:14px;font-size:12px;font-family:var(--font-display);color:var(--gutong)">참고 (불완전, 부족 본초 표시)</div>
+        <div class="cb-formula-grid" style="opacity:0.55">
+          ${candidates.filter(c=>!c.have).slice(0,6).map(c => `
+            <div class="cb-formula-btn" style="cursor:default">
+              <div class="cb-formula-han">${esc(c.f.han)}</div>
+              <div class="cb-formula-ko" style="color:var(--zhusha-d)">부족: ${c.missing.slice(0,3).map(esc).join(',')}${c.missing.length>3?'…':''}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-o" id="cb-decoct-close">취소</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  $('#cb-decoct-close').addEventListener('click', () => m.remove());
+  m.querySelectorAll('[data-fid]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const fid = btn.dataset.fid;
+      m.remove();
+      await attemptDecoct(roomId, room, me, opp, fid);
+    });
+  });
+}
+
+// 전탕 판정
+async function attemptDecoct(roomId, room, me, opp, formulaId){
+  const f = FORMULAS.find(x => x.id === formulaId);
+  if(!f){ toast('처방 데이터 없음','red'); return; }
+  // 본초 모두 보드에 있는지 재확인
+  const board = new Set(room.board||[]);
+  if(!f.composition.every(h => board.has(h))){
+    toast('보드에 본초 부족','red'); return;
+  }
+  const oppFid = SYNDROME_BY_ID[opp.syndromeChosen]?.formulaId;
+  const correct = (formulaId === oppFid);
+  appendCardLog(roomId, room, `${me.name}: 전탕 시도 — ${f.han} → ${correct?'✓ 정답':'✗ 오답'}`);
+  if(correct){
+    // 승리 — settleCardBattle
+    await settleCardBattle(roomId, room, S.userId, 'attack', formulaId);
+  } else {
+    // 오답 → 자동 턴 종료
+    toast(`✗ 오답: ${f.han} (상대 證 = ${SYNDROME_BY_ID[opp.syndromeChosen]?.han||'?'})`, 'red');
+    await endCardTurn(roomId, room);
+  }
+}
+
+// 턴 종료 (덱 1장 보드로 + 상대로 턴 넘김)
+async function endCardTurn(roomId, room){
+  const r = await FB.get(`card_battles/${roomId}`);
+  if(!r || r.status !== 'playing') return;
+  const oppU = Object.keys(r.players).find(u => u !== S.userId);
+  // 덱에서 1장 보드로 (덱 있을 때만)
+  const newDeck = (r.deck||[]).slice();
+  const newBoard= (r.board||[]).slice();
+  if(newDeck.length){
+    const draw = newDeck.shift();
+    newBoard.push(draw);
+  }
+  const newIdx = (r.turnIdx||0) + 1;
+  try{
+    await FB.put(`card_battles/${roomId}/deck`, newDeck);
+    await FB.put(`card_battles/${roomId}/board`, newBoard);
+    await FB.put(`card_battles/${roomId}/turn`, oppU);
+    await FB.put(`card_battles/${roomId}/turnIdx`, newIdx);
+    await FB.put(`card_battles/${roomId}/lastActionAt`, Date.now());
+  }catch(e){ toast('턴 종료 실패: '+e.message, 'red'); }
+}
+
+// 게임 로그 추가
+async function appendCardLog(roomId, room, msg){
+  try{
+    const log = (room.log||[]).slice();
+    log.push({ts: Date.now(), msg});
+    if(log.length > 50) log.splice(0, log.length-50);
+    await FB.put(`card_battles/${roomId}/log`, log);
+  }catch(_){}
+}
+
+// 정산
+async function settleCardBattle(roomId, room, winnerUid, reason, attackedFormula){
+  try{
+    const r = await FB.get(`card_battles/${roomId}`);
+    if(!r) return;
+    if(r.status === 'done') return;
+    const result = {
+      winner: winnerUid,
+      by: reason,
+      attackedFormula: attackedFormula||null,
+      finishedAt: Date.now()
+    };
+    await FB.put(`card_battles/${roomId}/result`, result);
+    await FB.put(`card_battles/${roomId}/status`, 'done');
+  }catch(e){ toast('정산 실패: '+e.message, 'red'); }
+}
+
+// 결과 화면
+async function renderCardResult(roomId, room, me, opp){
+  if(_cardChooseTimer){ clearInterval(_cardChooseTimer); _cardChooseTimer=null; }
+  const stage = $('#cb-stage');
+  const res = room.result || {};
+  let outcome = 'draw';
+  if(res.winner === S.userId) outcome = 'win';
+  else if(res.winner && res.winner !== S.userId) outcome = 'loss';
+  const oppSyn = SYNDROME_BY_ID[opp.syndromeChosen];
+  const mySyn  = SYNDROME_BY_ID[me.syndromeChosen];
+  const bet    = room.bet || 0;
+  const han    = outcome==='win'?'勝':(outcome==='loss'?'敗':'和');
+
+  // 한 번만 정산 (양측이 각자 자기 record 만 갱신)
+  if(!room._settled || !room._settled[S.userId]){
+    try{
+      if(outcome === 'win'){ S.qi += bet * 2; }
+      else if(outcome === 'draw'){ S.qi += bet; }
+      // loss 는 추가 없음 (이미 베팅 차감됨)
+      saveState();
+      await FB.put(`card_battles/${roomId}/_settled/${S.userId}`, true);
+      // record 갱신
+      if(FB && S.userId){
+        const rec = (await FB.get(`stats/records/${S.userId}`)) || {w:0, l:0, d:0};
+        if(outcome === 'win') rec.w = (rec.w||0)+1;
+        else if(outcome === 'loss') rec.l = (rec.l||0)+1;
+        else rec.d = (rec.d||0)+1;
+        rec.lastTs = Date.now();
+        await FB.put(`stats/records/${S.userId}`, rec);
+      }
+    }catch(_){}
+  }
+  // BGM 전환
+  try{
+    if(outcome === 'win' && bgm.startVictory) bgm.startVictory();
+    else if(outcome === 'loss' && bgm.startDefeat) bgm.startDefeat();
+    else if(bgm.stopBattle) bgm.stopBattle();
+  }catch(_){}
+
+  stage.innerHTML = `
+    <div style="text-align:center;padding:20px 8px">
+      <div style="font-family:var(--font-display);font-size:68px;color:${outcome==='win'?'#FFD700':(outcome==='loss'?'#444':'var(--gutong)')};${outcome==='win'?'text-shadow:0 0 20px rgba(255,215,0,0.6)':''};margin-bottom:8px">${han}</div>
+      <div style="font-size:14px;color:var(--mo);margin-bottom:14px">
+        ${outcome==='win'?`+${bet.toLocaleString()} 氣 획득`:(outcome==='loss'?`-${bet.toLocaleString()} 氣 손실`:`±0 氣 (환불)`)}
+      </div>
+      <div class="card" style="text-align:left;font-size:12.5px;max-width:520px;margin:0 auto">
+        <div><b>상대 證</b>: ${esc(oppSyn?.han||'?')} (${esc(oppSyn?.ko||'?')})</div>
+        <div><b>나의 證</b>: ${esc(mySyn?.han||'?')} (${esc(mySyn?.ko||'?')})</div>
+        ${res.attackedFormula ? `<div><b>승부 처방</b>: ${esc(FORMULAS.find(f=>f.id===res.attackedFormula)?.han||res.attackedFormula)}</div>` : ''}
+        <div style="margin-top:8px;color:var(--gutong)">종료 사유: ${esc(res.by||'unknown')}</div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:6px;justify-content:center">
+        <button class="btn" onclick="setTab('hall')">大廳으로</button>
+        <button class="btn btn-gold" onclick="joinCardBattleQueue()">다시 카드 對決</button>
+      </div>
+    </div>
+  `;
+
+  // 결과 화면 진입 후 5초 뒤 방 정리 (선공이 책임)
+  if(room.turn === S.userId){
+    setTimeout(async () => { try{ await FB.del(`card_battles/${roomId}`); }catch(_){} }, 8000);
+  }
+}
+
+// 페이지 떠날 때 스트림 정리
+function stopCardStreams(){
+  try{
+    if(_cardLobbyStream){ _cardLobbyStream.close(); _cardLobbyStream=null; }
+    if(_cardBattlesStream){ _cardBattlesStream.close(); _cardBattlesStream=null; }
+    if(_cardRoomStream){ _cardRoomStream.close(); _cardRoomStream=null; }
+    if(_cardChooseTimer){ clearInterval(_cardChooseTimer); _cardChooseTimer=null; }
+  }catch(_){}
+}
+
 function init(){
   loadState();
   refreshHeader();
@@ -4944,6 +5924,8 @@ function init(){
         for(const lvl of BET_LEVELS){
           FB.delKeepalive(`lobby/${lvl.id}/${S.userId}`);
         }
+        // v7: 카드 對決 큐 정리
+        FB.delKeepalive(`lobby_card/${S.userId}`);
       }
     }catch(_){}
   };
