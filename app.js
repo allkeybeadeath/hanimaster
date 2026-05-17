@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v8.9';                  // ★ 로비 표시용 (2026-05) — v8.9 critical: FB.subscribe SSE 완전 제거, paideia 패턴 polling-only (2s)
-const APP_BUILD   = '2026.05.17v';
+const APP_VERSION = 'v9.1';                  // ★ 로비 표시용 (2026-05) — v9.1: 카드 watchdog 폐기 · putRetry 6s · FB.get 재시도 단축
+const APP_BUILD   = '2026.05.17y';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -2478,10 +2478,10 @@ function stopLobbyIdle(){
 function startLobbyPoll(){ startLobbyStreams(); }
 function stopLobbyPoll(){  stopLobbyStreams(); stopLobbyIdle(); }
 
-// 매칭 큐 — v2.2.2: SSE 기반 실시간 매칭
-//   • /lobby/{level} 과 /battles 를 SSE 로 동시 구독
-//   • 새 entry 가 떨어지면 즉시 매칭 시도 (race 회피: userId 사전 순 작은 쪽이 방 생성)
-//   • 상대가 생성자였을 때도 /battles SSE 가 즉시 알려줌
+// 매칭 큐 — v9.0 자율 매치 (paideia 패턴)
+//   • /lobby/{level} 폴링으로 큐 동기화
+//   • 선임자 (ts 최소) 만 매치 publish → race-free
+//   • 다른 사용자는 /battles 폴링으로 자기 player 인 fresh room 발견 시 자동 입장
 //   • 무한 로딩 방지: MATCH_TIMEOUT_MS 이내 매칭 실패 시 자동 환불
 async function joinBattleQueue(level){
   if(!FB){ toast('Firebase 연결 안됨'); return; }
@@ -2611,9 +2611,17 @@ async function joinBattleQueue(level){
   }, 1000);
 
   // 5) /battles SSE — 상대가 방 생성자였을 때 즉시 감지
-  // v6 수정: stale 방 필터링 (createdAt 5분 이상 지난 방 또는 status='done' 인 방 무시)
-  //         그리고 자기 stale entry는 매칭 화면 진입 직후 1회 정리
+  // v9.0 자율 매치 (paideia 패턴) — 호스트/입장자 분리 제거
+  // ──────────────────────────────────────────────────────────────────────
+  //   기존: 사전 순 작은 userId 가 방 생성자, 큰 userId 는 onBattlesSnap 으로 입장
+  //         → 한쪽이 방을 못 보는 race 다수 발생
+  //   v9.0: 모두가 동등하게 lobby/{level}/{uid} 자기 키만 PUT
+  //         가장 오래 기다린 사람 (선임자 = ts 최소) 이 매치 publish
+  //         양측이 동일한 polling 으로 battles/{roomId} 발견 → 자동 합류
+  //         "방 생성자"/"입장자" 분리 없음 → 한쪽 못 들어가는 race 자체 사라짐
   const STALE_ROOM_MS = 5 * 60 * 1000;
+
+  // /battles 폴링 — 누구나 자기가 player 인 fresh room 발견 시 진입
   const onBattlesSnap = (battles) => {
     if(!active || matching) return;
     if(!battles) return;
@@ -2621,22 +2629,20 @@ async function joinBattleQueue(level){
     const myRoom = Object.values(battles).find(r =>
       r && r.players && r.players[S.userId]
       && r.status !== 'done'
-      && (now - (r.createdAt||0)) < STALE_ROOM_MS    // v6: 5분 이상 지난 방 무시
+      && (now - (r.createdAt||0)) < STALE_ROOM_MS
     );
     if(myRoom){
       matching = true;
-      const status = $('#queue-status'); if(status) status.textContent = '방 발견 — 입장 중…';
-      // cleanup 은 cleanedUp 플래그로 중복 호출 보호되므로 안전
+      const status = $('#queue-status'); if(status) status.textContent = '매치 발견 — 입장…';
       (async () => {
-        await cleanup(false);  // 환불 안 함 (실제 매칭 성공)
+        await cleanup(false);
         startBattle(myRoom.roomId, false);
       })();
     }
   };
   _battlesStream = FB.subscribe('battles', onBattlesSnap);
 
-  // v6: 입장 직후 자기의 stale 방 정리 (지난 5분+ 방에 자기가 player 로 남아있으면 status='done' 마킹)
-  // 이러면 다음 onBattlesSnap 에서 잘못 매칭 안 됨
+  // 입장 직후 자기의 stale 방 정리
   (async () => {
     try{
       const allBattles = await FB.get('battles');
@@ -2645,7 +2651,6 @@ async function joinBattleQueue(level){
         for(const [rid, r] of Object.entries(allBattles)){
           if(r && r.players && r.players[S.userId] && r.status !== 'done'
              && (now2 - (r.createdAt||0)) >= STALE_ROOM_MS){
-            // stale — 명시적으로 done 마킹
             try{ await FB.put(`battles/${rid}/status`, 'done'); }catch(_){}
           }
         }
@@ -2653,55 +2658,60 @@ async function joinBattleQueue(level){
     }catch(_){}
   })();
 
-  // 6) /lobby/{level} SSE — 상대 발견 시 사전순 작은 쪽이 방 생성
+  // /lobby/{level} 폴링 — 선임자만 매치 publish (자율 매치)
   const onLobbySnap = async (all) => {
     if(!active || matching) return;
-    // v8.4: 큐 카운트 항상 표시
     const now = Date.now();
     const fresh = all ? Object.values(all).filter(p => p && (now - (p.ts||0)) < LOBBY_FRESH_MS) : [];
-    const others = fresh.filter(p => p.userId !== S.userId).sort((a,b) => (a.ts||0) - (b.ts||0));
+    // ts 기준 정렬 = 가장 오래 기다린 사람이 [0]
+    const sortedFresh = fresh.slice().sort((a,b) => (a.ts||0) - (b.ts||0));
+    const others = sortedFresh.filter(p => p.userId !== S.userId);
     const cntEl = $('#queue-count');
     if(cntEl) cntEl.textContent = `현재 큐 (${esc(lvlInfo.han)}): ${fresh.length}명 · 대기 ${others.length}명`;
-    if(!all){
-      const status = $('#queue-status'); if(status) status.textContent = '대기 중…';
-      return;
-    }
     if(others.length === 0){
       const status = $('#queue-status'); if(status) status.textContent = '대기 중…';
       return;
     }
-    const opp = others[0];
-    if(S.userId < opp.userId){
-      // 내가 방 생성자
-      if(matching) return;
-      matching = true;
-      const status = $('#queue-status'); if(status) status.textContent = `상대 발견 (${esc(opp.name||'')}) — 방 생성 중…`;
-      const roomId = 'r_' + Math.random().toString(36).slice(2,8) + Date.now().toString(36).slice(-4);
-      const room = {
-        roomId, level, bet, status: 'starting',
-        players: {
-          [S.userId]:  { userId:S.userId,  name:S.name,  character:S.character,  score:0, qi:S.qi+bet, bet, done:false },
-          [opp.userId]:{ userId:opp.userId,name:opp.name,character:opp.character,score:0, qi:opp.qi,    bet, done:false },
-        },
-        questions: generateBattleQuestions(5, level),
-        createdAt: Date.now()
-      };
-      const created = await FB.putRetry(`battles/${roomId}`, room, {tries:3, backoffMs:300});
-      if(!created.ok){
-        // 방 생성 실패 — matching flag 해제하고 SSE 다음 스냅샷에서 재시도
-        matching = false;
-        const st = $('#queue-status'); if(st) st.textContent = `방 생성 실패 (HTTP ${created.status||'?'}) — 재시도 대기`;
-        return;
-      }
-      // 양쪽 큐 entry 제거 (각자 노력 — 상대가 실패해도 자기는 정리됨)
-      try{ await FB.del(`lobby/${level}/${S.userId}`); }catch(_){}
-      try{ await FB.del(`lobby/${level}/${opp.userId}`); }catch(_){}
-      await cleanup(false);  // 환불 안 함 (정상 매칭)
-      startBattle(roomId, true);
-    } else {
-      // 상대가 방 생성자 — _battlesStream 이 곧 잡아냄
-      const status = $('#queue-status'); if(status) status.textContent = `상대 발견 (${esc(opp.name||'')}) — 방 생성 대기…`;
+
+    // 자율 매치 결정 룰: 선임자 (ts 최소) 만 매치 publish 책임
+    // 동률 (ts 같음) 시 userId 사전 순 작은 쪽 (결정적 tiebreaker)
+    const senior = sortedFresh[0];
+    const isSeniorMe = senior.userId === S.userId
+      || (senior.ts === (myEntry.ts) && S.userId < senior.userId);
+    // (실제로 senior 가 곧 자기 entry 인 경우만 selfPublish 시도)
+    if(senior.userId !== S.userId){
+      // 자기가 선임자 아님 — 대기. onBattlesSnap 이 잡아줌.
+      const status = $('#queue-status');
+      if(status) status.textContent = `상대 발견 (${esc(others[0].name||'')}) — 매치 대기…`;
+      return;
     }
+
+    // 자기가 선임자 — 매치 publish (재진입 가드)
+    matching = true;
+    const status = $('#queue-status');
+    if(status) status.textContent = `상대 발견 (${esc(others[0].name||'')}) — 매치 시작…`;
+    const opp = others[0];
+    const roomId = 'r_' + Math.random().toString(36).slice(2,8) + Date.now().toString(36).slice(-4);
+    const room = {
+      roomId, level, bet, status: 'starting',
+      players: {
+        [S.userId]:  { userId:S.userId,  name:S.name,  character:S.character,  score:0, qi:S.qi+bet, bet, done:false },
+        [opp.userId]:{ userId:opp.userId,name:opp.name,character:opp.character,score:0, qi:opp.qi,    bet, done:false },
+      },
+      questions: generateBattleQuestions(5, level),
+      createdAt: Date.now()
+    };
+    // v9.1: 매치 publish — 기본 3회×5초=15초 → 2회×3초=6초로 단축. 실패 시 다음 폴링에서 재시도.
+    const created = await FB.putRetry(`battles/${roomId}`, room, {tries:2, backoffMs:300, timeoutMs:3000});
+    if(!created.ok){
+      matching = false;
+      const st = $('#queue-status'); if(st) st.textContent = `매치 publish 실패 (HTTP ${created.status||'?'}) — 재시도 대기`;
+      return;
+    }
+    // 자기 큐 entry 만 정리 — 상대 entry 는 건드리지 않음 (race-free 원칙)
+    try{ await FB.del(`lobby/${level}/${S.userId}`); }catch(_){}
+    await cleanup(false);
+    startBattle(roomId, true);
   };
   _lobbyQueueStream = FB.subscribe(`lobby/${level}`, onLobbySnap);
 }
@@ -2710,14 +2720,14 @@ async function joinBattleQueue(level){
 
 
 async function startBattle(roomId, isCreator){
-  // v8.5: FB.get 재시도 (1회 → 4회, 350·700·1050 ms 백오프). 네트워크 일시 장애에 강함.
+  // v9.1: FB.get 재시도 — 2회 (350·700 ms). polling 2초가 백업하므로 짧게.
   let room = null;
-  for(let i=0; i<4; i++){
+  for(let i=0; i<2; i++){
     try{ room = await FB.get(`battles/${roomId}`); }catch(_){ room = null; }
     if(room) break;
     await new Promise(r => setTimeout(r, 350 * (i+1)));
   }
-  if(!room){ toast('방을 찾을 수 없음 (4회 재시도 실패)','red'); setTab('hall'); return; }
+  if(!room){ toast('방을 찾을 수 없음','red'); setTab('hall'); return; }
   _battle = { roomId, isCreator, room };
   // v7.2: 배틀 진행 중 플래그 ON — 탭 이탈 가드 활성
   const oppId = Object.keys(room.players||{}).find(k => k !== S.userId) || null;
@@ -3101,10 +3111,8 @@ async function renderBattleGame(roomId){
       }catch(_){ /* 기록 실패해도 게임은 계속 */ }
     }
 
-    // 방 정리 (생성자만)
-    if(_battle && _battle.isCreator){
-      setTimeout(() => FB.del(`battles/${roomId}`), 5000);
-    }
+    // v9.0 자율 매치: 결과 후 방 정리도 양측 모두 시도 (DEL 멱등)
+    setTimeout(() => FB.del(`battles/${roomId}`), 5000);
 
     // v3: 승/패 BGM 전환
     try{
@@ -5730,41 +5738,45 @@ async function joinCardBattleQueue(){
     }catch(_){}
   })();
 
-  // /lobby_card SSE
+  // v9.0 자율 매치 (paideia 패턴) — 카드 對決
+  // /lobby_card 폴링 — 선임자(ts 최소) 만 방 publish
   const onLobbySnap = async (q) => {
     if(!active || matching) return;
-    // v8.4: 큐 카운트 항상 표시 (q 가 null 이어도 카운트 0 표시)
     const now = Date.now();
     const fresh = q ? Object.values(q).filter(x => x && x.userId && (now - (x.ts||0)) < 45000) : [];
-    const others = fresh.filter(x => x.userId !== S.userId);
+    const sortedFresh = fresh.slice().sort((a,b) => (a.ts||0) - (b.ts||0));
+    const others = sortedFresh.filter(x => x.userId !== S.userId);
     const cnt = $('#card-queue-count');
     if(cnt) cnt.textContent = `현재 큐: ${fresh.length}명 (나 + 대기 ${others.length}명)`;
-    if(!q) return;
-    // 매칭: 자기 외에 다른 fresh 사용자 1명 이상 있고, userId 사전 순 작은 쪽이 방 생성
-    const opp = others[0];
-    if(opp){
-      if(S.userId < opp.userId){
-        matching = true;
-        $('#card-queue-status').textContent = '상대 발견 — 방 생성 중…';
-        const roomId = 'cb_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8);
-        try{
-          await createCardBattleRoom(roomId, S, opp, bet);
-        }catch(e){
-          matching = false;  // v8.4: 방 생성 실패 시 다음 SSE 콜백에서 재시도 가능하게 flag 해제
-          $('#card-queue-status').textContent = '방 생성 실패: ' + (e && e.message || e) + ' — 재시도 대기';
-          return;
-        }
-        await cleanup(false);  // 환불 안 함
-        startCardBattle(roomId, true);
-      } else {
-        $('#card-queue-status').textContent = `상대 발견 (${esc(opp.name||'')}) — 방 생성 대기…`;
-      }
-      // 큰 쪽은 onBattlesSnap 에서 잡힘
+    if(others.length === 0) return;
+
+    const senior = sortedFresh[0];
+    if(senior.userId !== S.userId){
+      // 자기가 선임자 아님 — 대기. onBattlesSnap 이 잡아줌.
+      $('#card-queue-status').textContent = `상대 발견 (${esc(others[0].name||'')}) — 매치 대기…`;
+      return;
     }
+
+    // 자기가 선임자 — 매치 publish (재진입 가드)
+    matching = true;
+    $('#card-queue-status').textContent = '상대 발견 — 매치 시작…';
+    const opp = others[0];
+    const roomId = 'cb_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8);
+    try{
+      await createCardBattleRoom(roomId, S, opp, bet);
+    }catch(e){
+      matching = false;
+      $('#card-queue-status').textContent = '매치 publish 실패: ' + (e && e.message || e) + ' — 재시도 대기';
+      return;
+    }
+    // 자기 큐 entry 만 정리
+    try{ await FB.del(`lobby_card/${S.userId}`); }catch(_){}
+    await cleanup(false);
+    startCardBattle(roomId, true);
   };
   _cardLobbyStream = FB.subscribe('lobby_card', onLobbySnap);
 
-  // /card_battles SSE — 상대가 방 생성자였을 때
+  // /card_battles 폴링 — 자기가 player 인 fresh room 발견 시 입장
   const onBattlesSnap = (battles) => {
     if(!active || matching) return;
     if(!battles) return;
@@ -5772,11 +5784,11 @@ async function joinCardBattleQueue(){
     const myRoom = Object.values(battles).find(r =>
       r && r.players && r.players[S.userId]
       && r.status !== 'done'
-      && (now - (r.createdAt||0)) < STALE_BATTLE_QUICK_MS  // v8.5: 5분 (1분 stale 버그 회복)
+      && (now - (r.createdAt||0)) < STALE_BATTLE_QUICK_MS
     );
     if(myRoom){
       matching = true;
-      $('#card-queue-status').textContent = '방 발견 — 입장 중…';
+      $('#card-queue-status').textContent = '매치 발견 — 입장…';
       (async () => {
         await cleanup(false);
         startCardBattle(myRoom.roomId, false);
@@ -5869,7 +5881,12 @@ async function createCardBattleRoom(roomId, me, opp, bet){
     log: [],
     result: null
   };
-  await FB.putRetry(`card_battles/${roomId}`, room);
+  // v9.1: 매치 publish putRetry — 기본 3회×5초=15초 hang 가능 → 2회×3초=최대 6초로 단축.
+  //       실패 시 호출자(onLobbySnap)가 matching=false 로 풀고 다음 폴링(2초)에서 재시도.
+  const pubRes = await FB.putRetry(`card_battles/${roomId}`, room, {tries:2, backoffMs:300, timeoutMs:3000});
+  if(!pubRes || !pubRes.ok){
+    throw new Error('매치 publish 실패 (HTTP ' + (pubRes && pubRes.status || '?') + ')');
+  }
   return room;
 }
 
@@ -5931,11 +5948,11 @@ async function startCardBattle(roomId, isCreator){
   _battleSessionMeta = { mode:'card', roomId, oppId:null };
   _cardFirstRenderDone = false;
 
-  // v8.5: 초기 방 데이터를 FB.get 으로 즉시 패치 (재시도). SSE 의존 제거.
-  //       SSE 가 안 와도 최소 1회 렌더 보장 → 무한 로딩 방지.
+  // v9.1: 초기 방 데이터 FB.get 재시도 2회 (350·700 ms). polling 2초 (FB.subscribe) 가 백업.
+  //       polling 이 즉시 첫 fetch 호출하므로 사실상 이 블록은 보조망.
   (async () => {
     let initial = null;
-    for(let i=0; i<4; i++){
+    for(let i=0; i<2; i++){
       try{ initial = await FB.get(`card_battles/${roomId}`); }catch(_){ initial = null; }
       if(initial) break;
       await new Promise(r => setTimeout(r, 350 * (i+1)));
@@ -5949,9 +5966,8 @@ async function startCardBattle(roomId, isCreator){
       catch(e){
         const d = $('#cb-diag'); if(d) d.textContent = '렌더 오류: '+(e&&e.message||e);
       }
-    } else {
-      const d = $('#cb-diag'); if(d) d.innerHTML = `<span style="color:var(--zhusha-d)">초기 패치 실패 (4회 재시도) — SSE 대기 중</span>`;
     }
+    // 실패해도 별도 메시지 없음 — polling 이 곧 잡아줌
   })();
 
   // 방 데이터 구독 (라이브 업데이트용)
@@ -5976,29 +5992,10 @@ async function startCardBattle(roomId, isCreator){
     armCardInactivityWatchdog(roomId, room);
   });
 
-  // v8.6: 4초 watchdog (8초 → 4초, 더 빠른 피드백). FB.get 자체에 5초 timeout 이 있어
-  //       이 watchdog 가 FB.get 실패 전에 발화할 수도 있으나 그것은 의도 (사용자에게 즉시 진단 노출).
-  if(_cardLoadWatchdog){ clearTimeout(_cardLoadWatchdog); }
-  _cardLoadWatchdog = setTimeout(() => {
-    if(_cardFirstRenderDone) return;
-    const stg = $('#cb-stage'); const d = $('#cb-diag');
-    if(stg){
-      stg.innerHTML = `
-        <div style="text-align:center;padding:14px 8px">
-          <div style="color:var(--zhusha-d);font-size:14px;margin-bottom:8px">진입이 지연됩니다</div>
-          <div style="font-size:12px;color:var(--mo-l);margin-bottom:10px">방 ${esc(roomId)} 데이터 패치가 4초 내 완료되지 않았습니다. 네트워크/Firebase 권한/SSE 차단 가능성.</div>
-          <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
-            <button class="btn btn-gold" onclick="(async()=>{const r=await FB.get('card_battles/${esc(roomId)}');if(r){_cardRoomState=r;renderCardBattle('${esc(roomId)}',r);_cardFirstRenderDone=true;}else{toast('방을 찾을 수 없음','red');}})()">수동 패치 시도</button>
-            <button class="btn btn-o" onclick="(async()=>{try{await FB.put('card_battles/${esc(roomId)}/status','done');}catch(_){};_inBattleSession=false;_battleSessionMeta=null;stopCardStreams();setTab('hall');})()">포기 (방 폐쇄)</button>
-          </div>
-        </div>
-      `;
-    }
-    if(d){
-      const errStr = _lastSubError ? `· SSE 에러: ${esc(_lastSubError.err||'?')} (${esc(_lastSubError.path||'?')})` : '';
-      d.innerHTML = `watchdog 진단 — 첫 렌더 미완료 ${errStr}`;
-    }
-  }, 4000);
+  // v9.1: watchdog 폐기 — polling 2초 (v8.9) 가 첫 렌더 보장. 별도 watchdog 가
+  //       오히려 사용자 혼란 (정상 폴링 직전 진단 UI 깜빡임). 비정상 상황 (네트워크
+  //       끊김 등) 은 polling 이 계속 재시도하므로 화면이 "로딩…" 으로 유지되다가
+  //       복구 시 자동 진행.
 }
 
 // 화면 렌더링 — status 별로 분기
@@ -6086,15 +6083,15 @@ function renderCardChoose(roomId, room, me, opp){
       }
       clearInterval(_cardChooseTimer); _cardChooseTimer=null;
 
-      // 양측이 모두 선택했는지 1회 확인 → 모두 됐으면 playing 으로 전이
-      // (선공 클라이언트가 transition 책임)
+      // v9.0 자율 매치: 양측 모두 transition 시도 (선공 책임 폐기).
+      //   Firebase last-write-wins + status='done' 가드로 멱등성 보장.
       setTimeout(async () => {
         try{
           const r2 = await FB.get(`card_battles/${roomId}`);
           if(r2 && r2.status === 'choosing'){
             const us = Object.values(r2.players);
             const all = us.every(p => p.syndromeChosen);
-            if(all && r2.turn === S.userId){
+            if(all){
               await FB.put(`card_battles/${roomId}/status`, 'playing');
               await FB.put(`card_battles/${roomId}/startedAt`, Date.now());
               await FB.put(`card_battles/${roomId}/lastActionAt`, Date.now());
@@ -6105,8 +6102,8 @@ function renderCardChoose(roomId, room, me, opp){
     }
   }, 500);
 
-  // 양측 다 선택했으면 즉시 transition (선공 책임)
-  if(myDone && oppDone && room.turn === S.userId){
+  // v9.0 자율 매치: 양측 즉시 transition 시도 (선공 책임 폐기)
+  if(myDone && oppDone){
     (async () => {
       try{
         await FB.put(`card_battles/${roomId}/status`, 'playing');
@@ -6224,8 +6221,9 @@ function renderCardPlaying(roomId, room, me, opp){
     $('#cb-act-end') && $('#cb-act-end').addEventListener('click', () => endCardTurn(roomId, room));
   }
 
-  // 50턴 도달 시 무승부 처리 (선공이 책임)
-  if(room.turnIdx >= CARD_TURN_MAX - 1 && room.turn === S.userId){
+  // v9.0 자율 매치: 50턴 도달 시 양측 모두 무승부 정산 시도 (선공 책임 폐기).
+  //   settleCardBattle 내부 `if(r.status === 'done') return` 가드로 멱등성 보장.
+  if(room.turnIdx >= CARD_TURN_MAX - 1){
     setTimeout(() => settleCardBattle(roomId, room, null, 'turn_limit'), 800);
   }
 }
@@ -6869,10 +6867,8 @@ async function renderCardResult(roomId, room, me, opp){
     </div>
   `;
 
-  // 결과 화면 진입 후 5초 뒤 방 정리 (선공이 책임)
-  if(room.turn === S.userId){
-    setTimeout(async () => { try{ await FB.del(`card_battles/${roomId}`); }catch(_){} }, 8000);
-  }
+  // v9.0 자율 매치: 결과 화면 진입 후 5초 뒤 방 정리. 양측 모두 시도 (DEL 은 멱등).
+  setTimeout(async () => { try{ await FB.del(`card_battles/${roomId}`); }catch(_){} }, 8000);
 }
 
 // 페이지 떠날 때 스트림 정리
