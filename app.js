@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v2.2.2';              // ★ 로비 표시용 (2026-05)
+const APP_VERSION = 'v3';                  // ★ 로비 표시용 (2026-05)
 const APP_BUILD   = '2026.05.17';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
@@ -491,8 +491,10 @@ function refreshHeader(){
 // 古琴 시뮬레이션: sine + saw mix, 부드러운 attack, 긴 decay
 const bgm = {
   ctx: null, master: null, on: false, timer: null, t0: 0,
-  mode: null,        // 'ambient' | 'battle' | null
+  mode: null,        // 'ambient' | 'battle' | 'victory' | 'defeat' | null
   prevMode: null,
+  userGestureSeen: false,  // v3: 첫 클릭 등 user-gesture 감지 후에만 AudioContext.resume() 안전
+  userDisabled: false,     // v3: 사용자가 명시적으로 OFF 시 자동 재생 금지
   scale: [261.63, 293.66, 329.63, 392.00, 440.00],  // C D E G A (penta major)
   bass:  [130.81, 196.00],  // C G drone
 
@@ -624,46 +626,241 @@ const bgm = {
     this.timer = setTimeout(() => this.scheduleBattle(), bar * numBars * 1000 - 200);
   },
 
-  start(){
+  // v3: 모든 schedule 루프를 단일 invariant — 한 번에 한 모드만 살아 있게.
+  // ambient/battle/victory/defeat 어느 것을 시작하기 전에 반드시 호출.
+  _stopSchedulers(){
+    clearTimeout(this.timer);
+    this.timer = null;
+  },
+  _ensureCtx(){
     this.init();
-    if(!this.ctx){ toast('이 기기는 BGM 미지원'); return; }
-    if(this.ctx.state === 'suspended') this.ctx.resume();
+    if(!this.ctx) return false;
+    // user-gesture 이전엔 resume() 해도 의미 없지만 시도는 한다 (suspended일 때만)
+    if(this.ctx.state === 'suspended'){
+      try{ this.ctx.resume(); }catch(_){}
+    }
+    return true;
+  },
+
+  start(){
+    if(!this._ensureCtx()){ toast('이 기기는 BGM 미지원'); return; }
+    this._stopSchedulers();
     this.on = true;
     this.mode = 'ambient';
-    clearTimeout(this.timer);
+    this.userDisabled = false;
     this.schedule();
     refreshHeader();
   },
   stop(){
+    this._stopSchedulers();
     this.on = false;
     this.mode = null;
-    clearTimeout(this.timer);
+    this.userDisabled = true;  // v3: 사용자가 끈 의도 기억 → 자동 재생 차단
     refreshHeader();
   },
   toggle(){ this.on ? this.stop() : this.start(); },
 
+  // v3: 大廳 진입 시 자동 ambient 재생. 첫 user-gesture 이후 + 사용자 OFF 의도 없을 때만.
+  autoStartAmbient(){
+    if(this.userDisabled) return;
+    if(!this.userGestureSeen) return;
+    if(this.on && this.mode === 'ambient') return;
+    if(!this._ensureCtx()) return;
+    this._stopSchedulers();
+    this.on = true;
+    this.mode = 'ambient';
+    this.schedule();
+    refreshHeader();
+  },
+
   // 배틀 입장 시 호출 — 긴박한 戰鬪 BGM 으로 즉시 전환 (사용자 토글에 무관)
   startBattle(){
-    this.init();
-    if(!this.ctx) return;
-    if(this.ctx.state === 'suspended') this.ctx.resume();
+    if(!this._ensureCtx()) return;
+    this._stopSchedulers();
     this.on = true;
     this.mode = 'battle';
     this.prevMode = this.prevMode || 'ambient';
-    clearTimeout(this.timer);
     this.scheduleBattle();
     refreshHeader();
   },
   // 배틀 종료 시 호출 — 이전 ambient 모드로 복귀
   stopBattle(){
     if(this.mode !== 'battle') return;
+    this._stopSchedulers();
     this.mode = 'ambient';
-    clearTimeout(this.timer);
     if(this.on) this.schedule();
     refreshHeader();
+  },
+
+  // ── v3: 승리 BGM — C major arpeggio, 110 BPM, bell-like (sine+triangle 1옥타브 위)
+  //    배틀 결과 화면 진입 시 호출. ambient/battle은 _stopSchedulers로 끔.
+  scheduleVictory(){
+    if(!this.ctx || !this.on || this.mode !== 'victory') return;
+    const t = this.ctx.currentTime;
+    const bpm = 110;
+    const beat = 60 / bpm;
+    const bar = beat * 4;
+    const numBars = 4;
+    // C major arpeggio (C4 E4 G4 C5 E5 G5) — 밝은 상승
+    const arp = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99];
+    for(let b = 0; b < numBars; b++){
+      const tb = t + b * bar;
+      // 8분음표 6개 + 마무리 C5 sustain
+      for(let i = 0; i < 6; i++){
+        this.pluck(arp[i], tb + i * (beat/2), beat * 1.1, 0.16);
+      }
+      // 베이스 C2 + G2 (V→I 진행 흉내)
+      this.pluck(65.41, tb, beat * 2, 0.12);              // C2
+      this.pluck(98.00, tb + beat * 2, beat * 2, 0.11);   // G2
+      // 마지막 마디 종지: C5 길게
+      if(b === numBars - 1){
+        this.pluck(523.25, tb + beat * 3, beat * 2.5, 0.20);
+      }
+    }
+    this.timer = setTimeout(() => this.scheduleVictory(), bar * numBars * 1000 - 200);
+  },
+  startVictory(){
+    if(!this._ensureCtx()) return;
+    this._stopSchedulers();
+    this.on = true;
+    this.mode = 'victory';
+    this.scheduleVictory();
+    refreshHeader();
+  },
+
+  // ── v3: 패배 BGM — A minor 저속 드론 (A2, C3, E3 sustained), 매우 느린 LFO 스웰
+  scheduleDefeat(){
+    if(!this.ctx || !this.on || this.mode !== 'defeat') return;
+    const t = this.ctx.currentTime;
+    const bar = 4.0; // 4초 단위
+    const numBars = 4;
+    // 단조 화음 — 3-note long drone
+    const chord = [110.00, 130.81, 164.81]; // A2, C3, E3
+    for(let b = 0; b < numBars; b++){
+      const tb = t + b * bar;
+      chord.forEach((f, idx) => {
+        // 길게 sustain + 부드러운 fade-in/fade-out
+        this.pluck(f, tb + idx * 0.15, bar * 1.05, 0.09);
+      });
+      // 마디 후반 한숨처럼 하강하는 高音 single note (A4→F4)
+      if(b % 2 === 0){
+        this.pluck(440.00, tb + bar * 0.55, 1.2, 0.08);
+        this.pluck(349.23, tb + bar * 0.78, 1.5, 0.07);
+      }
+    }
+    this.timer = setTimeout(() => this.scheduleDefeat(), bar * numBars * 1000 - 200);
+  },
+  startDefeat(){
+    if(!this._ensureCtx()) return;
+    this._stopSchedulers();
+    this.on = true;
+    this.mode = 'defeat';
+    this.scheduleDefeat();
+    refreshHeader();
+  },
+
+  // ── v3: 선지 클릭 효과음 (정답: 상승 C5→E5→G5, 200ms / 오답: 하강 G4→Eb4, 350ms)
+  //    BGM on/off와 무관하게 항상 재생. ctx만 있으면 작동.
+  //    user-gesture 이전엔 ctx.resume()이 실패해도 silent 처리.
+  sfxCorrect(){
+    if(!this._ensureCtx()) return;
+    const t = this.ctx.currentTime;
+    // 3음 빠른 상승 (각 70ms)
+    const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+    notes.forEach((f, i) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine'; o.frequency.value = f;
+      const o2 = this.ctx.createOscillator();
+      o2.type = 'triangle'; o2.frequency.value = f * 2;
+      const g = this.ctx.createGain();
+      const ts = t + i * 0.065;
+      g.gain.setValueAtTime(0, ts);
+      g.gain.linearRampToValueAtTime(0.20, ts + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, ts + 0.18);
+      const g2 = this.ctx.createGain(); g2.gain.value = 0.22;
+      o2.connect(g2); g2.connect(g); o.connect(g);
+      // SFX는 master를 거치되 BGM master gain 영향 받지 않게 별도 출력
+      g.connect(this.ctx.destination);
+      o.start(ts); o.stop(ts + 0.22);
+      o2.start(ts); o2.stop(ts + 0.22);
+    });
+  },
+  sfxWrong(){
+    if(!this._ensureCtx()) return;
+    const t = this.ctx.currentTime;
+    // 2음 하강 (G4 → Eb4) — 묵직한 톤
+    const notes = [392.00, 311.13];
+    notes.forEach((f, i) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine'; o.frequency.value = f;
+      const o2 = this.ctx.createOscillator();
+      o2.type = 'sawtooth'; o2.frequency.value = f / 2; // 옥타브 아래 약하게
+      const g = this.ctx.createGain();
+      const ts = t + i * 0.16;
+      g.gain.setValueAtTime(0, ts);
+      g.gain.linearRampToValueAtTime(0.18, ts + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, ts + 0.34);
+      const g2 = this.ctx.createGain(); g2.gain.value = 0.12;
+      o2.connect(g2); g2.connect(g); o.connect(g);
+      g.connect(this.ctx.destination);
+      o.start(ts); o.stop(ts + 0.40);
+      o2.start(ts); o2.stop(ts + 0.40);
+    });
   }
 };
 window.bgm = bgm;
+
+// ───── 6.5 사용자별 전적 (v3) ───────────────────────────────────────────────
+// Firebase /stats/records/{userId}: {w, l, d, lastTs}
+// 한 화면당 1회 batch fetch로 캐싱 (5초 TTL) — Hall/Intro에서 공용.
+const _recordsCache = { data: null, ts: 0, TTL_MS: 5000 };
+async function fetchAllRecords(force){
+  if(!FB) return null;
+  const now = Date.now();
+  if(!force && _recordsCache.data && (now - _recordsCache.ts) < _recordsCache.TTL_MS){
+    return _recordsCache.data;
+  }
+  try{
+    const all = await FB.get('stats/records');
+    _recordsCache.data = all || {};
+    _recordsCache.ts = now;
+    return _recordsCache.data;
+  }catch(_){
+    return _recordsCache.data || {};
+  }
+}
+// 단일 사용자 record (FB 1회 조회) — 인트로처럼 2-3명만 필요할 때
+async function fetchUserRecord(uid){
+  if(!FB) return {w:0,l:0,d:0};
+  try{ return (await FB.get(`stats/records/${uid}`)) || {w:0,l:0,d:0}; }
+  catch(_){ return {w:0,l:0,d:0}; }
+}
+// 미니 W-L 칩 HTML — Hall 사다리·글로벌랭킹·인트로 공용
+// size: 'tiny' (10.5px) | 'small' (12px) | 'large' (17px)
+function recordChip(rec, size){
+  const r = rec || {w:0,l:0,d:0};
+  const w = r.w||0, l = r.l||0, d = r.d||0;
+  const total = w + l + d;
+  if(total === 0){
+    if(size === 'large') return '<span style="font-size:11px;color:var(--gutong);font-style:italic">無 戰績</span>';
+    return '';
+  }
+  const winRate = total > 0 ? Math.round(w/total*100) : 0;
+  if(size === 'large'){
+    return `<span style="display:inline-flex;gap:4px;align-items:center;font-size:11px;color:var(--mo-l);font-weight:600;letter-spacing:.03em">
+      <b style="color:var(--feicui)">${w}勝</b>
+      ${l>0?`<b style="color:var(--zhusha)">${l}敗</b>`:''}
+      ${d>0?`<b style="color:var(--gutong)">${d}和</b>`:''}
+      <span style="color:var(--gutong);font-weight:400">(${winRate}%)</span>
+    </span>`;
+  }
+  // tiny/small — 한 줄에 압축
+  const fs = size === 'small' ? '11px' : '10px';
+  return `<span style="font-size:${fs};color:var(--gutong);margin-left:4px;white-space:nowrap"
+    title="${w}勝 ${l}敗 ${d}和 · 승률 ${winRate}%">
+    <b style="color:var(--feicui);font-weight:700">${w}</b>·<b style="color:var(--zhusha);font-weight:700">${l}</b>${d?`·<b style="color:var(--gutong)">${d}</b>`:''}
+  </span>`;
+}
 
 // ───── 7. 라우팅 ─────────────────────────────────────────────────────────────
 function setTab(name){
@@ -1001,6 +1198,8 @@ function openPurchaseDialog(p){
 
 // ───── 10. 명예의 전당 ──────────────────────────────────────────────────────
 function renderHall(){
+  // v3: 大廳 진입 시 ambient BGM 자동 재생 시도 (user-gesture 후·사용자 OFF 의도 없을 때만)
+  try{ bgm.autoStartAmbient(); }catch(_){}
   const rk = getRank(S.qi);
   const nxt = getNextRank(S.qi);
   const prog = getRankProgress(S.qi);
@@ -1030,6 +1229,8 @@ function renderHall(){
           ${nxt?`<span>다음: <b class="han">${esc(nxt.han)}</b> (${nxt.cost.toLocaleString()} 氣)</span>`:`<span><b>최고 등급</b></span>`}
         </div>
         <div class="rank-bar"><div class="rank-bar-fill" style="width:${(prog*100).toFixed(1)}%"></div></div>
+        <!-- v3: 내 전적 -->
+        <div id="my-record" style="margin-top:6px;text-align:right;min-height:14px"></div>
       </div>
     </div>
 
@@ -1093,17 +1294,26 @@ function renderHall(){
     </div>` : ''}
   `;
   view.innerHTML = html;
-  loadGlobalRank();
-  loadLadderUsers();
+  // v3: 사용자별 전적 — 한 번 fetch해서 3곳(내 카드/사다리/글로벌)에 분배
+  (async () => {
+    const recs = (FB ? (await fetchAllRecords(true)) : null) || {};
+    const myEl = document.getElementById('my-record');
+    if(myEl){
+      myEl.innerHTML = recordChip(recs[S.userId] || {w:0,l:0,d:0}, 'large');
+    }
+    loadGlobalRank(recs);
+    loadLadderUsers(recs);
+  })();
 }
 
-// 등급 사다리 각 행에 해당 등급에 오른 사용자 표시 (v2.2)
-async function loadLadderUsers(){
+// 등급 사다리 각 행에 해당 등급에 오른 사용자 표시 (v2.2) — v3: 전적 inline
+async function loadLadderUsers(recs){
   if(!FB){
     $$('.ladder-users').forEach(el => { el.innerHTML = '<span class="ladder-user-empty">오프라인</span>'; });
     return;
   }
   const all = await FB.get('presence');
+  const rs = recs || {};
   $$('.ladder-users').forEach(el => {
     const min = parseInt(el.dataset.min) || 0;
     const max = el.dataset.max ? parseInt(el.dataset.max) : Infinity;
@@ -1120,17 +1330,20 @@ async function loadLadderUsers(){
     el.innerHTML = matched.slice(0, 18).map(p => {
       const isMe = p.uid === S.userId;
       const med = _charMedallion(p.character || 'qibo', 18);
-      return `<span class="ladder-user-chip ${isMe?'is-me':''}" title="${esc(p.name||'')} · ${(p.qi||0).toLocaleString()} 氣">
-        ${med}<span class="nm">${esc(p.name||'익명')}${isMe?'(나)':''}</span>
+      const rec = rs[p.uid];
+      const recHtml = rec ? recordChip(rec, 'tiny') : '';
+      return `<span class="ladder-user-chip ${isMe?'is-me':''}" data-uid="${esc(p.uid)}" title="${esc(p.name||'')} · ${(p.qi||0).toLocaleString()} 氣">
+        ${med}<span class="nm">${esc(p.name||'익명')}${isMe?'(나)':''}${recHtml}</span>
       </span>`;
     }).join('') + (matched.length > 18 ? `<span class="ladder-user-empty" style="font-style:normal">+${matched.length-18}명</span>` : '');
   });
 }
 
-async function loadGlobalRank(){
+async function loadGlobalRank(recs){
   const el = $('#global-rank-list'); if(!el || !FB) return;
   const all = await FB.get('presence');
   if(!all){ el.innerHTML = '아직 학습자가 없습니다.'; return; }
+  const rs = recs || {};
   const list = Object.entries(all)
     .map(([uid, p]) => ({uid, ...p}))
     .sort((a,b) => (b.qi||0) - (a.qi||0))
@@ -1139,10 +1352,13 @@ async function loadGlobalRank(){
     const r = getRank(p.qi||0);
     const med = _charMedallion(p.character || 'qibo', 26);
     const isMe = p.uid === S.userId;
-    return `<div style="display:flex;align-items:center;gap:6px;padding:5px 6px;${isMe?'background:#FFF8E0;':''}border-radius:4px;text-align:left">
+    const rec = rs[p.uid];
+    const recHtml = rec ? recordChip(rec, 'small') : '';
+    return `<div class="global-rank-row" data-uid="${esc(p.uid)}" style="display:flex;align-items:center;gap:6px;padding:5px 6px;${isMe?'background:#FFF8E0;':''}border-radius:4px;text-align:left;flex-wrap:wrap">
       <span style="width:22px;text-align:center;font-family:var(--font-display);font-size:14px;color:${i<3?'var(--zhusha-d)':'var(--gutong)'}">${i+1}</span>
       ${med}
-      <span style="flex:1;font-weight:600;color:var(--mo)">${esc(p.name||'익명')}${isMe?' (나)':''}</span>
+      <span style="flex:1;min-width:0;font-weight:600;color:var(--mo)">${esc(p.name||'익명')}${isMe?' (나)':''}</span>
+      <span class="rec-slot" style="font-size:11px">${recHtml}</span>
       <span class="han" style="font-size:11px;color:${r.color}">${esc(r.han)}</span>
       <span class="seal" style="font-size:12px;color:var(--zhusha-d)">${(p.qi||0).toLocaleString()}</span>
     </div>`;
@@ -1625,6 +1841,8 @@ function renderBattleIntro(room, onContinue){
           </div>
         </div>
         <div class="intro-name">${esc(opp.name)}</div>
+        <!-- v3: 전적 칩 -->
+        <div class="intro-record" data-uid="${esc(oppId)}" style="margin-top:4px;min-height:16px"></div>
         <div class="intro-charname"><span class="han">${esc(oppChar.han)}</span> · ${esc(oppChar.work_han)}</div>
       </div>
 
@@ -1645,6 +1863,8 @@ function renderBattleIntro(room, onContinue){
           </div>
         </div>
         <div class="intro-name">${esc(me.name)}</div>
+        <!-- v3: 전적 칩 -->
+        <div class="intro-record" data-uid="${esc(S.userId)}" style="margin-top:4px;min-height:16px"></div>
         <div class="intro-charname"><span class="han">${esc(meChar.han)}</span> · ${esc(meChar.work_han)}</div>
         <div style="font-size:11px;color:var(--zhusha-d);font-weight:600;letter-spacing:.08em;margin-top:6px">▲ 나</div>
       </div>
@@ -1654,6 +1874,15 @@ function renderBattleIntro(room, onContinue){
       </div>
     </div>
   `;
+  // v3: 양측 전적 비동기 로드 (인트로 차단 X — 5초 안에 도착하면 표시, 못 오면 빈칸)
+  if(FB){
+    Promise.all([fetchUserRecord(S.userId), fetchUserRecord(oppId)]).then(([mr, or]) => {
+      const meEl = view.querySelector(`.intro-record[data-uid="${CSS.escape(S.userId)}"]`);
+      const opEl = view.querySelector(`.intro-record[data-uid="${CSS.escape(oppId)}"]`);
+      if(meEl) meEl.innerHTML = recordChip(mr, 'large');
+      if(opEl) opEl.innerHTML = recordChip(or, 'large');
+    }).catch(_=>{});
+  }
   let advanced = false;
   const advance = () => { if(advanced) return; advanced = true; clearTimeout(tm); onContinue(); };
   $('#intro-skip').addEventListener('click', advance);
@@ -1690,6 +1919,8 @@ async function renderBattleGame(roomId){
         const i = +b.dataset.i;
         const correct = i === (q.answer||0);
         if(correct) myScore++;
+        // v3: 선지 효과음
+        try{ correct ? bgm.sfxCorrect() : bgm.sfxWrong(); }catch(_){}
         answers.push({q: curQ, choice:i, correct});
         // 정답 표시
         $$('.btn[data-i]').forEach(x => {
@@ -1720,20 +1951,60 @@ async function renderBattleGame(roomId){
     view.innerHTML = `
       <h2 class="view-title"><span class="han">候</span>판정 대기</h2>
       <div style="text-align:center;margin:40px 0">${taijiSVG(80, true)}
-      <div style="margin-top:12px;color:var(--mo-l);font-size:12px" id="judging-status">상대 결과 대기…</div></div>
+      <div style="margin-top:12px;color:var(--mo-l);font-size:12px" id="judging-status">상대 결과 대기…</div>
+      <div style="margin-top:4px;color:var(--gutong);font-size:10.5px" id="judging-sub"></div></div>
     `;
-    // 내 점수 기록
-    await FB.put(`battles/${roomId}/players/${S.userId}/score`, myScore);
-    await FB.put(`battles/${roomId}/players/${S.userId}/done`, true);
-    // 폴링 — 최대 30초 대기 후 강제 종료 (상대 disconnect 시 부전승)
-    const MAX_TRIES = 20;
+    // 내 점수 기록 — v3: putRetry로 네트워크 jitter에 견딤 (FB.putRetry 없으면 put fallback)
+    const putReliable = (path, val) => {
+      if(FB && typeof FB.putRetry === 'function') return FB.putRetry(path, val);
+      return FB.put(path, val);
+    };
+    try{
+      await putReliable(`battles/${roomId}/players/${S.userId}/score`, myScore);
+      await putReliable(`battles/${roomId}/players/${S.userId}/done`, true);
+    }catch(e){
+      // 업로드 자체 실패 — 로컬 정산만으로 진행 (방 미존재 처리)
+      toast('점수 기록 실패 — 로컬 환불 처리', 'red');
+      S.qi += room.bet;
+      saveState(); refreshHeader();
+      bgm.stopBattle();
+      setTab('hall');
+      return;
+    }
+    // v3: 폴링 50 × 1500ms = 75초 (handover 명시)
+    // 추가: FB.get 3회 연속 실패 → 5초 내 disconnect 간주, 부전승 처리
     const POLL_MS = 1500;
+    const MAX_TRIES = 50;
+    const DISCONNECT_FAILS = 3;       // 연속 FB.get 실패 임계
+    const FORFEIT_AFTER_FAIL_MS = 5000;
     let tries = 0;
+    let consecutiveFails = 0;
+    let firstFailTs = 0;
     async function pollEnd(){
       tries++;
-      const r = await FB.get(`battles/${roomId}`);
+      let r = null;
+      try{
+        r = await FB.get(`battles/${roomId}`);
+        consecutiveFails = 0;
+        firstFailTs = 0;
+      }catch(e){
+        consecutiveFails++;
+        if(firstFailTs === 0) firstFailTs = Date.now();
+        if(consecutiveFails >= DISCONNECT_FAILS && Date.now() - firstFailTs >= FORFEIT_AFTER_FAIL_MS){
+          // 네트워크 부재 → 로컬 환불 (안전한 fallback, 패배 처리 안 함)
+          S.qi += room.bet;
+          saveState(); refreshHeader();
+          bgm.stopBattle();
+          toast('연결 끊김 — 베팅 환불', 'gold');
+          setTab('hall');
+          return;
+        }
+        // 일시적 실패는 폴링 계속
+        setTimeout(pollEnd, POLL_MS);
+        return;
+      }
       if(!r){
-        // 방이 사라짐 → 패배 처리 안 함, 환불 (에스크로 복구)
+        // 방이 사라짐 → 환불 (에스크로 복구)
         S.qi += room.bet;
         saveState(); refreshHeader();
         bgm.stopBattle();
@@ -1748,20 +2019,22 @@ async function renderBattleGame(roomId){
         return;
       }
       if(tries > MAX_TRIES){
-        // 상대 타임아웃 → 부전승 (forfeit)
+        // 75초 경과 — 상대 응답 없음 → 부전승 (forfeit)
         showResult(r, true);
         return;
       }
       const elapsed = tries * POLL_MS / 1000;
       const st = $('#judging-status');
-      if(st) st.textContent = `상대 결과 대기… (${elapsed.toFixed(0)}초)`;
+      const sub = $('#judging-sub');
+      if(st) st.textContent = `상대 결과 대기… (${elapsed.toFixed(0)}/${(MAX_TRIES*POLL_MS/1000).toFixed(0)}초)`;
+      if(sub) sub.textContent = `${MAX_TRIES*POLL_MS/1000-elapsed}초 후 자동 부전승 처리`;
       setTimeout(pollEnd, POLL_MS);
     }
     pollEnd();
   }
 
   async function showResult(room, forfeit){
-    bgm.stopBattle();  // 戰鬪 BGM 종료 → ambient 복귀
+    bgm.stopBattle();  // 戰鬪 BGM 종료 후 → 승/패 BGM 전환
     const players = room.players;
     const me = players[S.userId];
     const oppId = Object.keys(players).find(k => k !== S.userId);
@@ -1786,7 +2059,7 @@ async function renderBattleGame(roomId){
     // 氣 정산 (에스크로 후 추가 조정)
     S.qi += qiAdjust;
     if(S.qi < 0) S.qi = 0;
-    // 배틀 히스토리
+    // 배틀 히스토리 (로컬)
     S.battleHistory = S.battleHistory || [];
     S.battleHistory.unshift({
       ts: Date.now(), win: outcome === 'win', draw: outcome === 'draw', forfeit: !!forfeit,
@@ -1796,43 +2069,74 @@ async function renderBattleGame(roomId){
     });
     if(S.battleHistory.length > 20) S.battleHistory = S.battleHistory.slice(0, 20);
     saveState(); refreshHeader();
+
+    // v3: 전역 W-L 기록 — 양측 모두 increment (winner 본인이 쓰지만 안전을 위해 본인 것만 씀)
+    //     상대 측은 상대 클라이언트가 자기 결과 화면에서 자기 record를 갱신함.
+    //     무승부는 양측 모두 d++. forfeit 패배자는 클라이언트가 안 떠 있으므로 적용 안 됨 (게임이론상 적절).
+    if(FB){
+      try{
+        const cur = (await FB.get(`stats/records/${S.userId}`)) || {w:0, l:0, d:0};
+        const upd = {
+          w: (cur.w||0) + (outcome === 'win' ? 1 : 0),
+          l: (cur.l||0) + (outcome === 'lose' ? 1 : 0),
+          d: (cur.d||0) + (outcome === 'draw' ? 1 : 0),
+          lastTs: Date.now()
+        };
+        await FB.put(`stats/records/${S.userId}`, upd);
+      }catch(_){ /* 기록 실패해도 게임은 계속 */ }
+    }
+
     // 방 정리 (생성자만)
     if(_battle && _battle.isCreator){
       setTimeout(() => FB.del(`battles/${roomId}`), 5000);
     }
 
+    // v3: 승/패 BGM 전환
+    try{
+      if(outcome === 'win') bgm.startVictory();
+      else if(outcome === 'lose') bgm.startDefeat();
+      // 무승부는 ambient 유지 — stopBattle()이 이미 ambient로 돌렸음
+    }catch(_){}
+
     const meChar = PHYSICIAN_BY_ID[me.character];
     const oppChar = PHYSICIAN_BY_ID[opp.character];
     const titleHan = outcome === 'win' ? '勝' : (outcome === 'lose' ? '敗' : '和');
     const titleKo = outcome === 'win' ? (forfeit?'부전승':'승리') : (outcome === 'lose' ? '패배' : '무승부');
+    // v3: 가운데 한자 색상 — 승=#FFD700(huang), 패=#444(dim), 무=gutong
+    const centerColor = outcome === 'win' ? '#FFD700' : (outcome === 'lose' ? '#444' : 'var(--gutong)');
+    const centerShadow = outcome === 'win'
+      ? '0 0 20px rgba(255,215,0,.55), 0 0 6px rgba(255,215,0,.9)'
+      : (outcome === 'lose' ? '0 0 18px rgba(0,0,0,.5)' : 'none');
+
     view.innerHTML = `
       <h2 class="view-title fade-in"><span class="han">${titleHan}</span>${esc(titleKo)}</h2>
-      <div class="card imperial fade-in" style="text-align:center;padding:24px 14px">
-        <div class="seal-stamp big" style="background:${outcome==='win'?'var(--huang)':(outcome==='lose'?'var(--zhusha-d)':'var(--gutong)')};color:var(--mi-w);margin:0 auto 12px">${titleHan}</div>
-        <div style="font-size:30px;font-family:var(--font-display);color:${deltaQi>0?'var(--feicui)':(deltaQi<0?'var(--zhusha)':'var(--gutong)')}">
-          ${deltaQi>0?'+':''}${deltaQi} 氣
-        </div>
-        <div style="margin-top:6px;font-size:13px;color:var(--mo-l)">베팅 ${bet.toLocaleString()} 氣 · 현재 ${S.qi.toLocaleString()} 氣${forfeit?'<br><span style="color:var(--gutong);font-size:11px;font-style:italic">(상대 응답 없음 — 부전승)</span>':''}</div>
-      </div>
-      <div class="card fade-in" style="margin-top:14px">
-        <div class="card-title"><span class="han">戰況</span> 결과</div>
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--mi-d)">
-          ${_charMedallion(meChar, 40)}
-          <div style="flex:1">
-            <div style="font-weight:600;color:var(--mo)">${esc(me.name)} (나)</div>
-            <div style="font-size:11px;color:var(--gutong)"><span class="han">${esc(meChar?.han||'')}</span></div>
+
+      <!-- v3: 메달리온 ─ 한자 ─ 메달리온 (가로 정렬) -->
+      <div class="card imperial fade-in" style="padding:22px 12px 18px">
+        <div style="display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:nowrap">
+          <div style="flex:1;text-align:center;min-width:0">
+            <div style="display:inline-block;border:2px solid ${outcome==='win'?'var(--huang)':'var(--mi-d)'};border-radius:50%;padding:3px;${outcome==='win'?'box-shadow:0 0 14px rgba(201,162,39,.5)':''}">${_charPhotoMedallion(meChar, 78)}</div>
+            <div style="font-weight:700;color:var(--mo);margin-top:6px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(me.name)} <span style="color:var(--zhusha);font-size:10px">(나)</span></div>
+            <div class="seal" style="font-size:26px;color:${outcome==='win'?'var(--huang)':'var(--mo-l)'};margin-top:2px">${me.score}</div>
           </div>
-          <div class="seal" style="font-size:22px;color:var(--zhusha-d)">${me.score}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 0">
-          ${_charMedallion(oppChar, 40)}
-          <div style="flex:1">
-            <div style="font-weight:600;color:var(--mo)">${esc(opp.name)}</div>
-            <div style="font-size:11px;color:var(--gutong)"><span class="han">${esc(oppChar?.han||'')}</span></div>
+          <div style="flex:0 0 auto;text-align:center">
+            <div style="font-family:var(--font-display);font-size:64px;line-height:1;color:${centerColor};text-shadow:${centerShadow};font-weight:900;letter-spacing:0">${titleHan}</div>
+            <div style="font-size:10.5px;color:var(--gutong);margin-top:6px;letter-spacing:.1em">${room.bet.toLocaleString()} 氣</div>
           </div>
-          <div class="seal" style="font-size:22px;color:var(--zhusha-d)">${opp.score||0}${forfeit?' <span style="font-size:10px;color:var(--gutong)">(미응답)</span>':''}</div>
+          <div style="flex:1;text-align:center;min-width:0">
+            <div style="display:inline-block;border:2px solid ${outcome==='lose'?'var(--huang)':'var(--mi-d)'};border-radius:50%;padding:3px;${outcome==='lose'?'box-shadow:0 0 14px rgba(201,162,39,.5)':''}">${_charPhotoMedallion(oppChar, 78)}</div>
+            <div style="font-weight:700;color:var(--mo);margin-top:6px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(opp.name)}</div>
+            <div class="seal" style="font-size:26px;color:${outcome==='lose'?'var(--huang)':'var(--mo-l)'};margin-top:2px">${opp.score||0}${forfeit?'<span style="font-size:9px;color:var(--gutong)"> (미응답)</span>':''}</div>
+          </div>
+        </div>
+        <div style="text-align:center;margin-top:16px;padding-top:14px;border-top:1px solid var(--mi-d)">
+          <div style="font-size:30px;font-family:var(--font-display);color:${deltaQi>0?'var(--feicui)':(deltaQi<0?'var(--zhusha)':'var(--gutong)')}">
+            ${deltaQi>0?'+':''}${deltaQi} 氣
+          </div>
+          <div style="margin-top:4px;font-size:12px;color:var(--mo-l)">현재 ${S.qi.toLocaleString()} 氣${forfeit?'<br><span style="color:var(--gutong);font-size:10.5px;font-style:italic">(상대 응답 없음 — 부전승)</span>':''}</div>
         </div>
       </div>
+
       <div style="display:flex;gap:6px;justify-content:center;margin-top:14px">
         <button class="btn" onclick="setTab('hall')">명예의 전당</button>
         <button class="btn btn-o" onclick="openBattleLobby()">다시 對決</button>
@@ -1894,7 +2198,7 @@ async function renderStatDetail(kind){
 //   ⑤ 君藥 빈도 — 全 처방의 君藥 TOP
 async function renderFormulaIndex(det){
   const formulas = (typeof FORMULAS    !== 'undefined') ? FORMULAS    : [];
-  const exams    = (typeof PAST_EXAMS  !== 'undefined') ? PAST_EXAMS  : [];
+  const exams    = (typeof PAST_EXAMS !== 'undefined') ? ((typeof BULK_QUESTIONS !== 'undefined') ? [...PAST_EXAMS, ...BULK_QUESTIONS] : PAST_EXAMS) : [];
   if(!formulas.length){
     det.innerHTML = `<div class="card"><div class="card-title"><span class="han">析</span> 처방별 분석</div><div style="font-size:12.5px;color:var(--gutong);text-align:center;padding:16px">data-formulas.js 의 FORMULAS 가 필요합니다.</div></div>`;
     return;
@@ -2204,7 +2508,7 @@ async function renderWrongsRank(det){
     det.innerHTML = `<div class="card"><div class="card-title"><span class="han">難題</span> 전체 오답 랭킹</div><div style="font-size:12.5px;color:var(--gutong);text-align:center;padding:16px">아직 데이터가 없습니다. 객관식 풀이를 시작하세요.</div></div>`;
     return;
   }
-  const exams = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const exams = (typeof PAST_EXAMS !== 'undefined') ? ((typeof BULK_QUESTIONS !== 'undefined') ? [...PAST_EXAMS, ...BULK_QUESTIONS] : PAST_EXAMS) : [];
   const byId = new Map(exams.map(e => [e.id, e]));
   const list = Object.entries(wrongs)
     .map(([qid, count]) => ({qid, count: Number(count)||0}))
@@ -2314,7 +2618,7 @@ function openWrongDetailModal(ex, globalCount){
 // ─── 기출 분석 v2.2 ──────────────────────────────────────────────────────
 // 모든 년도 기출 + 유형·章·처방·난이도별 분포. sub-tabs 로 5종 차트 전환.
 function renderExamAnalysis(det){
-  const exams = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const exams = (typeof PAST_EXAMS !== 'undefined') ? ((typeof BULK_QUESTIONS !== 'undefined') ? [...PAST_EXAMS, ...BULK_QUESTIONS] : PAST_EXAMS) : [];
   if(!exams.length){
     det.innerHTML = `<div class="card"><div class="card-title"><span class="han">問</span> 기출 분석</div><div style="font-size:12.5px;color:var(--gutong);text-align:center;padding:16px">data-formulas.js 에 PAST_EXAMS 배열이 필요합니다.</div></div>`;
     return;
@@ -2423,7 +2727,7 @@ function renderExamAnalysis(det){
 
 // v2.2.2: 처방별 심층 분석 — 모달 (구성·작용·기출 문제·유형 분포·글로벌 오답률)
 async function openFormulaDeep(formulaName){
-  const exams    = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const exams    = (typeof PAST_EXAMS !== 'undefined') ? ((typeof BULK_QUESTIONS !== 'undefined') ? [...PAST_EXAMS, ...BULK_QUESTIONS] : PAST_EXAMS) : [];
   const formulas = (typeof FORMULAS    !== 'undefined') ? FORMULAS    : [];
   // 처방 데이터 (한글명 매칭 — 가감방은 ko 와 정확히 일치, 변형은 contains)
   const f = formulas.find(x => x.ko === formulaName) ||
@@ -2992,7 +3296,7 @@ const DIFFICULTY_META = {
 window.DIFFICULTY_META = DIFFICULTY_META;
 
 function renderQuiz(){
-  const exams = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const exams = (typeof PAST_EXAMS !== 'undefined') ? ((typeof BULK_QUESTIONS !== 'undefined') ? [...PAST_EXAMS, ...BULK_QUESTIONS] : PAST_EXAMS) : [];
   const formulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
   if(!exams.length && !formulas.length){
     view.innerHTML = `
@@ -3126,7 +3430,7 @@ window.startQuizSession = function(mode, diff, count){
   mode  = mode  || 'mixed';
   diff  = diff  || 1;
   count = count || 5;
-  const exams = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const exams = (typeof PAST_EXAMS !== 'undefined') ? ((typeof BULK_QUESTIONS !== 'undefined') ? [...PAST_EXAMS, ...BULK_QUESTIONS] : PAST_EXAMS) : [];
 
   // 풀 빌드
   let pool = [];
@@ -3207,6 +3511,8 @@ window.startQuizSession = function(mode, diff, count){
       const i = +b.dataset.i;
       const correct = i === (q.answer||0);
       if(correct) score++;
+      // v3: 선지 효과음
+      try{ correct ? bgm.sfxCorrect() : bgm.sfxWrong(); }catch(_){}
       $$('.quiz-opt').forEach(x => {
         x.disabled = true;
         if(+x.dataset.i === (q.answer||0)){ x.style.background='var(--feicui)'; x.style.color='var(--mi-w)'; x.style.borderColor='transparent'; }
@@ -3464,7 +3770,7 @@ function generateQuizQuestions(n, diff){
 
 // 배틀용 (기존 호환)
 function generateBattleQuestions(n){
-  const exams = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
+  const exams = (typeof PAST_EXAMS !== 'undefined') ? ((typeof BULK_QUESTIONS !== 'undefined') ? [...PAST_EXAMS, ...BULK_QUESTIONS] : PAST_EXAMS) : [];
   // 배틀은 중급 위주 + 일부 기출
   const out = generateQuizQuestions(Math.ceil(n/2), 2);
   const past = (exams.filter(e => (e.difficulty||1) <= 2)).sort(()=>Math.random()-0.5).slice(0, Math.floor(n/2));
@@ -3503,6 +3809,20 @@ function init(){
   };
   window.addEventListener('pagehide', unloadCleanup);
   window.addEventListener('beforeunload', unloadCleanup);
+
+  // v3: 첫 user-gesture 감지 — AudioContext.resume()이 안전해지는 시점.
+  //     capture phase에서 1회만 잡고 제거. 이후 hall 진입 시 BGM 자동 재생 가능.
+  const markGesture = () => {
+    bgm.userGestureSeen = true;
+    document.removeEventListener('pointerdown', markGesture, true);
+    document.removeEventListener('keydown', markGesture, true);
+    // 사용자가 명시적으로 BGM을 끈 적이 없고, 현재 hall 화면이면 즉시 시작
+    if(!bgm.userDisabled && !bgm.on && (S.lastTab === 'hall' || S.lastTab === 'home')){
+      try{ bgm.autoStartAmbient(); }catch(_){}
+    }
+  };
+  document.addEventListener('pointerdown', markGesture, true);
+  document.addEventListener('keydown', markGesture, true);
 }
 
 document.addEventListener('DOMContentLoaded', init);

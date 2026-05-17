@@ -1,7 +1,7 @@
 {
   "name": "方劑學 — 神農의 방",
   "short_name": "方劑",
-  "description": "中華 帝王風 방제학 학습 PWA — 51의가·9등급·멀티 對決 (v2.2)",
+  "description": "中華 帝王風 방제학 학습 PWA — 51의가·9등급·멀티 對決 (v3)",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
