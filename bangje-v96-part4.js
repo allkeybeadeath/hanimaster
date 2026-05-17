@@ -80,6 +80,13 @@ async function start(numAi){
   _aiUids.forEach(u => { _room._formulationScore[u] = 0; });
   _started = true;
   _setupBridge();
+  if(!_origMethods){
+    // v9.6.4: bridge 설치 실패 시 즉시 정리 — _started 잔존 방지
+    toast_('AI bridge 설치 실패','red');
+    _started = false;
+    _room = null; _rid = null; _aiUids = [];
+    return;
+  }
   if(window.V96Activity) V96Activity.set('AI 방미큐브', `${1 + numAi}人 對局`);
 
   // BC 모듈로 입장
@@ -147,9 +154,12 @@ function _selfStart(){
 }
 
 function _setupBridge(){
-  if(_origMethods) return;
-  const F = window.FB;
-  if(!F){ console.warn('[V96CubeAI] window.FB 없음'); return; }
+  if(_origMethods) return true;
+  // v9.6.4 FIX: app.js 의 `const FB` 는 classic script global lexical binding 으로
+  //   `window.FB` 프로퍼티로는 노출되지 않음. bangje-cube.js 와 동일하게
+  //   `typeof FB !== 'undefined' && FB` 로 접근해야 함.
+  const F = (typeof FB !== 'undefined' && FB) || null;
+  if(!F){ console.warn('[V96CubeAI] FB 전역 없음 — bridge 설치 불가'); return false; }
   _origMethods = {
     get: F.get, put: F.put, putRetry: F.putRetry,
     del: F.del, push: F.push, subscribe: F.subscribe,
@@ -246,7 +256,7 @@ function _setupBridge(){
 
 function _teardownBridge(){
   if(!_origMethods) return;
-  const F = window.FB;
+  const F = (typeof FB !== 'undefined' && FB) || null;
   if(F){
     F.get = _origMethods.get;
     F.put = _origMethods.put;

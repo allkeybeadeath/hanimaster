@@ -104,6 +104,13 @@ async function start(){
     chat: {},
   };
   _setupBridge();
+  if(!_origMethods){
+    // v9.6.4: bridge 설치 실패 시 즉시 정리 — _started 잔존 방지
+    toast_('AI bridge 설치 실패','red');
+    _started = false;
+    _roomRef = null; _roomId = null; _aiUid = null; _meUid = null;
+    return;
+  }
   if(window.V96Activity) V96Activity.set('AI 카드 對決', `vs ${aiP.han}`);
 
   try{
@@ -168,12 +175,13 @@ function _notify(){
 let _notifyPending = false;
 
 function _setupBridge(){
-  if(_origMethods) return;
-  const F = window.FB;
-  if(!F){ console.warn('[V96CardAI] window.FB 없음'); return; }
-  // app.js 의 `const FB` 와 `window.FB` 는 동일 객체. 메소드 자체를 패치하면
-  // 양쪽 참조 모두 패치된 메소드를 사용. 객체 reference 교체는 const 캡쳐를
-  // 우회 못함 → 핵심 픽스.
+  if(_origMethods) return true;
+  // v9.6.4 FIX: app.js 의 `const FB` 는 classic script global lexical binding 으로
+  //   `window.FB` 프로퍼티로는 노출되지 않음. bangje-cube.js 와 동일하게
+  //   `typeof FB !== 'undefined' && FB` 로 접근해야 함.
+  //   객체 reference 는 같으므로 메소드 패치로 양쪽 모두 가로채는 전략은 유효.
+  const F = (typeof FB !== 'undefined' && FB) || null;
+  if(!F){ console.warn('[V96CardAI] FB 전역 없음 — bridge 설치 불가'); return false; }
   _origMethods = {
     get: F.get, put: F.put, putRetry: F.putRetry,
     del: F.del, push: F.push, subscribe: F.subscribe,
@@ -281,7 +289,7 @@ function _setupBridge(){
 
 function _teardownBridge(){
   if(!_origMethods) return;
-  const F = window.FB;
+  const F = (typeof FB !== 'undefined' && FB) || null;
   if(F){
     F.get = _origMethods.get;
     F.put = _origMethods.put;
