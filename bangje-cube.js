@@ -13,7 +13,7 @@
 // ──────────────────────────────────────────────────────────────────
 // 0. 상수
 // ──────────────────────────────────────────────────────────────────
-const BC_VER          = '1.1';
+const BC_VER          = '1.2';
 const HAND_4P         = 10;
 const HAND_23P        = 12;
 const PENALTY_DRAW    = 3;
@@ -173,17 +173,13 @@ function build(){
     for(const it of (obj.items||[])) for(const h of (it.herbs||[]).map(herbNorm).filter(x=>x))
       freq[h] = (freq[h]||0)+0.5;
   const proto = [];
-  // v9.7: 빈도 비례 분포 재조정 — 甘草(34회)·生薑(18.5)·白芍(17) 등이
-  //       기존 평탄 공식(f>=10이면 일률 4장)에 묻혀 실제 출현 비율과 어긋났음.
-  //       방제학 교과서 출현 빈도에 더 가깝게 5단계로 세분화.
+  // v10.0.3: 빈도 선형 비례 (계수 0.4) — 5단계 if-else 가 freq 차이를 뭉개버려서
+  //          甘草(34.5) 와 麻黃(8) 이 모두 cap 에 부딪힘. 선형으로 교체.
+  //          甘草→14장, 生薑→7, 桂枝→6, 人蔘→6, 白朮→5, 黃耆→4, 麻黃→3, freq=1→1장.
+  //          총 deck 246 → 약 280장. 손패에 甘草 0장 확률 75% → 52%.
+  //          한 본초 cap 15장 (deck 점유 과다 방지).
   for(const [h, f] of Object.entries(freq)){
-    let n;
-    if(f >= 25)      n = 7;     // 甘草 (34회 — 거의 모든 처방)
-    else if(f >= 15) n = 5;     // 生薑·白芍·茯苓·大棗
-    else if(f >= 10) n = 4;     // 當歸·桂枝·人蔘·白朮·川芎
-    else if(f >= 5)  n = 3;
-    else if(f >= 2)  n = 2;
-    else             n = 1;
+    const n = Math.max(1, Math.min(15, Math.round(f * 0.4)));
     for(let i=0;i<n;i++) proto.push(h);
   }
   _proto = proto;

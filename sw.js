@@ -10,7 +10,7 @@
  *   • 캐릭터 사진 → images/characters/ 폴더로 이동
  *   • 캐시 키 갱신
  */
-const CACHE = 'bangje-pwa-v10-0-2-2026-05';
+const CACHE = 'bangje-pwa-v10-0-3-2026-05';
 const PRECACHE = [
   './',
   './index.html',
@@ -45,6 +45,7 @@ const PRECACHE = [
   './bangje-v99-meridian-body.js',
   './bangje-v99-hotfix.js',
   './bangje-v99-herbtap.js',
+  './bangje-v99-cubesort.js',
   './data-physicians.js',
   './data-ranks.js',
   './data-factions.js',
@@ -60,8 +61,8 @@ const PRECACHE = [
   './icon-192.png',
   './icon-512.png',
   './apple-touch-icon.png',
-  './images/characters/shennong.png',
-  './images/characters/leesoonjae-medallion.jpeg'
+  './shennong.png',
+  './leesoonjae-medallion.jpeg'
 ];
 
 self.addEventListener('install', e => {

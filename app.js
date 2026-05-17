@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v10.0.2';                // ★ 로비 표시용 (2026-05) — 시진 시계·361穴·通明·본초 학습 토글
-const APP_BUILD   = '2026.05.18.v10.0.2';     // v10.0.2: 본초 단탭 학습 + 「+ 나머지 본초」
+const APP_VERSION = 'v10.0.3';                // ★ 로비 (2026-05) — 본초 드로어·甘草 비율·정렬·이미지 폴더없음·모달 토글
+const APP_BUILD   = '2026.05.18.v10.0.3';     // v10.0.3 통합
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 

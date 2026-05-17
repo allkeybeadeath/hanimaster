@@ -11,7 +11,17 @@ const V96_CSS = `
   margin-top:12px;
   overflow:hidden;
   font-family:var(--font-body);
+  /* v10.0.3: 채팅창은 모든 모달·드로어·alert 보다 아래 — 가리지 않게 */
+  position:relative;
+  z-index:0;
+  order:9999;  /* flex/grid 부모에서 가장 마지막 */
 }
+/* 채팅이 들어있는 board 영역이 flex 면 채팅이 자동으로 맨 아래로 */
+.cb-board, .bc-board, #view, #card-battle-view, #cube-view {
+  display: flex; flex-direction: column;
+}
+.cb-board > .chat-card, .bc-board > .chat-card,
+#view > .chat-card, [id$="-view"] > .chat-card { order: 9999; }
 .chat-card.collapsed .chat-body{ display:none; }
 .chat-head{
   display:flex; align-items:center; gap:6px;

@@ -700,7 +700,7 @@ if(typeof window !== 'undefined'){
 //
 // 한 이미지에 한 인물 사진만. 이순재 (게임 캐릭터) 는 로컬 jpeg.
 const _W = (n) => 'https://commons.wikimedia.org/wiki/Special:FilePath/' + n + '?width=320';
-const _LOCAL = (id, ext='jpg') => 'images/characters/' + id + '.' + ext;
+const _LOCAL = (id, ext='jpg') => id + '.' + ext;  // v10.0.3: 폴더 없이 루트 (호스팅 호환성)
 const CHARACTER_IMAGES = {
   // ═ 神階 (5인) ═ Wellcome 의가 시리즈 (검증됨) + 女媧 (한대 백화)
   huangdi:     { url: _LOCAL('huangdi'),     fallback: _W('Chinese_woodcut,_Famous_medical_figures;_The_Yellow_Emperor_Wellcome_L0039314.jpg'), caption: '黃帝 — Wellcome 의가 시리즈 (1601)', license: 'CC BY 4.0' },
@@ -771,7 +771,7 @@ const CHARACTER_IMAGES = {
   leejema:     { url: _LOCAL('leejema'),     fallback: _W('Lee_Je-ma.jpg'),                                                                        caption: '李濟馬 — 표준영정',                     license: 'PD-old' },
 
   // ═ 番外 (시트콤) ═
-  leesoonjae:  { url: 'images/characters/leesoonjae-medallion.jpeg',                                                                                caption: '이순재 — 거침없이 하이킥 (MBC 2006)',   license: 'fair-use, 개인 학습용' }
+  leesoonjae:  { url: 'leesoonjae-medallion.jpeg',                                                                                caption: '이순재 — 거침없이 하이킥 (MBC 2006)',   license: 'fair-use, 개인 학습용' }
 };
 
 if(typeof window !== 'undefined'){

@@ -28,6 +28,28 @@
 (function(){
 'use strict';
 
+// v10.0.3: 모달 alert 영구 해제 옵션 — 사용자가 alert pill 한 번 클릭하면
+// S.modalAlertDisabled=true 영속 저장, 이후 발동 안 함.
+const _v99CheckDisabled = () => {
+  try{ return !!(window.S && window.S.modalAlertDisabled); }catch(_){ return false; }
+};
+const _v99Dismiss = () => {
+  try{
+    if(window.S){ window.S.modalAlertDisabled = true; window.saveState && window.saveState(); }
+    document.querySelectorAll('.v98ma-pill, .v98ma-arrow, [class*="v98ma-"]').forEach(e => e.remove());
+    window.toast && window.toast('모달 알림 OFF', null);
+  }catch(_){}
+};
+// 단일 listener: 우리가 만든 alert pill 클릭 시 영구 dismiss
+document.addEventListener('click', e => {
+  if(!e.target || !e.target.closest) return;
+  if(e.target.closest('.v98ma-pill, [class*="v98ma-pill"]')){
+    e.preventDefault(); e.stopPropagation();
+    _v99Dismiss();
+  }
+}, true);
+
+
 let _enabled = true;
 let _activeAlert = null;
 let _hideTimer = null;
@@ -183,6 +205,7 @@ function _attachDismissOnInteract(modalEl){
   document.addEventListener('pointerdown', cleanup, true);
   // 모달이 사라지면 alert 도 자동 사라짐
   const obs = new MutationObserver(() => {
+  if(_v99CheckDisabled()) return;
     if(!document.body.contains(modalEl)){
       _dismiss();
       obs.disconnect();
