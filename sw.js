@@ -4,7 +4,7 @@
  *
  * v2.2: icon.svg 제거 (SVG 전면 폐기), 신농 아이콘으로 변경.
  */
-const CACHE = 'bangje-pwa-v9-3-2026-05';
+const CACHE = 'bangje-pwa-v9-4-2026-05';
 const PRECACHE = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const PRECACHE = [
   './data-ranks.js',
   './data-factions.js',
   './data-formulas.js',
+  './data-additions.js',
   './data-questions-bulk.js',
   './data-syndromes.js',
   './data-neijing.js',

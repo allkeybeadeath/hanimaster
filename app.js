@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v9.2';                  // ★ 로비 표시용 (2026-05) — v9.2 critical: publish fire-and-forget (호스트 자기 진입 hang 픽스)
+const APP_VERSION = 'v9.4';                  // ★ 로비 표시용 (2026-05) — 플래시카드 + 주관식 채점 (조성·효능·주치·가감) 추가
 const APP_BUILD   = '2026.05.17z';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
@@ -64,6 +64,10 @@ let S = {
   battleHistory: [],      // 최근 배틀 결과 (최대 20)
   cardBattleHistory: [],  // v8.5: 카드 對決 전적 (5지선다 별도)
   herbLang: 'han',        // v8.5: 본초 표시 언어 ('han'=한자 / 'ko'=한글)
+  // v9.4: 플래시카드 + 주관식
+  flashRated: {},                          // {key: 'easy'|'hard'|'again'} — Spaced repetition 표식
+  shortAnswerStats: {ok:0, ng:0, qi:0},    // 누적 주관식 통계
+  flashLang: 'han',                        // 플래시카드 표시 언어 ('han' | 'ko')
 };
 
 function loadState(){
@@ -96,6 +100,13 @@ function loadState(){
   // v8.5: 누적 필드 보강
   if(!Array.isArray(S.cardBattleHistory)) S.cardBattleHistory = [];
   if(!S.herbLang) S.herbLang = 'han';
+  // v9.4: 플래시카드 필드 보강
+  if(!S.flashRated || typeof S.flashRated !== 'object') S.flashRated = {};
+  if(!S.shortAnswerStats || typeof S.shortAnswerStats !== 'object') S.shortAnswerStats = {ok:0, ng:0, qi:0};
+  if(typeof S.shortAnswerStats.ok !== 'number') S.shortAnswerStats.ok = 0;
+  if(typeof S.shortAnswerStats.ng !== 'number') S.shortAnswerStats.ng = 0;
+  if(typeof S.shortAnswerStats.qi !== 'number') S.shortAnswerStats.qi = 0;
+  if(!S.flashLang) S.flashLang = 'han';
 }
 let _saveTimer = null;
 function saveState(){
@@ -1191,6 +1202,7 @@ const ROUTES = {
   formula: renderFormulas,
   herb: renderHerbs,
   quiz: renderQuiz,
+  flash: renderFlashHub,       // v9.4: 플래시카드 + 주관식 허브
   stats: renderStats,
   hall: renderHall,
   admin: renderAdminPanel,  // v8.2: PWA 내장 관리자 패널 (#admin URL 또는 hidden 진입)
@@ -1492,6 +1504,10 @@ function renderHome(){
       <button class="tile" type="button" onclick="setTab('herb')">
         <span class="han">本草</span><span class="ttl">약재</span>
         <span class="desc">80 약재 · 처방 역인덱스</span>
+      </button>
+      <button class="tile" type="button" onclick="setTab('flash')">
+        <span class="han">暗誦</span><span class="ttl">암기·주관식</span>
+        <span class="desc">처방·가감 플래시카드 · 조성 직접 입력 채점 <span style="background:var(--huang);color:var(--mo);padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;margin-left:2px">NEW</span></span>
       </button>
       <button class="tile" type="button" onclick="setTab('stats')">
         <span class="han">析究</span><span class="ttl">통계·분석</span>
@@ -5548,6 +5564,1076 @@ function startFormulaDrill(formulaId){
   render();
 }
 if(typeof window !== 'undefined') window.startFormulaDrill = startFormulaDrill;
+// ═══════════════════════════════════════════════════════════════════════════
+// v9.4 — 플래시카드 + 주관식 (Flashcard + Short Answer)
+// ═══════════════════════════════════════════════════════════════════════════
+// 구조:
+//   renderFlashHub()              — 허브 화면 (모드 선택 + 진행도 요약)
+//   startFlashFormula(scope)      — 처방 암기 카드 (조성/효능/주치/가감 順次)
+//   startFlashAddition(scope, t)  — 가감 카드 (증상 → 가감약물). t='mc'|'sa'
+//   startShortAnswer(scope)       — 주관식 (조성·효능·주치·군약·출전 입력)
+// 채점:
+//   normForGrade()        공백·구두점 제거, 한자 이체자 통일
+//   normHerbToken(s)      본초 1개 정규화 (한자/한글/별칭 → 정식 한자명)
+//   levenshtein(a, b)     편집 거리
+//   parseHerbList(text)   입력 문자열 → 본초 토큰 배열 (구분자 무관)
+//   gradeComposition()    조성 채점 (집합 비교 + 오타 허용)
+//   gradeShortText()      단일 텍스트 채점 (정규화 + 오타 허용)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── 채점용 정규화 헬퍼 ───────────────────────────────────────────────
+function normForGrade(s){
+  return String(s||'')
+    .replace(/[\s\u00A0\u2000-\u200B\u3000]/g, '')
+    .replace(/[,，。·．\.、:：;；\/\\\-_~`'"!?！？…\u2022\u00B7]/g, '')
+    .replace(/[\(\)（）\[\]【】「」『』〔〕]/g, '')
+    .toLowerCase();
+}
+
+function normHerbToken(token){
+  const cleaned = normForGrade(token);
+  if(!cleaned) return '';
+  const idx = (typeof HERB_NORM_INDEX !== 'undefined') ? HERB_NORM_INDEX : {};
+  if(idx[cleaned]) return idx[cleaned];
+  if(idx[token])   return idx[token];
+  const stripped = String(token).replace(/[\(（][^\)）]*[\)）]/g, '').replace(/^炙/,'');
+  if(idx[stripped]) return idx[stripped];
+  const strippedClean = normForGrade(stripped);
+  if(idx[strippedClean]) return idx[strippedClean];
+  return cleaned;
+}
+
+function levenshtein(a, b){
+  if(a === b) return 0;
+  const m = a.length, n = b.length;
+  if(!m) return n;
+  if(!n) return m;
+  let prev = new Array(n+1);
+  for(let j=0; j<=n; j++) prev[j] = j;
+  for(let i=1; i<=m; i++){
+    const cur = new Array(n+1);
+    cur[0] = i;
+    for(let j=1; j<=n; j++){
+      const cost = (a.charCodeAt(i-1) === b.charCodeAt(j-1)) ? 0 : 1;
+      cur[j] = Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+function herbsMatch(userTok, correctTok){
+  const u = normHerbToken(userTok);
+  const c = normHerbToken(correctTok);
+  if(!u || !c) return false;
+  if(u === c) return true;
+  // 1자 본초는 오타 허용 안 함
+  if(c.length <= 1 || u.length <= 1) return false;
+  // 정규화된 한자 레벨에서 1자 차이는 OK (간자체·번자체 이체자 흡수)
+  if(levenshtein(u, c) <= 1) return true;
+  // 별칭 레벨에서 같은-스크립트 1자 오타 허용 (예: 백출↔백술)
+  // c는 정식 한자명, 그 별칭 배열에 대해 사용자 raw 입력을 비교
+  const aliases = (typeof HERB_ALIASES !== 'undefined' && HERB_ALIASES[c]) || [];
+  const userRaw = normForGrade(userTok);
+  if(userRaw.length >= 2){
+    for(const a of aliases){
+      const ac = normForGrade(a);
+      if(!ac || ac.length < 2) continue;
+      if(userRaw === ac) return true;
+      if(levenshtein(userRaw, ac) <= 1) return true;
+    }
+  }
+  return false;
+}
+
+function parseHerbList(text){
+  if(!text) return [];
+  const rawTokens = String(text)
+    .replace(/[\(（][^\)）]*[\)）]/g, '')
+    .split(/[\s,，、·．\.\/\\\;；\+]+/)
+    .map(t => t.trim())
+    .filter(Boolean);
+  if(rawTokens.length >= 2) return rawTokens;
+  const idx = (typeof HERB_NORM_INDEX !== 'undefined') ? HERB_NORM_INDEX : {};
+  const aliasKeys = Object.keys(idx).sort((a,b) => b.length - a.length);
+  const blob = (rawTokens[0] || '').replace(/\s/g, '');
+  const out = [];
+  let rest = blob;
+  let safety = 50;
+  while(rest && safety-- > 0){
+    let matched = null;
+    for(const k of aliasKeys){ if(rest.startsWith(k)){ matched = k; break; } }
+    if(matched){
+      out.push(matched);
+      rest = rest.slice(matched.length);
+    } else {
+      return rawTokens.length ? rawTokens : (blob ? [blob] : []);
+    }
+  }
+  return out.length ? out : (rawTokens.length ? rawTokens : []);
+}
+
+function gradeComposition(userText, correctHerbs){
+  const userTokens = parseHerbList(userText).map(normHerbToken).filter(Boolean);
+  const userSet = Array.from(new Set(userTokens));
+  const correct = (correctHerbs || []).map(h =>
+    String(h).replace(/[\(（][^\)）]*[\)）]/g, '').replace(/^炙/, '').trim()
+  ).map(normHerbToken).filter(Boolean);
+  const correctSet = Array.from(new Set(correct));
+
+  const hits = [];
+  const missed = [];
+  const matchedUserIdx = new Set();
+  for(const c of correctSet){
+    let found = -1;
+    for(let i=0; i<userSet.length; i++){
+      if(matchedUserIdx.has(i)) continue;
+      if(herbsMatch(userSet[i], c)){ found = i; break; }
+    }
+    if(found >= 0){ hits.push(c); matchedUserIdx.add(found); }
+    else missed.push(c);
+  }
+  const extras = userSet.filter((_, i) => !matchedUserIdx.has(i));
+  const total = correctSet.length || 1;
+  const score = hits.length / total;
+  const ok = (missed.length === 0) && (extras.length === 0);
+  return { ok, hits, missed, extras, score };
+}
+
+function gradeShortText(userText, correct){
+  const u = normForGrade(userText);
+  if(!u) return { ok:false, dist: Infinity };
+  const candidates = Array.isArray(correct) ? correct : [correct];
+  let best = { ok:false, dist: Infinity };
+  for(const c of candidates){
+    const cc = normForGrade(c);
+    if(!cc) continue;
+    if(u === cc){ return { ok:true, dist:0 }; }
+    if(u.includes(cc) && cc.length >= 3){ return { ok:true, dist:0, partial:true }; }
+    if(cc.includes(u) && u.length >= cc.length * 0.8){ return { ok:true, dist:0, partial:true }; }
+    const tol = Math.max(1, Math.floor(cc.length * 0.15));
+    const d = levenshtein(u, cc);
+    if(d <= tol){ return { ok:true, dist:d }; }
+    if(d < best.dist) best = { ok:false, dist:d, nearest:c };
+  }
+  return best;
+}
+
+window.normHerbToken = normHerbToken;
+window.parseHerbList = parseHerbList;
+window.gradeComposition = gradeComposition;
+window.gradeShortText = gradeShortText;
+window.levenshtein = levenshtein;
+
+// ─── 플래시카드 / 주관식 공용 스타일 (1회만 주입) ──────────────────────
+function _injectFlashStyles(){
+  if(document.getElementById('flash-style')) return;
+  const st = document.createElement('style');
+  st.id = 'flash-style';
+  st.textContent = `
+    .flash-hub-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:8px}
+    .flash-mode-tile{background:var(--mi-w);border:1.5px solid var(--zhusha);border-radius:10px;
+                     padding:14px 12px;cursor:pointer;text-align:left;color:var(--mo);
+                     transition:transform .12s, box-shadow .12s;position:relative;overflow:hidden;
+                     font-family:var(--font-body);display:flex;flex-direction:column;gap:2px}
+    .flash-mode-tile:hover{transform:translateY(-1px);box-shadow:var(--sh-sm)}
+    .flash-mode-tile .ic{font-family:var(--font-display);font-size:20px;color:var(--zhusha);letter-spacing:.06em}
+    .flash-mode-tile .ttl{font-size:14px;font-weight:700;margin-top:2px}
+    .flash-mode-tile .desc{font-size:11.5px;color:var(--mo-l);margin-top:3px;line-height:1.4}
+    .flash-mode-tile.wide{grid-column:1/-1}
+    .flash-mode-tile.gold{background:linear-gradient(180deg,#FFF8DC 0%,#FFE08A 100%);border-color:var(--huang-d)}
+    .flash-mode-tile.gold .ic{color:var(--zhusha-d)}
+    .flash-progress{height:5px;background:var(--mi-d);border-radius:3px;overflow:hidden;margin:6px 0 14px}
+    .flash-progress-fill{height:100%;background:linear-gradient(90deg,var(--feicui),var(--huang));transition:width .3s ease}
+    .flash-card{background:var(--mi-w);border:1.5px solid var(--zhusha);border-radius:14px;
+                padding:22px 18px;min-height:220px;box-shadow:var(--sh);position:relative;
+                display:flex;flex-direction:column;justify-content:center}
+    .flash-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;
+                        background:linear-gradient(180deg,var(--huang),var(--zhusha),var(--huang));
+                        border-radius:14px 0 0 14px}
+    .flash-side-label{position:absolute;top:8px;right:14px;font-family:var(--font-display);
+                      font-size:11px;color:var(--gutong);letter-spacing:.1em}
+    .flash-name{font-family:var(--font-display);font-size:32px;color:var(--zhusha-d);
+                text-align:center;letter-spacing:.08em;margin-bottom:6px;line-height:1.2}
+    .flash-name-ko{text-align:center;font-size:13px;color:var(--mo-l);margin-bottom:8px;letter-spacing:.04em}
+    .flash-name-sub{text-align:center;font-size:11px;color:var(--gutong);letter-spacing:.06em}
+    .flash-q-label{display:inline-block;background:var(--zhusha);color:var(--huang-l);
+                   padding:3px 12px;border-radius:14px;font-family:var(--font-display);
+                   font-size:12px;letter-spacing:.08em;margin-bottom:10px}
+    .flash-question{font-family:var(--font-han);font-size:16px;color:var(--mo);line-height:1.7;margin:6px 0}
+    .flash-answer{font-family:var(--font-han);font-size:15.5px;color:var(--zhusha-d);
+                  background:var(--mi);padding:12px 14px;border-radius:8px;
+                  border-left:3px solid var(--huang);line-height:1.7;margin-top:8px}
+    .flash-answer .ko{font-family:var(--font-body);font-size:13px;color:var(--mo-l);margin-top:6px;display:block;line-height:1.55}
+    .flash-hint{text-align:center;color:var(--gutong);font-size:11.5px;margin:10px 0;letter-spacing:.04em}
+    .flash-bottom{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;justify-content:center}
+    .flash-bottom .btn{flex:1 1 auto;min-width:80px;font-size:13.5px;padding:10px}
+    .flash-rate-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:14px}
+    .flash-rate{padding:11px 6px;border:1.5px solid;border-radius:8px;cursor:pointer;
+                background:transparent;font-family:var(--font-body);font-size:13px;font-weight:600;
+                transition:transform .1s, background .1s;display:flex;flex-direction:column;align-items:center;gap:2px}
+    .flash-rate:hover{transform:translateY(-1px)}
+    .flash-rate .han{font-family:var(--font-display);font-size:16px;line-height:1}
+    .flash-rate.again{border-color:var(--zhusha);color:var(--zhusha-d)}
+    .flash-rate.again:hover{background:rgba(156,48,48,.08)}
+    .flash-rate.hard{border-color:var(--gutong);color:var(--gutong)}
+    .flash-rate.hard:hover{background:rgba(135,106,54,.08)}
+    .flash-rate.easy{border-color:var(--feicui);color:var(--feicui)}
+    .flash-rate.easy:hover{background:rgba(42,112,96,.08)}
+    .flash-rate-hint{font-size:9.5px;opacity:.7;font-weight:400}
+    .add-symptom{font-family:var(--font-han);font-size:21px;color:var(--zhusha-d);
+                 text-align:center;letter-spacing:.05em;line-height:1.4;margin:6px 0 4px}
+    .add-symptom-ko{text-align:center;font-size:12.5px;color:var(--mo-l);margin-bottom:8px;line-height:1.5}
+    .add-formula-tag{display:inline-block;background:var(--huang);color:var(--mo);
+                     padding:2px 10px;border-radius:10px;font-family:var(--font-display);
+                     font-size:11.5px;letter-spacing:.05em;margin-bottom:10px}
+    .sa-input{width:100%;min-height:64px;padding:10px 12px;border:1.5px solid var(--mi-d);
+              border-radius:8px;font-family:var(--font-han);font-size:15px;line-height:1.55;
+              background:#FFF;color:var(--mo);resize:vertical;outline:none}
+    .sa-input:focus{border-color:var(--zhusha)}
+    .sa-input.ok{border-color:var(--feicui);background:#F2F8F3}
+    .sa-input.ng{border-color:var(--zhusha);background:#FDF1F1}
+    .sa-feedback{margin-top:10px;padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.6}
+    .sa-feedback.ok{background:#E8F4E8;color:#1F5A3A;border-left:3px solid var(--feicui)}
+    .sa-feedback.ng{background:#FBE8E8;color:#7A1818;border-left:3px solid var(--zhusha)}
+    .sa-feedback .label{font-family:var(--font-display);font-size:12px;letter-spacing:.06em;display:block;margin-bottom:4px}
+    .sa-feedback .han{font-family:var(--font-han);color:var(--zhusha-d);font-size:14px}
+    .sa-feedback ul{margin:6px 0 0 16px;padding:0}
+    .sa-feedback li{font-size:12.5px}
+    .sa-hint{font-size:11px;color:var(--gutong);margin-top:4px}
+    .flash-tabs{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap}
+    .flash-tab{padding:6px 12px;border:1.5px solid var(--mi-d);border-radius:14px;
+               background:var(--mi-w);color:var(--mo-l);font-family:var(--font-body);font-size:12px;
+               cursor:pointer;transition:all .12s;font-weight:600}
+    .flash-tab.on{background:var(--zhusha);color:var(--huang-l);border-color:var(--zhusha-d)}
+    .flash-tab:hover:not(.on){background:var(--mi);border-color:var(--gutong)}
+    .flash-lang-toggle{display:inline-flex;background:var(--mi);border-radius:14px;padding:2px;border:1px solid var(--mi-d)}
+    .flash-lang-toggle button{border:none;background:transparent;padding:4px 10px;font-size:11px;
+                              color:var(--mo-l);cursor:pointer;border-radius:12px;font-family:var(--font-body);font-weight:600}
+    .flash-lang-toggle button.on{background:var(--zhusha);color:var(--huang-l)}
+    .sa-count-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:4px}
+    .sa-count-btn{background:var(--mi-w);border:1.5px solid var(--gutong);border-radius:8px;
+                  padding:10px 0;font-size:18px;font-weight:700;cursor:pointer;color:var(--mo);
+                  font-family:var(--font-display);transition:all .15s;text-align:center}
+    .sa-count-btn:hover{transform:translateY(-1px)}
+    .sa-count-btn.on{background:var(--zhusha);color:var(--mi-w);border-color:var(--zhusha)}
+  `;
+  document.head.appendChild(st);
+}
+
+// ─── 플래시카드 허브 ──────────────────────────────────────────────────────
+function renderFlashHub(){
+  _injectFlashStyles();
+  const formulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
+  const additions = (typeof FORMULA_ADDITIONS !== 'undefined') ? FORMULA_ADDITIONS : {};
+  if(!formulas.length){
+    view.innerHTML = `
+      <h2 class="view-title"><span class="han">卡</span>플래시카드</h2>
+      <div class="card"><div style="text-align:center;color:var(--gutong);padding:24px;font-size:13px">
+        <div class="han" style="font-size:24px;color:var(--zhusha-d);margin-bottom:8px">未充</div>
+        data-formulas.js 의 FORMULAS 가 필요합니다
+      </div></div>`;
+    return;
+  }
+  const addItemCount = Object.values(additions).reduce((s, v) => s + (v.items ? v.items.length : 0), 0);
+  const formulaCount = formulas.length;
+  const easyCount = Object.values(S.flashRated || {}).filter(v => v === 'easy').length;
+  const sa = S.shortAnswerStats || {ok:0, ng:0, qi:0};
+  const total = (sa.ok || 0) + (sa.ng || 0);
+  const acc = total ? Math.round((sa.ok / total) * 100) : 0;
+
+  view.innerHTML = `
+    <h2 class="view-title"><span class="han">卡</span>플래시카드·주관식</h2>
+    <div class="view-sub">안 보고 외우기 + 주관식 채점 (오타·띄어쓰기 허용)</div>
+
+    <div class="card imperial fade-in" style="padding:14px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:140px">
+          <div class="card-title" style="margin:0"><span class="han">熟達</span> 학습 진행</div>
+          <div style="font-size:12px;color:var(--mo-l);margin-top:3px;line-height:1.6">
+            완전 익숙 <b style="color:var(--feicui)">${easyCount}</b> 카드 ·
+            주관식 누적 <b style="color:var(--zhusha-d)">${total}</b>문
+            ${total ? `(<span style="color:var(--feicui)">${acc}%</span> 정확도, +${sa.qi||0} 氣)` : ''}
+          </div>
+        </div>
+        <div class="flash-lang-toggle" title="조성·효능 표시 언어">
+          <button id="fl-lang-han" type="button" class="${S.flashLang==='han'?'on':''}">漢</button>
+          <button id="fl-lang-ko" type="button" class="${S.flashLang==='ko'?'on':''}">한</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card fade-in">
+      <div class="card-title"><span class="han">範圍</span> 범위 선택</div>
+      <div class="flash-tabs" id="fl-scope-tabs">
+        <button type="button" class="flash-tab on" data-s="all">전체 ${formulaCount}처방</button>
+        <button type="button" class="flash-tab" data-s="8">8장 補益劑</button>
+        <button type="button" class="flash-tab" data-s="6">6장 溫裏劑</button>
+        <button type="button" class="flash-tab" data-s="7">7장 表裏雙解劑</button>
+        <button type="button" class="flash-tab" data-s="bookmark">★ 북마크</button>
+        <button type="button" class="flash-tab" data-s="weak">↻ 다시 보기·어려움</button>
+      </div>
+    </div>
+
+    <div class="flash-hub-grid fade-in">
+      <button class="flash-mode-tile wide gold" type="button" id="fl-mode-formula">
+        <span class="ic">方·誦</span>
+        <span class="ttl">처방 암기 카드</span>
+        <span class="desc">처방명만 보고 → 조성·효능·주치를 順次로 떠올린 뒤 카드 펼침. 익숙/보통/다시 평가</span>
+      </button>
+      <button class="flash-mode-tile" type="button" id="fl-mode-addition">
+        <span class="ic">加·症</span>
+        <span class="ttl">가감 카드 (객관식)</span>
+        <span class="desc">증상 보고 → 가감약물 4지선다. ${addItemCount}항</span>
+      </button>
+      <button class="flash-mode-tile" type="button" id="fl-mode-addition-sa">
+        <span class="ic">加·書</span>
+        <span class="ttl">가감 주관식</span>
+        <span class="desc">증상 보고 → 가감약물 직접 입력 (오타 허용)</span>
+      </button>
+      <button class="flash-mode-tile wide" type="button" id="fl-mode-shortanswer">
+        <span class="ic">問·書</span>
+        <span class="ttl">주관식 문제 (정통 시험형)</span>
+        <span class="desc">조성·효능·주치·군약·출전을 직접 입력. 띄어쓰기·오타 허용, 객관식 대비 2~5배 氣</span>
+      </button>
+    </div>
+
+    <div class="card fade-in" style="margin-top:14px">
+      <div class="card-title"><span class="han">指針</span> 사용 안내</div>
+      <ul style="margin:0 0 0 18px;padding:0;font-size:12.5px;color:var(--mo-l);line-height:1.7">
+        <li><b>처방 암기 카드</b>: 처방명만 노출 → 머리로 조성·효능·주치를 떠올린 뒤 카드를 펼쳐 비교</li>
+        <li><b>가감 카드</b>: 「臍上動悸」 같은 증상 → 「加桂」 정답. 4지선다·즉시 해설</li>
+        <li><b>가감 주관식</b>: 같은 내용 직접 입력. 한글·한자 모두 가능 (「계지」 = 「桂枝」)</li>
+        <li><b>주관식 문제</b>: 「四君子湯의 조성을 모두 쓰시오」 같은 정통 시험형. 띄어쓰기 무관·1자 오타 허용</li>
+        <li>학습 진행도·「다시 보기」 등급은 자동 저장 (다음 接속 시 이어보기 가능)</li>
+      </ul>
+    </div>
+  `;
+
+  let scope = 'all';
+  $$('#fl-scope-tabs .flash-tab').forEach(b => b.addEventListener('click', () => {
+    $$('#fl-scope-tabs .flash-tab').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    scope = b.dataset.s;
+  }));
+  $('#fl-lang-han').addEventListener('click', () => { S.flashLang = 'han'; saveState(); renderFlashHub(); });
+  $('#fl-lang-ko').addEventListener('click',  () => { S.flashLang = 'ko';  saveState(); renderFlashHub(); });
+  $('#fl-mode-formula').addEventListener('click',       () => startFlashFormula(scope));
+  $('#fl-mode-addition').addEventListener('click',      () => startFlashAddition(scope, 'mc'));
+  $('#fl-mode-addition-sa').addEventListener('click',   () => startFlashAddition(scope, 'sa'));
+  $('#fl-mode-shortanswer').addEventListener('click',   () => startShortAnswer(scope));
+}
+if(typeof window !== 'undefined') window.renderFlashHub = renderFlashHub;
+
+// ─── 범위 필터 헬퍼 ──────────────────────────────────────────────────────
+function _filterFormulasByScope(scope){
+  const all = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
+  if(scope === 'all' || !scope) return all;
+  if(scope === 'bookmark'){
+    const bm = new Set(S.bookmarks || []);
+    return all.filter(f => bm.has(f.id));
+  }
+  if(scope === 'weak'){
+    const rated = S.flashRated || {};
+    return all.filter(f =>
+      rated[`f:${f.id}`] === 'again' || rated[`f:${f.id}`] === 'hard'
+    );
+  }
+  if(scope === '6' || scope === '7' || scope === '8'){
+    return all.filter(f => String(f.chapter || '').startsWith(scope));
+  }
+  return all;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 모드 1: 처방 암기 카드 (처방명 → 조성 → 효능 → 주치 → 가감 → 평가)
+// ═══════════════════════════════════════════════════════════════════
+function startFlashFormula(scope){
+  _injectFlashStyles();
+  const pool = _filterFormulasByScope(scope);
+  if(!pool.length){
+    toast('해당 범위에 처방이 없습니다');
+    renderFlashHub();
+    return;
+  }
+  const cards = pool.slice().sort(() => Math.random() - 0.5);
+  let idx = 0;
+  let stage = 0;  // 0=처방명만, 1=조성, 2=효능, 3=주치, 4=가감, 5=평가
+  const stageLabels = ['提示', '構成', '作用', '主治', '加減', '評價'];
+
+  const render = () => {
+    if(idx >= cards.length){
+      view.innerHTML = `
+        <h2 class="view-title fade-in"><span class="han">畢</span>암기 카드 완료</h2>
+        <div class="card imperial" style="text-align:center;padding:24px">
+          <div class="han" style="font-size:42px;color:var(--zhusha-d);margin-bottom:6px">熟</div>
+          <div style="font-size:14px;color:var(--mo);margin-bottom:14px">
+            ${cards.length}개 처방 카드를 모두 살펴봤습니다.<br>
+            <span style="font-size:12px;color:var(--gutong)">「다시 보기」 평가한 카드는 「↻ 다시 보기·어려움」 범위에서 다시 만날 수 있어요</span>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+            <button class="btn" type="button" onclick="renderFlashHub()">허브로</button>
+            <button class="btn btn-o" type="button" id="fl-replay">다시 한 사이클</button>
+          </div>
+        </div>`;
+      $('#fl-replay').addEventListener('click', () => startFlashFormula(scope));
+      return;
+    }
+
+    const f = cards[idx];
+    const progress = Math.round((idx / cards.length) * 100);
+    const stageLabel = stageLabels[stage] || '?';
+    const lang = S.flashLang || 'han';
+    const composition = (f.composition || []).map(h => String(h).replace(/[\(（][^\)）]*[\)）]/g, '').trim());
+    const compStr = composition.join(' · ');
+    const compStrKo = composition.map(h => {
+      const norm = (typeof HERB_NORM_INDEX !== 'undefined' && HERB_NORM_INDEX[h]) || h;
+      const meta = (typeof HERBS !== 'undefined') ? HERBS.find(x => x.han === norm) : null;
+      return meta && meta.ko ? meta.ko : h;
+    }).join(' · ');
+    const additionEntry = (typeof FORMULA_ADDITIONS !== 'undefined') && FORMULA_ADDITIONS[f.id];
+    const hasAdditions = additionEntry && (additionEntry.items || []).length > 0;
+
+    let cardBody = '';
+    if(stage === 0){
+      cardBody = `
+        <div class="flash-side-label">${stageLabel}</div>
+        <div class="flash-name">${esc(f.han || '?')}</div>
+        <div class="flash-name-ko">${esc(f.ko || '')}</div>
+        <div class="flash-name-sub">${esc(f.chapter || '')} · ${esc(f.source || '')}</div>
+        <div class="flash-hint" style="margin-top:18px">머릿속으로 <b>조성·효능·주치·가감</b>을 떠올려 보세요</div>
+      `;
+    } else if(stage === 1){
+      cardBody = `
+        <div class="flash-side-label">${stageLabel}</div>
+        <div class="flash-name" style="font-size:22px">${esc(f.han || '')}</div>
+        <div class="flash-q-label">構成 (${composition.length}味)</div>
+        <div class="flash-answer">
+          ${esc(lang === 'ko' ? compStrKo : compStr)}
+          ${lang !== 'ko' ? `<span class="ko">${esc(compStrKo)}</span>` : ''}
+        </div>
+      `;
+    } else if(stage === 2){
+      cardBody = `
+        <div class="flash-side-label">${stageLabel}</div>
+        <div class="flash-name" style="font-size:22px">${esc(f.han || '')}</div>
+        <div class="flash-q-label">作用·效能</div>
+        <div class="flash-answer">${esc(f.action || '(데이터 없음)')}</div>
+      `;
+    } else if(stage === 3){
+      cardBody = `
+        <div class="flash-side-label">${stageLabel}</div>
+        <div class="flash-name" style="font-size:22px">${esc(f.han || '')}</div>
+        <div class="flash-q-label">適應症·主治</div>
+        <div class="flash-answer">${esc(f.indication || '(데이터 없음)')}</div>
+      `;
+    } else if(stage === 4){
+      if(hasAdditions){
+        const lines = additionEntry.items.map(it => `
+          <div style="margin:8px 0;padding:8px 10px;background:var(--mi-w);border-radius:6px;border-left:2px solid var(--huang)">
+            <div style="font-family:var(--font-han);font-size:13.5px;color:var(--zhusha-d)">${esc(it.symptom || '')}</div>
+            <div style="font-size:11.5px;color:var(--mo-l);margin-top:2px">${esc(it.symptomKo || '')}</div>
+            <div style="font-family:var(--font-han);font-size:13px;color:var(--mo);margin-top:4px"><b>→</b> ${esc(it.mod || '')}</div>
+          </div>
+        `).join('');
+        cardBody = `
+          <div class="flash-side-label">${stageLabel}</div>
+          <div class="flash-name" style="font-size:22px">${esc(f.han || '')}</div>
+          <div class="flash-q-label">加減法</div>
+          <div style="margin-top:6px">${lines}</div>
+        `;
+      } else {
+        cardBody = `
+          <div class="flash-side-label">${stageLabel}</div>
+          <div class="flash-name" style="font-size:22px">${esc(f.han || '')}</div>
+          <div class="flash-q-label">加減法</div>
+          <div class="flash-hint" style="margin:14px 0">이 처방은 구조화된 가감 데이터가 없어요 — 핵심 포인트로 대체:</div>
+          <ul style="margin:0 0 0 18px;font-size:12.5px;color:var(--mo-l);line-height:1.7">
+            ${(f.keyPoints || []).slice(0, 4).map(k => `<li>${esc(k)}</li>`).join('')}
+          </ul>
+        `;
+      }
+    } else {
+      cardBody = `
+        <div class="flash-side-label">${stageLabel}</div>
+        <div class="flash-name" style="font-size:24px">${esc(f.han || '')}</div>
+        <div class="flash-name-ko">${esc(f.ko || '')} · ${esc(f.chapter || '')}</div>
+        <div class="flash-hint" style="margin-top:8px">이 처방, 얼마나 익숙해요?</div>
+        <div class="flash-rate-grid">
+          <button class="flash-rate again" type="button" data-r="again">
+            <span class="han">復</span>다시 보기
+            <span class="flash-rate-hint">아직 헷갈림</span>
+          </button>
+          <button class="flash-rate hard" type="button" data-r="hard">
+            <span class="han">難</span>보통
+            <span class="flash-rate-hint">조금 더 연습</span>
+          </button>
+          <button class="flash-rate easy" type="button" data-r="easy">
+            <span class="han">熟</span>익숙
+            <span class="flash-rate-hint">완전 익혔음</span>
+          </button>
+        </div>
+      `;
+    }
+
+    view.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <button class="btn btn-sm btn-ghost" type="button" onclick="renderFlashHub()">← 허브</button>
+        <span style="margin-left:auto;font-size:12px;color:var(--gutong)">${idx+1} / ${cards.length}</span>
+      </div>
+      <div class="flash-progress"><div class="flash-progress-fill" style="width:${progress}%"></div></div>
+      <div class="flash-card fade-in" id="flash-card">${cardBody}</div>
+      <div class="flash-bottom">
+        ${stage > 0 ? '<button class="btn btn-o" type="button" id="fl-prev">← 이전 단계</button>' : ''}
+        ${stage < 5 ? `<button class="btn" type="button" id="fl-next">${stage === 0 ? '카드 펼치기 →' : (stage === 4 ? '평가 →' : '다음 →')}</button>` : ''}
+        ${stage === 5 ? '<button class="btn btn-ghost" type="button" id="fl-skip">평가 건너뛰기</button>' : ''}
+      </div>
+    `;
+
+    if(stage > 0){
+      const prev = $('#fl-prev'); if(prev) prev.addEventListener('click', () => { stage--; render(); });
+    }
+    if(stage < 5){
+      const next = $('#fl-next'); if(next) next.addEventListener('click', () => { stage++; render(); });
+    }
+    if(stage === 5){
+      const skip = $('#fl-skip');
+      if(skip) skip.addEventListener('click', () => { idx++; stage = 0; render(); });
+      $$('.flash-rate').forEach(b => b.addEventListener('click', () => {
+        const r = b.dataset.r;
+        S.flashRated = S.flashRated || {};
+        const prevRating = S.flashRated[`f:${f.id}_prev`];
+        S.flashRated[`f:${f.id}`] = r;
+        if(r === 'easy' && prevRating !== 'easy'){
+          S.qi = (S.qi || 0) + 5;
+        }
+        S.flashRated[`f:${f.id}_prev`] = r;
+        saveState();
+        try{ refreshHeader(); }catch(_){}
+        try{
+          if(typeof bgm !== 'undefined'){
+            if(r === 'easy' && bgm.sfxCorrect) bgm.sfxCorrect();
+            else if(r === 'again' && bgm.sfxWrong) bgm.sfxWrong();
+          }
+        }catch(_){}
+        idx++; stage = 0; render();
+      }));
+    }
+  };
+
+  render();
+}
+if(typeof window !== 'undefined') window.startFlashFormula = startFlashFormula;
+
+// ═══════════════════════════════════════════════════════════════════
+// 모드 2: 가감 카드 (증상 → 가감약물)
+// ═══════════════════════════════════════════════════════════════════
+function startFlashAddition(scope, type){
+  _injectFlashStyles();
+  type = type || 'mc';
+  const additions = (typeof FORMULA_ADDITIONS !== 'undefined') ? FORMULA_ADDITIONS : {};
+  const allFormulas = (typeof FORMULAS !== 'undefined') ? FORMULAS : [];
+  const formulaById = {};
+  allFormulas.forEach(f => { formulaById[f.id] = f; });
+  const scopeFormulas = _filterFormulasByScope(scope);
+  const scopeIds = new Set(scopeFormulas.map(f => f.id));
+
+  const allItems = [];
+  for(const [fid, entry] of Object.entries(additions)){
+    if(!scopeIds.has(fid)) continue;
+    (entry.items || []).forEach((it, i) => {
+      if((!it.herbs || !it.herbs.length) && !it.target) return;
+      allItems.push({ ...it, formulaId: fid, idxInF: i });
+    });
+  }
+
+  if(!allItems.length){
+    toast('해당 범위에 가감 데이터가 없습니다');
+    renderFlashHub();
+    return;
+  }
+
+  const allHerbs = (typeof HERBS !== 'undefined' && HERBS.length)
+    ? HERBS.map(h => h.han)
+    : Object.keys((typeof HERB_NORM_INDEX !== 'undefined') ? HERB_NORM_INDEX : {});
+
+  const items = allItems.slice().sort(() => Math.random() - 0.5);
+  let idx = 0;
+  let correctCount = 0;
+  const startedAt = Date.now();
+
+  const render = () => {
+    if(idx >= items.length){
+      const earned = correctCount * 4;
+      S.qi = (S.qi || 0) + earned;
+      // 가감 주관식이면 shortAnswerStats에도 누적
+      if(type === 'sa'){
+        S.shortAnswerStats.ok = (S.shortAnswerStats.ok || 0) + correctCount;
+        S.shortAnswerStats.ng = (S.shortAnswerStats.ng || 0) + (items.length - correctCount);
+        S.shortAnswerStats.qi = (S.shortAnswerStats.qi || 0) + earned;
+      }
+      saveState();
+      try{ refreshHeader(); }catch(_){}
+      view.innerHTML = `
+        <h2 class="view-title fade-in"><span class="han">畢</span>가감 카드 완료</h2>
+        <div class="card imperial" style="text-align:center;padding:24px">
+          <div class="seal" style="font-size:42px;color:var(--zhusha-d);line-height:1">${correctCount}<span style="font-size:24px;opacity:.6">/${items.length}</span></div>
+          <div style="margin-top:8px;font-size:14px;color:var(--feicui);font-weight:600">+${earned} 氣</div>
+          <div style="margin-top:6px;font-size:11px;color:var(--gutong)">${Math.round((Date.now()-startedAt)/1000)}초 소요</div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:14px">
+          <button class="btn" type="button" onclick="renderFlashHub()">허브로</button>
+          <button class="btn btn-o" type="button" id="fl-add-again">다시</button>
+        </div>`;
+      $('#fl-add-again').addEventListener('click', () => startFlashAddition(scope, type));
+      return;
+    }
+
+    const item = items[idx];
+    const f = formulaById[item.formulaId] || {};
+    const progress = Math.round((idx / items.length) * 100);
+    const correctHerbs = (item.herbs || []).slice();
+    const correctTarget = item.target || null;
+
+    let mcOptions = [];
+    let mcAnswerIdx = -1;
+    if(type === 'mc'){
+      let correctOpt;
+      if(correctHerbs.length){
+        correctOpt = correctHerbs.join('·');
+      } else if(correctTarget){
+        correctOpt = correctTarget;
+      } else {
+        correctOpt = item.mod;
+      }
+      const distractorPool = new Set();
+      if(correctHerbs.length){
+        const sameF = (additions[item.formulaId] && additions[item.formulaId].items) || [];
+        sameF.forEach(o => {
+          if(o === item) return;
+          if(o.herbs && o.herbs.length){
+            distractorPool.add(o.herbs.join('·'));
+          }
+        });
+        const samples = allHerbs.filter(h => !correctHerbs.includes(h))
+          .sort(() => Math.random() - 0.5).slice(0, 30);
+        for(let i = 0; i < 20 && distractorPool.size < 8; i++){
+          const n = Math.max(1, Math.min(correctHerbs.length, 2));
+          const picks = samples.slice(i*n, i*n + n);
+          if(picks.length === n) distractorPool.add(picks.join('·'));
+        }
+      } else if(correctTarget){
+        allFormulas.filter(x => x.id !== f.id && x.chapter === f.chapter)
+          .forEach(x => distractorPool.add(x.han));
+      }
+      distractorPool.delete(correctOpt);
+      const distractors = Array.from(distractorPool).sort(() => Math.random() - 0.5).slice(0, 3);
+      const opts = [correctOpt, ...distractors].sort(() => Math.random() - 0.5);
+      mcOptions = opts;
+      mcAnswerIdx = opts.indexOf(correctOpt);
+    }
+
+    view.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <button class="btn btn-sm btn-ghost" type="button" onclick="renderFlashHub()">← 허브</button>
+        <span style="margin-left:auto;font-size:12px;color:var(--gutong)">${idx+1} / ${items.length}</span>
+      </div>
+      <div class="flash-progress"><div class="flash-progress-fill" style="width:${progress}%"></div></div>
+      <div class="flash-card fade-in">
+        <div class="flash-side-label">${type==='mc'?'加減·객':'加減·서'}</div>
+        <div style="text-align:center"><span class="add-formula-tag">${esc(f.han || '?')}</span></div>
+        <div class="add-symptom">${esc(item.symptom || '')}</div>
+        <div class="add-symptom-ko">${esc(item.symptomKo || '')}</div>
+        <div class="flash-q-label" style="display:block;margin:8px auto 4px;text-align:center;width:fit-content">
+          ${type === 'mc' ? '↓ 가감약물을 고르세요' : '↓ 가감약물을 적으세요'}
+        </div>
+        <div id="add-answer-area"></div>
+      </div>
+    `;
+
+    const ansArea = $('#add-answer-area');
+    if(type === 'mc'){
+      ansArea.innerHTML = mcOptions.map((opt, i) => `
+        <button class="btn btn-o quiz-opt" type="button" style="display:block;width:100%;margin:6px 0;text-align:left;padding:10px 12px;white-space:normal;line-height:1.45;font-family:var(--font-han);font-size:15px" data-i="${i}">
+          <span class="han" style="color:var(--zhusha-d);margin-right:8px;font-weight:700">${'甲乙丙丁戊'[i]||(i+1)}</span>${esc(opt)}
+        </button>
+      `).join('');
+      $$('.quiz-opt').forEach(b => b.addEventListener('click', () => {
+        const i = +b.dataset.i;
+        const correct = (i === mcAnswerIdx);
+        if(correct) correctCount++;
+        try{
+          if(typeof bgm !== 'undefined'){
+            if(correct && bgm.sfxCorrect) bgm.sfxCorrect();
+            else if(!correct && bgm.sfxWrong) bgm.sfxWrong();
+          }
+        }catch(_){}
+        $$('.quiz-opt').forEach(x => {
+          x.disabled = true;
+          if(+x.dataset.i === mcAnswerIdx){ x.style.background='var(--feicui)'; x.style.color='var(--mi-w)'; x.style.borderColor='transparent'; }
+          if(+x.dataset.i === i && !correct){ x.style.background='var(--zhusha)'; x.style.color='var(--mi-w)'; x.style.borderColor='transparent'; }
+        });
+        const noteDiv = document.createElement('div');
+        noteDiv.style.cssText = 'margin-top:10px;padding:10px;background:var(--mi);border-radius:6px;font-size:12.5px;color:var(--mo);line-height:1.55';
+        noteDiv.innerHTML = `
+          <b style="color:var(--zhusha-d)">機轉</b> ${esc(item.note || '(설명 없음)')}<br>
+          <span class="han" style="color:var(--mo-l);font-size:12px">정답 ${esc(item.mod || '')}</span>
+          ${item.remove ? `<br><span style="color:var(--gutong);font-size:11.5px">去: ${esc(item.remove.join('·'))}</span>`:''}
+        `;
+        ansArea.appendChild(noteDiv);
+        const nx = document.createElement('button');
+        nx.className = 'btn';
+        nx.type = 'button';
+        nx.style.cssText = 'display:block;width:100%;margin-top:10px;padding:10px';
+        nx.textContent = idx + 1 >= items.length ? '결과 보기 →' : '다음 →';
+        nx.onclick = () => { idx++; render(); };
+        ansArea.appendChild(nx);
+      }));
+    } else {
+      // 주관식
+      ansArea.innerHTML = `
+        <textarea class="sa-input" id="add-sa-input" placeholder="예: 桂枝 / 桂枝·茯苓 / 계지, 복령 (한글·한자 모두 가능, 순서 무관)" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+        <div class="sa-hint">${correctHerbs.length || '?'}개 가감약물 입력 ${item.remove ? ` · 「去」 약물은 적지 않아도 됩니다` : ''}</div>
+        <button class="btn" type="button" id="add-sa-submit" style="display:block;width:100%;margin-top:10px;padding:10px">제출 →</button>
+        <div id="add-sa-fb"></div>
+      `;
+      const ta = $('#add-sa-input');
+      const fb = $('#add-sa-fb');
+      try{ ta.focus(); }catch(_){}
+      const submit = () => {
+        if(ta.disabled) return;
+        const text = ta.value;
+        // herbs가 비고 target만 있는 경우는 처방명 채점으로
+        const result = correctHerbs.length
+          ? gradeComposition(text, correctHerbs)
+          : { ok: gradeShortText(text, correctTarget || item.mod).ok, hits: [], missed: [correctTarget || item.mod], extras: [] };
+        ta.classList.remove('ok','ng');
+        ta.classList.add(result.ok ? 'ok' : 'ng');
+        ta.disabled = true;
+        $('#add-sa-submit').disabled = true;
+        if(result.ok) correctCount++;
+        try{
+          if(typeof bgm !== 'undefined'){
+            if(result.ok && bgm.sfxCorrect) bgm.sfxCorrect();
+            else if(!result.ok && bgm.sfxWrong) bgm.sfxWrong();
+          }
+        }catch(_){}
+        const missedStr = (result.missed && result.missed.length) ? `<li>맞히지 못한 본초: <span class="han">${esc(result.missed.join('·'))}</span></li>` : '';
+        const extrasStr = (result.extras && result.extras.length) ? `<li>잘못 적은 본초: <span class="han">${esc(result.extras.join('·'))}</span></li>` : '';
+        const correctStr = correctHerbs.length ? correctHerbs.join('·') : (correctTarget || item.mod || '?');
+        fb.innerHTML = `
+          <div class="sa-feedback ${result.ok?'ok':'ng'}">
+            <span class="label">${result.ok ? '✓ 정답' : '× 오답'}</span>
+            <b style="color:var(--zhusha-d)">정답</b> <span class="han">${esc(correctStr)}</span>
+            ${item.remove ? `<br><span style="font-size:11.5px;color:var(--gutong)">去: ${esc(item.remove.join('·'))}</span>`:''}
+            ${(missedStr||extrasStr) ? `<ul>${missedStr}${extrasStr}</ul>` : ''}
+            <div style="margin-top:6px;font-size:12.5px"><b>機轉</b> ${esc(item.note || '')}</div>
+          </div>
+          <button class="btn" type="button" id="add-sa-next" style="display:block;width:100%;margin-top:10px;padding:10px">${idx+1>=items.length?'결과 →':'다음 →'}</button>
+        `;
+        $('#add-sa-next').addEventListener('click', () => { idx++; render(); });
+      };
+      $('#add-sa-submit').addEventListener('click', submit);
+      ta.addEventListener('keydown', (e) => {
+        if(e.key === 'Enter' && (e.metaKey || e.ctrlKey)){ e.preventDefault(); submit(); }
+      });
+    }
+  };
+
+  render();
+}
+if(typeof window !== 'undefined') window.startFlashAddition = startFlashAddition;
+
+// ═══════════════════════════════════════════════════════════════════
+// 모드 3: 주관식 문제 (조성·효능·주치·군약·출전 직접 입력)
+// 점수: 객관식 대비 2~5배. 조성 15·효능/주치 10·군약 8·출전 6 氣/문
+// ═══════════════════════════════════════════════════════════════════
+function startShortAnswer(scope){
+  _injectFlashStyles();
+  const formulas = _filterFormulasByScope(scope);
+  if(!formulas.length){ toast('해당 범위에 처방이 없습니다'); renderFlashHub(); return; }
+
+  const buildQuestions = () => {
+    const out = [];
+    formulas.forEach(f => {
+      if((f.composition || []).length){
+        out.push({
+          type: 'composition', fid: f.id, formula: f,
+          prompt: `<b>${esc(f.han)}</b> (${esc(f.ko)})의 <b>구성 본초</b>를 모두 적으시오 (순서 무관, 한자·한글 모두 가능)`,
+          hint: `${f.composition.length}味. 띄어쓰기·쉼표 무관, 1자 오타까지 허용`,
+          correctHerbs: f.composition,
+          points: 15,
+        });
+      }
+      if(f.action){
+        out.push({
+          type: 'action', fid: f.id, formula: f,
+          prompt: `<b>${esc(f.han)}</b>의 <b>효능(작용)</b>을 적으시오`,
+          hint: '예: 益氣健脾 / 補氣生血 / 溫中補虛 등',
+          correct: f.action,
+          points: 10,
+        });
+      }
+      if(f.indication){
+        const m = f.indication.match(/^([^.。·,，()\n]{2,16}證|[^.。·,，()\n]{2,16}病)/);
+        const firstSeg = m ? m[1].trim() : f.indication.split(/[.。·,，\n]/)[0].trim();
+        if(firstSeg && firstSeg.length <= 20){
+          out.push({
+            type: 'indication', fid: f.id, formula: f,
+            prompt: `<b>${esc(f.han)}</b>의 <b>主治證</b>의 명칭은? (證 이름)`,
+            hint: '예: 脾胃氣虛證, 血虛陽浮發熱證 등',
+            correct: firstSeg,
+            points: 10,
+          });
+        }
+      }
+      if(f.monarch_minister && f.monarch_minister['君']){
+        const monarchs = f.monarch_minister['君'];
+        if(monarchs.length){
+          out.push({
+            type: 'monarch', fid: f.id, formula: f,
+            prompt: `<b>${esc(f.han)}</b>의 <b>君藥</b>은? ${monarchs.length > 1 ? `(${monarchs.length}味)` : ''}`,
+            hint: monarchs.length > 1 ? `${monarchs.length}개 모두 적어주세요` : '1味',
+            correctHerbs: monarchs,
+            points: 8,
+            asList: true,
+          });
+        }
+      }
+      if(f.source){
+        const src = f.source.split(/[—\(（]/)[0].trim();
+        if(src && src.length <= 14){
+          out.push({
+            type: 'source', fid: f.id, formula: f,
+            prompt: `<b>${esc(f.han)}</b>의 <b>出典</b>은?`,
+            hint: '예: 傷寒論, 太平惠民和劑局方, 脾胃論 등',
+            correct: src,
+            points: 6,
+          });
+        }
+      }
+    });
+    return out;
+  };
+
+  const allQuestions = buildQuestions();
+  if(!allQuestions.length){ toast('주관식 문제를 만들 수 없습니다'); renderFlashHub(); return; }
+
+  view.innerHTML = `
+    <button class="btn btn-sm btn-ghost" type="button" onclick="renderFlashHub()">← 허브</button>
+    <h2 class="view-title fade-in"><span class="han">問</span>주관식 문제</h2>
+    <div class="view-sub">조성·효능·주치·군약·출전 직접 입력 · 띄어쓰기·오타 허용</div>
+
+    <div class="card fade-in">
+      <div class="card-title"><span class="han">出題</span> 문제 유형 선택</div>
+      <div class="flash-tabs" id="sa-type-tabs">
+        <button type="button" class="flash-tab on" data-t="all">전체 (${allQuestions.length}문)</button>
+        <button type="button" class="flash-tab" data-t="composition">조성만</button>
+        <button type="button" class="flash-tab" data-t="action">효능만</button>
+        <button type="button" class="flash-tab" data-t="indication">주치만</button>
+        <button type="button" class="flash-tab" data-t="monarch">군약만</button>
+        <button type="button" class="flash-tab" data-t="source">출전만</button>
+      </div>
+    </div>
+
+    <div class="card fade-in">
+      <div class="card-title"><span class="han">數</span> 문제수</div>
+      <div class="sa-count-grid" id="sa-count-grid">
+        ${[3,5,10,20].map((n, i) => `
+          <button type="button" class="sa-count-btn ${i===1?'on':''}" data-n="${n}">${n}<span style="font-size:10px;color:var(--gutong);margin-left:2px">문</span></button>
+        `).join('')}
+      </div>
+    </div>
+
+    <div class="card fade-in">
+      <div class="card-title"><span class="han">配点</span> 점수 안내</div>
+      <ul style="margin:0 0 0 18px;padding:0;font-size:12px;color:var(--mo-l);line-height:1.7">
+        <li>조성 (구성 본초 전체) — <b style="color:var(--zhusha-d)">15 氣 / 문</b> · 모두 맞춰야 만점</li>
+        <li>효능·주치 — <b style="color:var(--zhusha-d)">10 氣 / 문</b></li>
+        <li>군약 — <b style="color:var(--zhusha-d)">8 氣 / 문</b></li>
+        <li>출전 — <b style="color:var(--zhusha-d)">6 氣 / 문</b></li>
+        <li>객관식(2~3 氣) 대비 약 <b>2~5배</b>. 조성·군약은 부분점수 가능</li>
+      </ul>
+    </div>
+
+    <button class="btn btn-lg" type="button" style="display:block;width:100%;margin-top:14px;padding:13px;font-size:16px" id="sa-start">
+      <span class="han" style="margin-right:6px">始</span>시작
+    </button>
+  `;
+
+  let filterType = 'all';
+  let count = 5;
+  $$('#sa-type-tabs .flash-tab').forEach(b => b.addEventListener('click', () => {
+    $$('#sa-type-tabs .flash-tab').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    filterType = b.dataset.t;
+  }));
+  $$('#sa-count-grid .sa-count-btn').forEach(b => b.addEventListener('click', () => {
+    $$('#sa-count-grid .sa-count-btn').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    count = +b.dataset.n;
+  }));
+
+  $('#sa-start').addEventListener('click', () => {
+    const pool = (filterType === 'all')
+      ? allQuestions
+      : allQuestions.filter(q => q.type === filterType);
+    if(!pool.length){
+      toast('선택한 유형의 문제가 없습니다');
+      return;
+    }
+    const session = pool.slice().sort(() => Math.random() - 0.5).slice(0, count);
+    runShortAnswerSession(session, scope);
+  });
+}
+if(typeof window !== 'undefined') window.startShortAnswer = startShortAnswer;
+
+// ─── 주관식 세션 실행 ──────────────────────────────────────────────────
+function runShortAnswerSession(questions, returnScope){
+  let idx = 0;
+  let totalPoints = 0;
+  let earned = 0;
+  let okCount = 0;
+  const results = [];   // {q, ok, score, userText}
+  const startedAt = Date.now();
+
+  const render = () => {
+    if(idx >= questions.length){
+      // 결과 화면
+      const totalAvail = questions.reduce((s, q) => s + (q.points || 10), 0);
+      const pct = totalAvail ? Math.round((earned / totalAvail) * 100) : 0;
+      const grade = pct >= 90 ? '甲' : pct >= 75 ? '乙' : pct >= 60 ? '丙' : pct >= 40 ? '丁' : '戊';
+      const gradeColor = pct >= 75 ? 'var(--feicui)' : pct >= 50 ? 'var(--huang-d)' : 'var(--zhusha)';
+      S.qi = (S.qi || 0) + earned;
+      S.shortAnswerStats.ok = (S.shortAnswerStats.ok || 0) + okCount;
+      S.shortAnswerStats.ng = (S.shortAnswerStats.ng || 0) + (questions.length - okCount);
+      S.shortAnswerStats.qi = (S.shortAnswerStats.qi || 0) + earned;
+      saveState();
+      try{ refreshHeader(); }catch(_){}
+      view.innerHTML = `
+        <h2 class="view-title fade-in"><span class="han">果</span>주관식 결과</h2>
+        <div class="card imperial fade-in" style="text-align:center;padding:24px">
+          <div style="font-family:var(--font-display);font-size:54px;color:${gradeColor};line-height:1">${grade}</div>
+          <div style="font-size:18px;color:var(--mo);margin-top:8px"><b>${earned}</b> / ${totalAvail} 氣 (${pct}%)</div>
+          <div style="font-size:12px;color:var(--gutong);margin-top:4px">${okCount} / ${questions.length} 문항 완답 · ${Math.round((Date.now()-startedAt)/1000)}초</div>
+        </div>
+        <div class="card fade-in">
+          <div class="card-title"><span class="han">細目</span> 문항별 결과</div>
+          ${results.map((r, i) => {
+            const f = r.q.formula;
+            const okIcon = r.ok ? '<span style="color:var(--feicui);font-weight:700">✓</span>' : '<span style="color:var(--zhusha);font-weight:700">×</span>';
+            return `
+              <div style="padding:8px 0;border-bottom:1px dashed var(--mi-d);font-size:12.5px">
+                <div>${okIcon} <b>${esc(f.han)}</b> <span style="color:var(--gutong);font-size:11px">${esc(r.q.type)}</span>
+                  <span style="float:right;color:${r.ok?'var(--feicui)':'var(--gutong)'};font-weight:600">+${r.earned} 氣</span></div>
+                <div style="color:var(--mo-l);font-size:11.5px;margin-top:2px">정답: <span class="han" style="color:var(--zhusha-d)">${esc(r.correctText || '')}</span></div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap">
+          <button class="btn" type="button" onclick="renderFlashHub()">허브로</button>
+          <button class="btn btn-o" type="button" id="sa-again">같은 범위로 다시</button>
+        </div>
+      `;
+      $('#sa-again').addEventListener('click', () => startShortAnswer(returnScope));
+      return;
+    }
+
+    const q = questions[idx];
+    const progress = Math.round((idx / questions.length) * 100);
+    const isList = q.correctHerbs;
+    const placeholder = isList
+      ? '예: 人蔘, 白朮, 茯苓, 甘草 / 인삼 백출 복령 감초 (순서·구분자 무관)'
+      : '예: 益氣健脾 (간결하게)';
+    const minHeight = isList ? '80px' : '56px';
+
+    view.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <button class="btn btn-sm btn-ghost" type="button" onclick="renderFlashHub()">← 허브</button>
+        <span style="margin-left:auto;font-size:12px;color:var(--gutong)">${idx+1} / ${questions.length} · 누적 +${earned} 氣</span>
+      </div>
+      <div class="flash-progress"><div class="flash-progress-fill" style="width:${progress}%"></div></div>
+      <div class="sa-card fade-in" style="background:var(--mi-w);border:1.5px solid var(--zhusha);border-radius:12px;padding:18px 16px;box-shadow:var(--sh-sm)">
+        <div style="font-size:11px;color:var(--gutong);font-family:var(--font-display);letter-spacing:.08em;margin-bottom:8px">
+          ${esc(({composition:'構成', action:'作用·效能', indication:'適應症·主治', monarch:'君藥', source:'出典'})[q.type] || '問')}
+          <span style="background:var(--huang);color:var(--mo);padding:1px 8px;border-radius:8px;font-size:11px;font-weight:700;margin-left:6px">${q.points} 氣</span>
+        </div>
+        <div style="font-family:var(--font-han);font-size:15.5px;color:var(--mo);line-height:1.7;margin-bottom:8px">${q.prompt}</div>
+        <textarea class="sa-input" id="sa-input" style="min-height:${minHeight}" placeholder="${esc(placeholder)}" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+        <div class="sa-hint">${esc(q.hint)}</div>
+        <button class="btn" type="button" id="sa-submit" style="display:block;width:100%;margin-top:10px;padding:10px">제출 →</button>
+        <div id="sa-fb"></div>
+      </div>
+    `;
+
+    const ta = $('#sa-input');
+    const fb = $('#sa-fb');
+    try{ ta.focus(); }catch(_){}
+
+    const submit = () => {
+      if(ta.disabled) return;
+      const text = ta.value;
+      let result, correctText, gainedRatio = 0;
+      if(q.correctHerbs){
+        result = gradeComposition(text, q.correctHerbs);
+        correctText = q.correctHerbs.map(h => String(h).replace(/[\(（][^\)）]*[\)）]/g, '').trim()).join(' · ');
+        if(result.ok){
+          gainedRatio = 1.0;
+        } else if(result.score > 0){
+          // 부분점수: 절반 임계 — 절반 이상 맞으면 그 비율, 미만이면 0
+          const penalty = result.extras.length > 0 ? Math.max(0.5, 1 - result.extras.length * 0.15) : 1;
+          gainedRatio = (result.score >= 0.5) ? Math.max(0, result.score * penalty) : 0;
+        }
+      } else {
+        result = gradeShortText(text, q.correct);
+        correctText = q.correct;
+        gainedRatio = result.ok ? 1.0 : 0;
+      }
+      const pts = Math.round(q.points * gainedRatio);
+      earned += pts;
+      const ok = (gainedRatio >= 0.999);
+      if(ok || gainedRatio >= 0.5) okCount += (ok ? 1 : 0.5);
+      results.push({ q, ok, score: gainedRatio, earned: pts, correctText });
+      ta.classList.add(ok ? 'ok' : 'ng');
+      ta.disabled = true;
+      $('#sa-submit').disabled = true;
+      try{
+        if(typeof bgm !== 'undefined'){
+          if(ok && bgm.sfxCorrect) bgm.sfxCorrect();
+          else if(!ok && bgm.sfxWrong) bgm.sfxWrong();
+        }
+      }catch(_){}
+      let detail = '';
+      if(q.correctHerbs && !ok){
+        const missedStr = (result.missed && result.missed.length) ? `<li>맞히지 못한 본초: <span class="han">${esc(result.missed.join('·'))}</span></li>` : '';
+        const extrasStr = (result.extras && result.extras.length) ? `<li>잘못 적은 본초: <span class="han">${esc(result.extras.join('·'))}</span></li>` : '';
+        detail = (missedStr || extrasStr) ? `<ul>${missedStr}${extrasStr}</ul>` : '';
+      } else if(!q.correctHerbs && !ok && result.nearest){
+        detail = `<div style="font-size:11.5px;color:var(--gutong);margin-top:4px">입력 「${esc(text || '(빈칸)')}」 과 정답이 다릅니다</div>`;
+      }
+      fb.innerHTML = `
+        <div class="sa-feedback ${ok?'ok':'ng'}">
+          <span class="label">${ok ? '✓ 정답' : (gainedRatio > 0 ? `△ 부분 정답 (${Math.round(gainedRatio*100)}%)` : '× 오답')} · +${pts} 氣</span>
+          <b style="color:var(--zhusha-d)">정답</b> <span class="han">${esc(correctText)}</span>
+          ${detail}
+        </div>
+        <button class="btn" type="button" id="sa-next" style="display:block;width:100%;margin-top:10px;padding:10px">${idx+1>=questions.length?'결과 →':'다음 →'}</button>
+      `;
+      $('#sa-next').addEventListener('click', () => { idx++; render(); });
+    };
+
+    $('#sa-submit').addEventListener('click', submit);
+    ta.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter' && (e.metaKey || e.ctrlKey)){ e.preventDefault(); submit(); }
+    });
+  };
+
+  render();
+}
+if(typeof window !== 'undefined') window.runShortAnswerSession = runShortAnswerSession;
+
+// 끝 — v9.4 플래시카드 + 주관식
 
 // ─── 난이도별 자동 문제 생성 ─────────────────────────────────────────────
 // difficulty 1: 작용·구성 단순 매칭 (빈출 위주)
