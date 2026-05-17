@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v7';                    // ★ 로비 표시용 (2026-05) — v7: 카드 對決 (本草 보드 + 神급 5스킬)
-const APP_BUILD   = '2026.05.17f';
+const APP_VERSION = 'v7.1';                  // ★ 로비 표시용 (2026-05) — v7.1: 도홍경 사진 + 멀티 진단 도구
+const APP_BUILD   = '2026.05.17g';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -165,6 +165,51 @@ const FB = (() => {
         fetch(`${base}/${path}.json`, {method:'DELETE', keepalive:true});
         return true;
       }catch(_){ return false; }
+    },
+    // v7.1: 멀티 진단 — 각 노드의 GET/PUT 권한을 직접 REST로 점검.
+    //   반환: [{node, op, ok, status, msg}, ...]
+    //   PUT 테스트는 __diag/{userId} 임시 키에 timestamp 쓰고 즉시 삭제.
+    //   사용자 콘솔에 결과를 명시적으로 표시 (어떤 노드의 어떤 권한이 막혔는지).
+    diag: async (userId) => {
+      const results = [];
+      const stamp = Date.now();
+      const tryGet = async (node) => {
+        try{
+          const r = await fetch(`${base}/${node}.json?shallow=true`);
+          results.push({node, op:'read',  ok:r.ok, status:r.status,
+                        msg: r.ok ? '읽기 OK' : (r.status === 401 || r.status === 403 ? '권한 거부' : `HTTP ${r.status}`)});
+        }catch(e){
+          results.push({node, op:'read', ok:false, status:0, msg:'네트워크 오류'});
+        }
+      };
+      const tryPut = async (node) => {
+        const path = `${node}/__diag/${userId||'anon'}`;
+        try{
+          const r = await fetch(`${base}/${path}.json`, {
+            method:'PUT', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ts:stamp})
+          });
+          results.push({node, op:'write', ok:r.ok, status:r.status,
+                        msg: r.ok ? '쓰기 OK' : (r.status === 401 || r.status === 403 ? '권한 거부' : `HTTP ${r.status}`)});
+          if(r.ok){
+            // 청소
+            try{ await fetch(`${base}/${path}.json`, {method:'DELETE'}); }catch(_){}
+          }
+        }catch(e){
+          results.push({node, op:'write', ok:false, status:0, msg:'네트워크 오류'});
+        }
+      };
+      // 5지선다 멀티
+      await tryGet('lobby');       await tryPut('lobby');
+      await tryGet('battles');     await tryPut('battles');
+      // 카드 對決
+      await tryGet('lobby_card');  await tryPut('lobby_card');
+      await tryGet('card_battles');await tryPut('card_battles');
+      // presence (둘러보는 중)
+      await tryGet('presence');    await tryPut('presence');
+      // 5지선다 idle
+      await tryGet('lobby_idle');  await tryPut('lobby_idle');
+      return results;
     },
     // v2.2.2: Firebase RTDB SSE 스트리밍 — 실시간 매칭/대기자 동기화
     //   const sub = FB.subscribe('lobby/small', snap => updateUI(snap));
@@ -1708,6 +1753,15 @@ function openBattleLobby(){
     <h2 class="view-title fade-in"><span class="han">對決</span>멀티 배틀</h2>
     <div class="view-sub">같은 베팅 레벨끼리 자동 매칭 · 승자가 패자의 氣 획득</div>
 
+    <!-- v7.1: Firebase 진단 (멀티 작동 안할 때 어디서 막혔는지 명시) -->
+    <div class="card fade-in" id="multi-diag-card" style="padding:10px 12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-family:var(--font-display);font-size:13px;color:var(--zhusha-d)">서버 연결 진단</div>
+        <button class="btn btn-sm btn-o" type="button" id="diag-rerun" style="font-size:11px;padding:2px 8px">재진단</button>
+      </div>
+      <div id="diag-result" style="font-size:11.5px;color:var(--mo)">진단 중…</div>
+    </div>
+
     <!-- v7: 對決 방식 토글 -->
     <div class="card fade-in" style="padding:10px 12px">
       <div style="font-family:var(--font-display);font-size:13px;color:var(--zhusha-d);margin-bottom:6px">對決 방식</div>
@@ -1845,8 +1899,78 @@ function openBattleLobby(){
   startLobbyStreams();
   startLobbyIdle(selected);
   applyMode();
+
+  // v7.1: 멀티 진단 자동 실행 (사용자가 매칭 안되는 원인을 화면에서 즉시 확인)
+  runMultiDiag();
+  $('#diag-rerun').addEventListener('click', runMultiDiag);
 }
 window.openBattleLobby = openBattleLobby;
+
+// v7.1: Firebase 진단 — 11개 노드 × (read|write) 권한 점검 후 UI에 표시
+async function runMultiDiag(){
+  const el = $('#diag-result');
+  if(!el) return;
+  if(!FB){
+    el.innerHTML = `<span style="color:var(--zhusha-d)">⚠ Firebase 설정 없음</span>`;
+    return;
+  }
+  el.textContent = '진단 중…';
+  let results;
+  try{
+    results = await FB.diag(S.userId || 'anon');
+  }catch(e){
+    el.innerHTML = `<span style="color:var(--zhusha-d)">진단 실패: ${esc(e.message||e)}</span>`;
+    return;
+  }
+  // 결과 집계
+  const fails = results.filter(r => !r.ok);
+  const writeOk = (node) => results.find(r => r.node === node && r.op === 'write')?.ok;
+  const allWriteNodes = ['lobby','battles','lobby_card','card_battles','presence','lobby_idle'];
+  const missingWrites = allWriteNodes.filter(n => !writeOk(n));
+  if(fails.length === 0){
+    el.innerHTML = `<span style="color:#1a7a3a">✓ 전 노드 읽기·쓰기 OK — 다른 사용자가 동시에 같은 모드 큐에 있어야 매칭됩니다</span>`;
+    return;
+  }
+  // 표 + 룰 안내
+  const rows = results.map(r => {
+    const icon = r.ok ? '<span style="color:#1a7a3a">✓</span>' : '<span style="color:var(--zhusha-d)">✗</span>';
+    return `<div style="display:grid;grid-template-columns:18px 1fr 1fr 1fr;gap:4px;align-items:center;padding:1px 0">
+      ${icon}
+      <span style="font-family:var(--font-display)">${esc(r.node)}</span>
+      <span style="color:var(--gutong)">${r.op}</span>
+      <span style="color:${r.ok?'#1a7a3a':'var(--zhusha-d)'}">${esc(r.msg)}</span>
+    </div>`;
+  }).join('');
+  // Firebase 룰 JSON (모든 노드 포함)
+  const ruleJson = `{
+  "rules": {
+    "presence":     { ".read": true, ".write": true },
+    "feedback":     { ".read": true, ".write": true },
+    "lobby":        { ".read": true, ".write": true },
+    "lobby_idle":   { ".read": true, ".write": true },
+    "battles":      { ".read": true, ".write": true },
+    "lobby_card":   { ".read": true, ".write": true },
+    "card_battles": { ".read": true, ".write": true },
+    "stats":        { ".read": true, ".write": true }
+  }
+}`;
+  el.innerHTML = `
+    <div style="margin-bottom:6px;color:var(--zhusha-d);font-weight:600">⚠ ${fails.length}개 항목 실패 — 멀티가 작동하지 않는 원인입니다</div>
+    <div style="background:var(--mi);padding:6px 8px;border-radius:3px;font-size:11px;font-family:ui-monospace,monospace">${rows}</div>
+    ${missingWrites.length ? `
+      <div style="margin-top:8px;padding:6px 8px;background:#FFF8E0;border:1px dashed var(--zhusha-d);border-radius:3px">
+        <div style="font-size:11.5px;color:var(--mo);margin-bottom:4px">
+          <b>Firebase Console → Realtime Database → 규칙</b>에 아래 JSON 붙여넣고 <b>게시</b>:
+        </div>
+        <pre style="font-size:10.5px;background:#fff;padding:6px;border:1px solid var(--gutong);border-radius:2px;overflow-x:auto;white-space:pre;margin:0">${esc(ruleJson)}</pre>
+        <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-gold" type="button" onclick="(()=>{navigator.clipboard.writeText(${JSON.stringify(ruleJson)}).then(()=>toast('룰 JSON 복사됨','gold'),()=>toast('복사 실패','red'))})()" style="font-size:11px;padding:3px 10px">룰 복사</button>
+          <a class="btn btn-sm btn-o" href="https://console.firebase.google.com/project/hanimaster-245f6/database/hanimaster-245f6-default-rtdb/rules" target="_blank" rel="noopener" style="font-size:11px;padding:3px 10px;text-decoration:none">Console 열기 ↗</a>
+        </div>
+      </div>` : ''}
+  `;
+}
+window.runMultiDiag = runMultiDiag;
 
 // v2.2.2: SSE 기반 실시간 대기자/관심자 동기화
 //   _lobbyStream      : /lobby      전체 (모든 level) SSE 1개

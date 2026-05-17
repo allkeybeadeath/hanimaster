@@ -705,7 +705,7 @@ const _LOCAL = (id, ext='jpg') => id + '.' + ext;
 const CHARACTER_IMAGES = {
   // ═ 神階 (5인) ═ Wellcome 의가 시리즈 (검증됨) + 女媧 (한대 백화)
   huangdi:     { url: _LOCAL('huangdi'),     fallback: _W('Chinese_woodcut,_Famous_medical_figures;_The_Yellow_Emperor_Wellcome_L0039314.jpg'), caption: '黃帝 — Wellcome 의가 시리즈 (1601)', license: 'CC BY 4.0' },
-  shennong:    { url: _LOCAL('shennong'),    fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Shen_Nong_Wellcome_L0039313.jpg'),         caption: '神農 — Wellcome 의가 시리즈',         license: 'CC BY 4.0' },
+  shennong:    { url: _LOCAL('shennong','png'), fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Shen_Nong_Wellcome_L0039313.jpg'),         caption: '神農 — Wellcome 의가 시리즈',         license: 'CC BY 4.0' },
   fuxi:        { url: _LOCAL('fuxi'),        fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Emperor_Fuxi_Wellcome_L0039312.jpg'),      caption: '伏羲 — Wellcome 의가 시리즈',         license: 'CC BY 4.0' },
   nvwa:        { url: _LOCAL('nvwa'),        fallback: _W('Anonymous-Fuxi_and_N%C3%BCwa3.jpg'),                                                  caption: '女媧 (伏羲女媧圖) — 唐 阿斯塔那 출토', license: 'PD-old' },
   qibo:        { url: _LOCAL('qibo'),        fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Portrait_of_Qibo_Wellcome_L0039315.jpg'),   caption: '岐伯 — Wellcome 의가 시리즈',         license: 'CC BY 4.0' },
@@ -762,7 +762,7 @@ const CHARACTER_IMAGES = {
 
   // ═ 清末·民國 (5인) ═
   chengguopeng:{ url: _LOCAL('chengguopeng'),fallback: _W('Cheng_Guopeng.jpg'),                                                                    caption: '程國彭 (鍾齡) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
-  zhangxichun: { url: _LOCAL('zhangxichun'), fallback: _W('Zhang_Xichun.jpg'),                                                                     caption: '張錫純 (壽甫) — 民國 사진 (추정)',      license: 'PD-old' },
+  zhangxichun: { url: _LOCAL('zhangxichun','png'), fallback: _W('Zhang_Xichun.jpg'),                                                                     caption: '張錫純 (壽甫) — 民國 사진 (추정)',      license: 'PD-old' },
   zhengqinan:  { url: _LOCAL('zhengqinan'),  fallback: _W('Zheng_Qinan.jpg'),                                                                      caption: '鄭欽安 (火神派 시조) — 歷代名醫圖贊 (추정)', license: 'PD-old' },
   huangyuanyu: { url: _LOCAL('huangyuanyu'), fallback: _W('Huang_Yuanyu.jpg'),                                                                     caption: '黃元御 (玉楸) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
   feibaixiong: { url: _LOCAL('feibaixiong'), fallback: _W('Fei_Boxiong.jpg'),                                                                      caption: '費伯雄 (晉卿) — 歷代名醫圖贊 (추정)',   license: 'PD-old' },
