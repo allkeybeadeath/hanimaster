@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v8';                    // ★ 로비 표시용 (2026-05) — v8: 본초 맛 색 + 진단 도구 + 전탕 힌트 차단 + forfeit 통합
-const APP_BUILD   = '2026.05.17k';
+const APP_VERSION = 'v8.3';                  // ★ 로비 표시용 (2026-05) — v8.3: 원격 wipe (모든 단말 localStorage 청소)
+const APP_BUILD   = '2026.05.17n';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -167,36 +167,43 @@ const FB = (() => {
       }catch(_){ return false; }
     },
     // v7.1: 멀티 진단 — 각 노드의 GET/PUT 권한을 직접 REST로 점검.
-    //   반환: [{node, op, ok, status, msg}, ...]
+    //   반환: [{node, op, ok, status, msg, body, url}, ...]
     //   PUT 테스트는 __diag/{userId} 임시 키에 timestamp 쓰고 즉시 삭제.
     //   사용자 콘솔에 결과를 명시적으로 표시 (어떤 노드의 어떤 권한이 막혔는지).
+    //   v8.1: 실패 시 Firebase 응답 본문(예: "Permission denied")까지 표시
     diag: async (userId) => {
       const results = [];
       const stamp = Date.now();
       const tryGet = async (node) => {
+        const url = `${base}/${node}.json?shallow=true`;
         try{
-          const r = await fetch(`${base}/${node}.json?shallow=true`);
-          results.push({node, op:'read',  ok:r.ok, status:r.status,
+          const r = await fetch(url);
+          let body = '';
+          if(!r.ok){ try{ body = await r.text(); }catch(_){} }
+          results.push({node, op:'read',  ok:r.ok, status:r.status, body, url,
                         msg: r.ok ? '읽기 OK' : (r.status === 401 || r.status === 403 ? '권한 거부' : `HTTP ${r.status}`)});
         }catch(e){
-          results.push({node, op:'read', ok:false, status:0, msg:'네트워크 오류'});
+          results.push({node, op:'read', ok:false, status:0, url, msg:'네트워크 오류'});
         }
       };
       const tryPut = async (node) => {
         const path = `${node}/__diag/${userId||'anon'}`;
+        const url = `${base}/${path}.json`;
         try{
-          const r = await fetch(`${base}/${path}.json`, {
+          const r = await fetch(url, {
             method:'PUT', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ts:stamp})
           });
-          results.push({node, op:'write', ok:r.ok, status:r.status,
+          let body = '';
+          if(!r.ok){ try{ body = await r.text(); }catch(_){} }
+          results.push({node, op:'write', ok:r.ok, status:r.status, body, url,
                         msg: r.ok ? '쓰기 OK' : (r.status === 401 || r.status === 403 ? '권한 거부' : `HTTP ${r.status}`)});
           if(r.ok){
             // 청소
-            try{ await fetch(`${base}/${path}.json`, {method:'DELETE'}); }catch(_){}
+            try{ await fetch(url, {method:'DELETE'}); }catch(_){}
           }
         }catch(e){
-          results.push({node, op:'write', ok:false, status:0, msg:'네트워크 오류'});
+          results.push({node, op:'write', ok:false, status:0, url, msg:'네트워크 오류'});
         }
       };
       // 5지선다 멀티
@@ -1213,7 +1220,245 @@ const ROUTES = {
   quiz: renderQuiz,
   stats: renderStats,
   hall: renderHall,
+  admin: renderAdminPanel,  // v8.2: PWA 내장 관리자 패널 (#admin URL 또는 hidden 진입)
 };
+
+// ───── 7.5. 관리자 패널 (v8.2) ────────────────────────────────────────────────
+// PWA 와 같은 origin 이라 admin HTML 의 cross-origin/sandbox 문제 우회.
+// 진입: URL 에 #admin 추가 (예: index.html#admin) 또는 헤더 朱砂 도장 5회 연타.
+const ADMIN_NODES = [
+  {key:'lobby',        desc:'5지선다 매칭 큐'},
+  {key:'lobby_idle',   desc:'5지선다 둘러보는 중'},
+  {key:'lobby_card',   desc:'카드 對決 매칭 큐'},
+  {key:'battles',      desc:'5지선다 對決 방'},
+  {key:'card_battles', desc:'카드 對決 방'},
+  {key:'presence',     desc:'사용자 접속 표시'},
+  {key:'stats',        desc:'전적·오답 집계'},
+  {key:'feedback',     desc:'사용자 피드백'},
+];
+
+async function _adminProbeRead(key){
+  const base = FB && FB.base;
+  if(!base) return {ok:false, status:0, msg:'FB 없음'};
+  const url = `${base}/${key}.json?shallow=true`;
+  try{
+    const r = await fetch(url);
+    let body = '';
+    if(!r.ok){ try{ body = await r.text(); }catch(_){} return {ok:false, status:r.status, body, url}; }
+    const j = await r.json();
+    const count = j === null ? 0 : (typeof j === 'object' ? Object.keys(j).length : 1);
+    return {ok:true, status:r.status, count, url};
+  }catch(e){ return {ok:false, status:0, msg:e.message, url}; }
+}
+
+async function _adminProbeWrite(key){
+  const base = FB && FB.base;
+  if(!base) return {ok:false, status:0, msg:'FB 없음'};
+  const url = `${base}/${key}/__probe_${Date.now()}.json`;
+  try{
+    const r = await fetch(url, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({t:Date.now()})
+    });
+    let body = '';
+    if(!r.ok){ try{ body = await r.text(); }catch(_){} return {ok:false, status:r.status, body, url}; }
+    await fetch(url, {method:'DELETE'});
+    return {ok:true, status:r.status, url};
+  }catch(e){ return {ok:false, status:0, msg:e.message, url}; }
+}
+
+async function _adminDelete(key){
+  const base = FB && FB.base;
+  if(!base) return {ok:false};
+  const url = `${base}/${key}.json`;
+  try{
+    const r = await fetch(url, {method:'DELETE'});
+    let body = '';
+    if(!r.ok){ try{ body = await r.text(); }catch(_){} }
+    return {ok:r.ok, status:r.status, body, url};
+  }catch(e){ return {ok:false, status:0, msg:e.message, url}; }
+}
+
+function _adminLog(msg, kind){
+  const el = document.getElementById('admin-log');
+  if(!el) return;
+  const t = new Date().toLocaleTimeString('ko-KR', {hour12:false});
+  const line = document.createElement('div');
+  if(kind) line.style.color = ({ok:'#7ddc7d', err:'#ff8b8b', info:'#9bcfff', warn:'#ffd17a'})[kind] || '';
+  line.textContent = `[${t}] ${msg}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderAdminPanel(){
+  if(!FB){
+    view.innerHTML = '<div class="card">Firebase 미설정 — 관리자 기능 사용 불가</div>';
+    return;
+  }
+  view.innerHTML = `
+    <h2 class="view-title fade-in"><span class="han">掃</span>관리자 패널</h2>
+    <div class="view-sub">Firebase RTDB 8개 노드 진단 · 청소 (PWA 동일 origin)</div>
+
+    <div class="card fade-in">
+      <div class="card-title" style="font-family:var(--font-display);color:var(--zhusha-d);font-size:13px;margin-bottom:6px">현재 RTDB 호스트</div>
+      <div style="font-family:ui-monospace,monospace;font-size:11px;color:var(--mo-l);word-break:break-all;background:var(--mi);padding:6px 8px;border-radius:3px">${esc(FB.base)}</div>
+    </div>
+
+    <div class="card fade-in" id="admin-nodes-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-family:var(--font-display);color:var(--zhusha-d);font-size:13px">노드별 카운트</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm btn-o" type="button" id="admin-refresh">카운트</button>
+          <button class="btn btn-sm btn-o" type="button" id="admin-probe">쓰기 점검</button>
+        </div>
+      </div>
+      <div id="admin-nodes" style="font-size:11.5px"></div>
+    </div>
+
+    <div class="card fade-in" style="background:#FFF8E0;border:1px dashed var(--zhusha-d)">
+      <div style="font-family:var(--font-display);color:var(--zhusha-d);font-size:14px;margin-bottom:6px">⚠ 전체 삭제</div>
+      <div style="font-size:12px;color:var(--mo);margin-bottom:8px;line-height:1.55">
+        8개 노드 전체 삭제. 모든 사용자의 매칭 큐·전적·오답·진행중 對決 사라짐.
+        氣는 클라이언트 localStorage 에 있어 별개.
+      </div>
+      <button class="btn" type="button" id="admin-wipe" style="background:var(--zhusha-d);color:#fff;border-color:var(--zhusha-d);font-weight:600">전체 삭제 (이중 확인)</button>
+    </div>
+
+    <div class="card fade-in" style="background:#FFE8E0;border:1px dashed var(--zhusha-d)">
+      <div style="font-family:var(--font-display);color:var(--zhusha-d);font-size:14px;margin-bottom:6px">⚠ 모든 사용자 단말 localStorage 청소 (원격 wipe)</div>
+      <div style="font-size:12px;color:var(--mo);margin-bottom:8px;line-height:1.55">
+        Firebase 의 <code>/system/wipeAt</code> 노드에 현재 timestamp 를 게시 → 각 사용자가 다음 PWA 로드 시 자동으로 자기 단말의 氣·이름·진영·battleHistory 까지 모두 청소되고 새로 시작합니다. 동일 사용자에게 1회만 적용 (wipeAt 갱신 전엔 재실행 안 됨). 모든 사용자가 v8.3+ 를 로드한 상태여야 작동합니다.
+      </div>
+      <button class="btn" type="button" id="admin-remote-wipe" style="background:var(--zhusha-d);color:#fff;border-color:var(--zhusha-d);font-weight:600">단말 청소 신호 발사</button>
+    </div>
+
+    <div class="card fade-in" style="background:#161616;padding:10px 12px">
+      <div style="font-family:ui-monospace,monospace;font-size:10.5px;color:#9bcfff;margin-bottom:4px">로그</div>
+      <div id="admin-log" style="font-family:ui-monospace,monospace;font-size:10.5px;color:#d4d4d4;max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-all"></div>
+    </div>
+  `;
+  _renderAdminNodeRows();
+  document.getElementById('admin-refresh').addEventListener('click', _adminRefreshAll);
+  document.getElementById('admin-probe').addEventListener('click', _adminProbeAll);
+  document.getElementById('admin-wipe').addEventListener('click', _adminWipeAll);
+  document.getElementById('admin-remote-wipe').addEventListener('click', _adminRemoteWipe);
+  _adminLog('관리자 패널 준비됨. PWA 와 같은 origin 이라 CORS 영향 없음.', 'info');
+  _adminRefreshAll();
+}
+
+function _renderAdminNodeRows(){
+  const c = document.getElementById('admin-nodes');
+  c.innerHTML = ADMIN_NODES.map(n => `
+    <div style="display:grid;grid-template-columns:1fr 70px 80px;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid var(--mi)" data-key="${esc(n.key)}">
+      <div>
+        <div style="font-family:ui-monospace,monospace;color:var(--zhusha-d);font-size:12px">/${esc(n.key)}</div>
+        <div style="font-size:10.5px;color:var(--gutong)">${esc(n.desc)}</div>
+      </div>
+      <div style="text-align:right;font-family:ui-monospace,monospace;font-weight:600" id="admin-cnt-${esc(n.key)}">—</div>
+      <div><button class="btn btn-sm btn-o" type="button" data-del="${esc(n.key)}" style="font-size:10.5px;padding:3px 6px;width:100%">개별 삭제</button></div>
+    </div>
+  `).join('');
+  c.querySelectorAll('[data-del]').forEach(b => {
+    b.addEventListener('click', async () => {
+      const key = b.dataset.del;
+      if(!confirm(`/${key} 노드를 정말 삭제할까요?`)) return;
+      b.disabled = true;
+      _adminLog(`/${key} 삭제 중…`, 'info');
+      const r = await _adminDelete(key);
+      if(r.ok){ _adminLog(`✓ /${key} 삭제 완료`, 'ok'); }
+      else{ _adminLog(`✗ /${key} 실패 (HTTP ${r.status}${r.body?' · '+r.body.slice(0,150):''})`, 'err'); }
+      b.disabled = false;
+      const c2 = await _adminProbeRead(key);
+      const cntEl = document.getElementById(`admin-cnt-${key}`);
+      if(cntEl) cntEl.textContent = c2.ok ? c2.count.toLocaleString() : 'err';
+    });
+  });
+}
+
+async function _adminRefreshAll(){
+  _adminLog('카운트 수집…', 'info');
+  let total = 0;
+  for(const n of ADMIN_NODES){
+    const r = await _adminProbeRead(n.key);
+    const el = document.getElementById(`admin-cnt-${n.key}`);
+    if(r.ok){
+      total += r.count;
+      if(el){ el.textContent = r.count.toLocaleString(); el.style.color = r.count === 0 ? 'var(--gutong)' : 'var(--mo)'; }
+      _adminLog(`  /${n.key} : ${r.count}`, r.count > 0 ? null : 'info');
+    } else {
+      if(el){ el.textContent = `err ${r.status||0}`; el.style.color = 'var(--zhusha-d)'; }
+      _adminLog(`  ✗ /${n.key} HTTP ${r.status} · ${r.body||r.msg||''}`, 'err');
+      _adminLog(`     URL: ${r.url}`, 'info');
+    }
+  }
+  _adminLog(`총 ${total} 항목`, total > 0 ? 'warn' : 'ok');
+}
+
+async function _adminProbeAll(){
+  _adminLog('쓰기 권한 점검…', 'info');
+  let ok = 0, fail = 0;
+  for(const n of ADMIN_NODES){
+    const r = await _adminProbeWrite(n.key);
+    if(r.ok){ _adminLog(`  ✓ /${n.key} 쓰기 OK`, 'ok'); ok++; }
+    else {
+      const reason = r.status === 401 || r.status === 403 ? '권한 거부' : `HTTP ${r.status}`;
+      _adminLog(`  ✗ /${n.key} ${reason}${r.body?' · '+r.body.slice(0,150):''}${r.msg?' · '+r.msg:''}`, 'err');
+      _adminLog(`     URL: ${r.url}`, 'info');
+      fail++;
+    }
+  }
+  _adminLog(`결과: ${ok} 통과 / ${fail} 실패`, fail === 0 ? 'ok' : 'warn');
+  if(fail === ADMIN_NODES.length){
+    _adminLog('━━ 전 노드 실패 = "게시 안 됨" 또는 "다른 인스턴스" 가능성. 응답 본문에 Permission denied 가 있는지 확인.', 'warn');
+  }
+}
+
+async function _adminWipeAll(){
+  const phrase = '모두 삭제';
+  const typed = prompt(`모든 사용자 기록을 영구 삭제합니다.\n진행하려면 정확히 입력: "${phrase}"`);
+  if(typed !== phrase){ _adminLog('취소됨 (확인 문구 불일치)', 'warn'); return; }
+  if(!confirm('마지막 확인 — 정말 모두 삭제? 되돌릴 수 없음')){
+    _adminLog('취소됨 (최종 확인 거부)', 'warn'); return;
+  }
+  _adminLog('━━ 전체 삭제 시작 ━━', 'warn');
+  document.getElementById('admin-wipe').disabled = true;
+  let ok = 0, fail = 0;
+  for(const n of ADMIN_NODES){
+    const r = await _adminDelete(n.key);
+    if(r.ok){ _adminLog(`  ✓ /${n.key} 삭제`, 'ok'); ok++; }
+    else { _adminLog(`  ✗ /${n.key} HTTP ${r.status} · ${r.body||r.msg||''}`, 'err'); fail++; }
+  }
+  _adminLog(`━━ 완료: 성공 ${ok} / 실패 ${fail}`, fail === 0 ? 'ok' : 'err');
+  await _adminRefreshAll();
+  document.getElementById('admin-wipe').disabled = false;
+}
+
+async function _adminRemoteWipe(){
+  const phrase = '단말 청소';
+  const typed = prompt(`모든 사용자 단말의 localStorage 를 청소합니다.\n각 사용자는 다음 PWA 로드 시 자동으로 새로 시작.\n\n진행하려면 정확히 입력: "${phrase}"`);
+  if(typed !== phrase){ _adminLog('취소됨 (확인 문구 불일치)', 'warn'); return; }
+  if(!confirm('마지막 확인 — 모든 사용자 단말 청소 신호를 발사합니다. 진행할까요?')){
+    _adminLog('취소됨', 'warn'); return;
+  }
+  const stamp = Date.now();
+  _adminLog(`/system/wipeAt = ${stamp} (${new Date(stamp).toLocaleString('ko-KR')}) 게시 중…`, 'info');
+  const base = FB && FB.base;
+  if(!base){ _adminLog('FB 없음', 'err'); return; }
+  try{
+    const r = await fetch(`${base}/system/wipeAt.json`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(stamp)
+    });
+    if(!r.ok){
+      let body = '';
+      try{ body = await r.text(); }catch(_){}
+      _adminLog(`✗ 실패 HTTP ${r.status} · ${body}`, 'err');
+      return;
+    }
+    _adminLog(`✓ 원격 wipe 신호 발사 완료. 각 사용자가 PWA 를 다시 열면 자동 청소됩니다.`, 'ok');
+    _adminLog('  본인 단말도 같은 신호를 받습니다 — 새로고침하면 자기도 청소됨.', 'warn');
+  }catch(e){ _adminLog(`✗ 네트워크 오류 · ${e.message}`, 'err'); }
+}
 
 // ───── 8. 大廳 (홈/로비) ─────────────────────────────────────────────────────
 function renderHome(){
@@ -2053,14 +2298,17 @@ async function runMultiDiag(){
     return;
   }
   // 표 + 룰 안내
-  const rows = results.map(r => {
+  const rows = results.map((r, i) => {
     const icon = r.ok ? '<span style="color:#1a7a3a">✓</span>' : '<span style="color:var(--zhusha-d)">✗</span>';
-    return `<div style="display:grid;grid-template-columns:18px 1fr 1fr 1fr;gap:4px;align-items:center;padding:1px 0">
+    const bodyLine = (!r.ok && r.body)
+      ? `<details style="grid-column:1/-1;margin:2px 0 4px 22px"><summary style="font-size:10.5px;color:var(--zhusha-d);cursor:pointer">Firebase 응답 본문</summary><pre style="font-size:10px;background:#fff;padding:4px 6px;border:1px solid var(--gutong);border-radius:2px;margin:3px 0 0;white-space:pre-wrap;word-break:break-all">${esc(r.body.slice(0,300))}</pre><div style="font-size:10px;color:var(--gutong);margin-top:2px;word-break:break-all">URL: ${esc(r.url||'')}</div></details>`
+      : '';
+    return `<div style="display:grid;grid-template-columns:18px 1fr 50px 1fr;gap:4px;align-items:center;padding:1px 0">
       ${icon}
       <span style="font-family:var(--font-display)">${esc(r.node)}</span>
-      <span style="color:var(--gutong)">${r.op}</span>
-      <span style="color:${r.ok?'#1a7a3a':'var(--zhusha-d)'}">${esc(r.msg)}</span>
-    </div>`;
+      <span style="color:var(--gutong);font-size:10.5px">${r.op}</span>
+      <span style="color:${r.ok?'#1a7a3a':'var(--zhusha-d)'};font-size:10.5px">${esc(r.msg)}</span>
+    </div>${bodyLine}`;
   }).join('');
   // Firebase 룰 JSON (모든 노드 포함)
   const ruleJson = `{
@@ -2075,8 +2323,19 @@ async function runMultiDiag(){
     "stats":        { ".read": true, ".write": true }
   }
 }`;
+  // v8.1: 모든 노드 실패 = "게시 안 됨" 패턴 식별
+  const allWritesFail = allWriteNodes.every(n => !writeOk(n));
+  const allReadsFail  = allWriteNodes.every(n => {
+    const r = results.find(x => x.node === n && x.op === 'read');
+    return r && !r.ok;
+  });
+  const totalFailPattern = allWritesFail && allReadsFail;
   el.innerHTML = `
     <div style="margin-bottom:6px;color:var(--zhusha-d);font-weight:600">⚠ ${fails.length}개 항목 실패 — 멀티가 작동하지 않는 원인입니다</div>
+    ${totalFailPattern ? `
+      <div style="margin:6px 0 10px;padding:8px 10px;background:#FFF8E0;border-left:3px solid var(--zhusha-d);font-size:12px;line-height:1.55">
+        <b style="color:var(--zhusha-d)">전 노드 거부 패턴</b> — 룰이 실제로 게시되지 않았을 가능성이 가장 높습니다. Console 룰 페이지에 들어가 "게시" 버튼이 <b>회색(비활성)</b>인지 확인하세요. 파란색이면 미게시 변경사항이 남아있다는 뜻입니다. 또한 Console 의 RTDB URL 호스트가 아래 진단 URL 과 정확히 같은지 비교 (region 다른 인스턴스 가능성).
+      </div>` : ''}
     <div style="background:var(--mi);padding:6px 8px;border-radius:3px;font-size:11px;font-family:ui-monospace,monospace">${rows}</div>
     ${missingWrites.length ? `
       <div style="margin-top:8px;padding:6px 8px;background:#FFF8E0;border:1px dashed var(--zhusha-d);border-radius:3px">
@@ -6331,7 +6590,52 @@ function stopCardStreams(){
   }catch(_){}
 }
 
+// v8.3: 원격 wipe 메커니즘
+//   Firebase 의 /system/wipeAt 노드에 timestamp(ms) 를 게시하면
+//   각 사용자가 다음 PWA 로드 시 자동으로 localStorage 청소 + reload.
+//   bangje.* / quiz.* prefix 의 모든 localStorage 키 청소.
+//   청소 후 wipeAt 값을 bangje.wipeAck.v1 에 기록 → 동일 wipe 신호는 1회만 실행.
+async function checkRemoteWipe(){
+  if(!FB) return false;
+  try{
+    const remote = await FB.get('system/wipeAt');
+    const remoteN = parseInt(remote, 10);
+    if(!remoteN || remoteN <= 0) return false;
+    const localAck = parseInt(localStorage.getItem('bangje.wipeAck.v1')||'0', 10);
+    if(remoteN <= localAck) return false;
+    // 청소 대상: bangje.* 와 quiz.* prefix (사용자 데이터). wipeAck 자체는 보존.
+    const keysToWipe = [];
+    for(let i=0; i<localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(!k) continue;
+      if(k === 'bangje.wipeAck.v1') continue;
+      if(k.startsWith('bangje.') || k.startsWith('quiz.')) keysToWipe.push(k);
+    }
+    keysToWipe.forEach(k => localStorage.removeItem(k));
+    localStorage.setItem('bangje.wipeAck.v1', String(remoteN));
+    // 사용자에게 짧게 알리고 새로고침
+    document.body.innerHTML = `
+      <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+                  flex-direction:column;gap:14px;
+                  font-family:'Noto Serif KR',serif;background:#FAF7EF;color:#9C3030">
+        <div style="font-size:48px">掃</div>
+        <div style="font-size:16px">관리자 청소 적용 — 새로 시작합니다</div>
+        <div style="font-size:11px;color:#888">${new Date(remoteN).toLocaleString('ko-KR')}</div>
+      </div>`;
+    setTimeout(() => location.reload(), 900);
+    return true;
+  }catch(_){ return false; }
+}
+
 function init(){
+  // v8.3: 원격 wipe 체크 우선. wipe 발견 시 청소 + reload → 이후 단계 무시.
+  checkRemoteWipe().then(wiped => {
+    if(wiped) return;
+    _initContinue();
+  });
+}
+
+function _initContinue(){
   loadState();
   refreshHeader();
   // 헤더 칩 클릭
@@ -6340,8 +6644,29 @@ function init(){
   $('#bgm-chip').addEventListener('click', () => bgm.toggle());
   // 네비
   $$('.nav-btn').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
-  // 첫 화면
-  setTab(S.lastTab || 'home');
+  // v8.2: 관리자 패널 hidden 진입
+  //   ① URL hash 가 #admin 이면 자동 진입 (예: index.html#admin)
+  //   ② 헤더의 朱砂 도장(rank-chip) 5초 안에 5회 연타로 진입
+  const hashIsAdmin = () => (location.hash || '').toLowerCase() === '#admin';
+  let firstTab = S.lastTab || 'home';
+  if(hashIsAdmin()) firstTab = 'admin';
+  setTab(firstTab);
+  // 朱砂 5연타 카운터
+  let _adminTaps = []; const _ADMIN_TAP_WINDOW = 5000;
+  const rankChip = $('#rank-chip');
+  if(rankChip){
+    rankChip.addEventListener('click', () => {
+      const now = Date.now();
+      _adminTaps = _adminTaps.filter(t => now - t < _ADMIN_TAP_WINDOW);
+      _adminTaps.push(now);
+      if(_adminTaps.length >= 5){
+        _adminTaps = [];
+        toast('관리자 패널 진입', 'gold');
+        setTab('admin');
+      }
+    });
+  }
+  window.addEventListener('hashchange', () => { if(hashIsAdmin()) setTab('admin'); });
   // presence 시작
   if(FB) recordPresence();
   // v2.2.2: page unload 시 멀티 로비 잔여 정리 (keepalive DELETE)
