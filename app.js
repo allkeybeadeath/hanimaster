@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v9.4';                  // ★ 로비 표시용 (2026-05) — 플래시카드 + 주관식 채점 (조성·효능·주치·가감) 추가
+const APP_VERSION = 'v9.5';                  // ★ 로비 표시용 (2026-05) — 方劑Cube 방미큐브 4人 對局 추가
 const APP_BUILD   = '2026.05.17z';
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
@@ -1205,6 +1205,7 @@ const ROUTES = {
   flash: renderFlashHub,       // v9.4: 플래시카드 + 주관식 허브
   stats: renderStats,
   hall: renderHall,
+  cube: (typeof renderCube === 'function') ? renderCube : renderHome,  // v9.5: 방미큐브
   admin: renderAdminPanel,  // v8.2: PWA 내장 관리자 패널 (#admin URL 또는 hidden 진입)
 };
 
@@ -1493,6 +1494,10 @@ function renderHome(){
 
     <!-- 학습 메뉴 타일 -->
     <div class="tile-grid fade-in">
+      <button class="tile cube" type="button" onclick="setTab('cube')">
+        <span class="han">方劑Cube</span><span class="ttl">방미큐브 · 4人 對局<span class="new-badge">NEW</span></span>
+        <span class="desc">루미큐브 룰 · 본초 카드 · 처방 짜서 손패 비우자</span>
+      </button>
       <button class="tile" type="button" onclick="setTab('formula')">
         <span class="han">方劑</span><span class="ttl">처방</span>
         <span class="desc">26 처방 카드 · 작용·구성·적응증</span>
