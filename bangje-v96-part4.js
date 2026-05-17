@@ -234,10 +234,20 @@ function _teardownBridge(){
 }
 
 function _emit(){
-  for(const s of _subs){
-    try{ s.cb(_room); }catch(_){}
-  }
+  // v9.6: 마이크로태스크 배칭 — startGame 등에서 Promise.all 로 여러 PUT 이 동시
+  //   발사될 때 부분 상태로 구독자 cb 가 호출되어 renderGame 이 잘못된 snap 으로
+  //   진입하는 것 방지. 동기 PUT 여러 건을 1회 emit 으로 합침.
+  if(_emitPending) return;
+  _emitPending = true;
+  Promise.resolve().then(() => {
+    _emitPending = false;
+    if(!_room && _subs.length === 0) return;
+    for(const s of _subs){
+      try{ s.cb(_room); }catch(_){}
+    }
+  });
 }
+let _emitPending = false;
 
 // ─ AI 출패 로직 ────────────────────────────────────────────────────────────
 function _findBestPlay(hand){

@@ -1638,12 +1638,14 @@ if(document.readyState === 'loading'){
   init();
 }
 
-// 외부 노출 — app.js 의 ROUTES 에서 사용
+// 외부 노출 — app.js 의 ROUTES 및 v9.6 AI 모듈에서 사용
 window.renderCube = renderCube;
 window.BC = {
   VERSION: BC_VER,
   build, injectCSS,
   matchSet, isValidSet, validateBoard,
+  // v9.6: AI 大局 진입용 — V96CubeAI 가 호출
+  enterRoom, startGame,
   // 디버깅용
   sets: () => _sets,
   proto: () => _proto,

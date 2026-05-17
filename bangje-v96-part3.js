@@ -140,11 +140,19 @@ function stop(){
 }
 
 function _notify(){
+  // v9.6: 마이크로태스크 배칭 — 부분 상태 emit 방지
   if(!_roomRef || !_roomId) return;
   _roomRef.lastActionAt = now();
-  const subs = _bridgeSubs[_roomId] || [];
-  subs.forEach(cb => { try{ cb(_roomRef); }catch(_){} });
+  if(_notifyPending) return;
+  _notifyPending = true;
+  Promise.resolve().then(() => {
+    _notifyPending = false;
+    if(!_roomRef || !_roomId) return;
+    const subs = _bridgeSubs[_roomId] || [];
+    subs.forEach(cb => { try{ cb(_roomRef); }catch(_){} });
+  });
 }
+let _notifyPending = false;
 
 function _setupBridge(){
   if(_bridgeSavedFB) return;
