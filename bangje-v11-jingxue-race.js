@@ -296,6 +296,11 @@ function renderSaamdoinHome(){
   if(!view) return;
   // v11.6: 헤더 컨텍스트 전환
   try{ if(typeof window.setHeaderContext === 'function') window.setHeaderContext('saamdoin'); }catch(_){}
+  // v11.6: 활동 라벨 (의서궁 同學 표시용)
+  try{
+    if(window.V96Activity) window.V96Activity.set('舍巖之房', '경혈학 학습 중');
+    if(typeof window.recordPresence === 'function') window.recordPresence();
+  }catch(_){}
   view.innerHTML = _baseStyles() + _bannerHTML() + `
     <div class="sx-modes">
       <button class="sx-mode-btn primary" type="button" data-mode="solo">
@@ -377,7 +382,10 @@ function _newRace(mode){
   };
 }
 
-function openRaceSolo(){ RACE = _newRace('solo'); _renderRace(); _startCountdown(); }
+function openRaceSolo(){
+  try{ if(window.V96Activity) window.V96Activity.set('五輸穴 레이스', '15 經脈 完走 · 對 AI 3봇'); }catch(_){}
+  RACE = _newRace('solo'); _renderRace(); _startCountdown();
+}
 
 function _startCountdown(){
   // 「3 · 2 · 1 · 出發!」

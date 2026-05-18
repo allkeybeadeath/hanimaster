@@ -1452,11 +1452,34 @@ body.on-hub main#view { padding-bottom:18px !important; }
 <!-- v11.6: 경혈학 (舍巖之房) — 五輸穴 레이스 + 12경락 + 임독대 -->
 <script src="bangje-v11-jingxue-race.js"></script>
 
-<!-- 서비스 워커 -->
+<!-- 서비스 워커 v11.6: 자동 업데이트 감지 + skipWaiting -->
 <script>
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      // 매 페이지 로드 시 SW update 체크 (캐시 우회)
+      try{ reg.update(); }catch(_){}
+      // 새 SW 발견 시 자동 skipWaiting → 즉시 activate
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if(!nw) return;
+        nw.addEventListener('statechange', () => {
+          if(nw.state === 'installed' && navigator.serviceWorker.controller){
+            // 이전 SW 가 컨트롤 중인데 새 SW 가 installed → waiting 상태.
+            //   강제로 활성화 시도 (sw.js 의 message 리스너가 skipWaiting 호출)
+            try{ nw.postMessage('SKIP_WAITING'); }catch(_){}
+            try{ if(window.toast) window.toast('업데이트 적용됨 · 새로고침합니다','gold'); }catch(_){}
+          }
+        });
+      });
+      // controller 변경 (새 SW activate) → 1회 자동 reload
+      let _reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if(_reloaded) return;
+        _reloaded = true;
+        setTimeout(() => location.reload(), 250);
+      });
+    }).catch(()=>{});
   });
 }
 </script>

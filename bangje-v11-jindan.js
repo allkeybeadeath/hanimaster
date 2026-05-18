@@ -191,6 +191,11 @@ function _newSession(mode, catId){
 function renderDongmuHome(){
   const view = document.getElementById('view');
   if(!view) return;
+  // v11.6: 활동 라벨 갱신 (의서궁 同學 표시용).
+  try{
+    if(window.V96Activity) window.V96Activity.set('東武之房', '진단학 동무대청');
+    if(typeof window.recordPresence === 'function') window.recordPresence();
+  }catch(_){}
   view.innerHTML = _baseStyles() + _bannerHTML() + `
     <div class="dm-modes">
       <button class="dm-mode-btn duiwei" type="button" data-mode="duiwei" style="grid-column:1 / -1">
@@ -225,6 +230,34 @@ function renderDongmuHome(){
       <div><b style="color:#C9A227">兼 (복합)</b> · 4장 — 舌+苔 동시 명시 (양쪽 set 에 모두 포함)</div>
       <div style="margin-top:6px;color:var(--mo-l);font-size:10.5px">시험 일정은 醫書宮 상단 D-N 패널에 통합 표시.</div>
     </div>
+    
+    <!-- v11.6: 참고서적 패널 -->
+    <details class="dm-ref-panel" style="margin-top:10px;background:#FAF6E8;border:1px solid #C9A22755;border-radius:9px;padding:0 12px">
+      <summary style="cursor:pointer;padding:10px 0;font-family:'Noto Serif SC',serif;font-size:13px;color:var(--zhusha-d)">
+        <b>參考 · 설진 표준 서적 ${(window.TONGUE_REFERENCES||[]).length}종</b>
+        <span style="font-size:11px;color:var(--mo-l);font-weight:normal">— 사진 매칭 보강용</span>
+      </summary>
+      <div style="padding-bottom:12px;font-size:11.5px;line-height:1.65">
+        ${((window.TONGUE_REFERENCES||[])).map(r => `
+          <div style="border-top:1px dashed #C9A22744;padding:8px 0">
+            <div style="font-family:'Noto Serif SC',serif;font-size:12.5px">
+              <span style="color:${r.standard?'#9C3030':'#2A7060'};font-weight:700">${r.standard?'★ 表':'  '}</span>
+              <span class="han" style="font-weight:700">${esc(r.name_han)}</span>
+              <span style="color:var(--mo-l)">· ${esc(r.name_ko)}</span>
+              <span style="font-size:9.5px;background:#C9A22733;color:#7C5810;padding:1px 5px;border-radius:3px;margin-left:4px">${esc(r.lang.toUpperCase())}</span>
+            </div>
+            <div style="color:var(--mo-l);font-size:10.5px;margin-top:2px">${esc(r.authors)} · ${esc(r.pub)} · ${esc(r.year)}</div>
+            <div style="color:var(--mo);font-size:10.5px;margin-top:2px">사진/도판: ${esc(r.pages)}</div>
+            <div style="color:#7C5810;font-size:10.5px;margin-top:3px;font-style:italic">→ ${esc(r.why)}</div>
+          </div>
+        `).join('')}
+        <div style="margin-top:8px;padding:6px 8px;background:#FFF2D8;border-radius:5px;font-size:10px;color:var(--mo-l);line-height:1.55">
+          ★ 表 = 한국 한의대 표준 교재. 추가 사진을 對位 매트릭스에 통합하려면<br>
+          ① 사진을 t49.jpg ~ 형식으로 저장 → ② data-jindan-tongue.js TONGUES 배열에 항목 추가 →<br>
+          ③ bangje-v11-tongue-matrix.js ENTRIES 에 (color, coating, conf) 추가.
+        </div>
+      </div>
+    </details>
   `;
   _attachBanner();
   $$('.dm-mode-btn').forEach(b => {
@@ -245,7 +278,10 @@ function renderDongmuHome(){
 window.renderDongmuHome = renderDongmuHome;
 
 let GAL_STATE = { catId:'all', showLabels:true };
-function openGallery(){ _renderGallery(); }
+function openGallery(){
+  try{ if(window.V96Activity) window.V96Activity.set('圖鑑 · 설진', '동무대청 사진첩'); }catch(_){}
+  _renderGallery();
+}
 function _renderGallery(){
   const view = document.getElementById('view');
   if(!view) return;
@@ -322,9 +358,18 @@ function _openDetailModal(tid){
   document.body.appendChild(bg);
 }
 
-function openMcq(){   _renderQuizPickRange('mcq',   '問答 · 객관식 4지선다', '범위 탭 → 시작.'); }
-function openSubj(){  _renderQuizPickRange('subj',  '主觀 · 주관식 입력',   '한자/한글 직접 입력.'); }
-function openDrill(){ _renderQuizPickRange('drill', '速習 · 드릴',          '4지선다 자동 진행.'); }
+function openMcq(){
+  try{ if(window.V96Activity) window.V96Activity.set('問答 · 설진', '4지선다 객관식'); }catch(_){}
+  _renderQuizPickRange('mcq',   '問答 · 객관식 4지선다', '범위 탭 → 시작.');
+}
+function openSubj(){
+  try{ if(window.V96Activity) window.V96Activity.set('主觀 · 설진', '주관식 입력'); }catch(_){}
+  _renderQuizPickRange('subj',  '主觀 · 주관식 입력',   '한자/한글 직접 입력.');
+}
+function openDrill(){
+  try{ if(window.V96Activity) window.V96Activity.set('速習 · 설진', '드릴 자동 진행'); }catch(_){}
+  _renderQuizPickRange('drill', '速習 · 드릴',          '4지선다 자동 진행.');
+}
 function _renderQuizPickRange(mode, title, sub){
   const view = document.getElementById('view');
   if(!view) return;

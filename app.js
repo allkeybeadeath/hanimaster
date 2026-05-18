@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v11.5';                  // ★ 醫書宮 통합 hub + 진단학 풀 구축 (圖鑑/問答/主觀/速習/析究/對位) + 방제학 home 중복 제거 (2026-05)
+const APP_VERSION = 'v11.6';                  // ★ 醫書宮 同學 활동상태 통합 + 설진 對位 48장 完備 + 參考書 (2026-05)
 const APP_BUILD   = '2026.05.18.v10.0.8';     // v10.0.8 scope correction
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
@@ -1146,11 +1146,17 @@ function setTab(name){
   $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   view.scrollTop = 0; window.scrollTo({top:0, behavior:'instant'});
   // v9.6: 활동 라벨 갱신 (presence detail 모달에서 표시)
+  // v11.6: 의서궁(hub) 및 진단학·경혈학·설진 라벨 추가 →
+  //        의서궁의 同學 목록과 방제학 home 의 同學 목록에서 동일하게 의미 있는 활동 라벨이 표시됨.
   if(typeof window.V96Activity !== 'undefined'){
     const labels = {
       home: '大廳', formula: '處方 학습', herb: '本草 학습', quiz: '기출·암기',
       flash: '암기·주관식', stats: '통계·분석', hall: '명예의 전당',
       cube: '방미큐브 對局', warrior2h: '2시간의 전사', battle: '對決 진행 중',
+      // v11.6: 의서궁 / 8房 라벨 (clinic-hub _wrapSetTab 에서 sub 까지 다시 set 하지만,
+      //         외부 모듈이 setTab 만 호출했을 때를 위한 fallback)
+      hub: '醫書宮', dongmu: '東武之房 (진단)', jingxue: '舍巖之房 (경혈)',
+      tongue: '舌診 對位',
     };
     try{ window.V96Activity.set(labels[name] || name, ''); }catch(_){}
   }

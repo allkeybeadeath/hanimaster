@@ -47,6 +47,9 @@ const COATINGS = [
 // 각 tongue id 의 (color_idx, coating_idx).
 // confidence: 'explicit' = 교재 라벨에 색·태 둘 다 명시.
 //             'inferred' = 한 쪽 명시 + 변증/notes 로 표준 진단학 합리 추정.
+//
+// v11.6: 누락 24장 보강. 진단학 표준 (한방진단학·中医诊断学) 으로 색·태 좌표 추정.
+//        근거는 각 entry 의 주석 (변증·notes·교과서 일반 분류).
 const ENTRIES = [
   // 정상·氣虛계
   { tid: 1,  color:1, coating:1, conf:'explicit' },   // 淡紅·薄白苔 — 정상
@@ -54,10 +57,18 @@ const ENTRIES = [
   { tid: 6,  color:0, coating:0, conf:'explicit' },   // 淡白·無苔 — 陽虛
   { tid:36, color:0, coating:1, conf:'inferred' },    // 淡白 + 氣血兩虛 → 薄白
   { tid:38, color:1, coating:1, conf:'inferred' },    // 薄白苔 + 정상 → 淡紅
+  // v11.6 추가 (氣虛·陽虛·齒痕계 — 형태 위주 사진)
+  { tid:25, color:0, coating:1, conf:'inferred' },    // 齒痕舌·氣虛/陽虛 → 淡白·薄白 standard
+  { tid:26, color:0, coating:1, conf:'inferred' },    // 齒痕(肥大)·氣虛 → 淡白·薄白
+  { tid:27, color:0, coating:1, conf:'inferred' },    // 齒痕(肥大)·氣虛 → 淡白·薄白
   // 濕證·寒濕
   { tid: 7,  color:1, coating:1, conf:'explicit' },   // 淡紅·薄滑苔 — 濕證
   { tid:40, color:0, coating:2, conf:'inferred' },    // 白厚滑膩 + 寒濕 → 淡白
   { tid:41, color:1, coating:2, conf:'inferred' },    // 白滑苔 + 痰濕 → 淡紅
+  // v11.6 추가 (濕證·痰濕계 苔 명시)
+  { tid:15, color:1, coating:2, conf:'inferred' },    // 滑苔·濕證 → 淡紅·白厚滑膩
+  { tid:16, color:1, coating:2, conf:'inferred' },    // 白厚苔·痰濕 → 淡紅·白厚膩
+  { tid:39, color:1, coating:2, conf:'inferred' },    // 白厚腐苔·食積/痰濁 → 淡紅·白厚膩 (腐苔는 食積)
   // 痰濕·寒濕 紫계
   { tid:10, color:4, coating:2, conf:'explicit' },    // 紫紅·白膩 — 痰濕
   { tid:13, color:4, coating:2, conf:'explicit' },    // 紫·白膩 — 寒濕
@@ -67,18 +78,41 @@ const ENTRIES = [
   { tid:18, color:2, coating:3, conf:'inferred' },    // 淡黃垢膩 + 濕熱 → 紅
   { tid:19, color:2, coating:3, conf:'inferred' },    // 黃膩 + 濕熱 → 紅
   { tid:42, color:2, coating:3, conf:'inferred' },    // 黃薄乾 + 熱盛 → 紅
+  // v11.6 추가 (純 熱證·心肝火旺·實證계)
+  { tid: 4,  color:1, coating:1, conf:'inferred' },   // 舌尖紅·점자·心火盛 → 전체 淡紅 + 薄白 (국소 발현)
+  { tid: 8,  color:2, coating:3, conf:'inferred' },   // 紅舌·熱證 → 紅·黃苔 standard
+  { tid: 9,  color:2, coating:3, conf:'inferred' },   // 尖邊紅·心肝火旺 → 紅·黃苔
+  { tid:34, color:2, coating:3, conf:'inferred' },    // 粗老·實證 → 紅·黃苔 (實熱)
+  { tid:37, color:2, coating:3, conf:'inferred' },    // 芒刺·熱盛 → 紅·黃苔
+  { tid:20, color:2, coating:3, conf:'explicit' },    // 黃膩苔+剝·陰虛 → 紅·黃 (苔 explicit, 剝은 보조)
   // 熱入營血·熱極
   { tid:14, color:4, coating:3, conf:'explicit' },    // 暗紅·薄黃 — 熱入營血
   { tid:43, color:3, coating:3, conf:'inferred' },    // 黃厚燥 + 熱極 → 絳
   { tid:44, color:3, coating:3, conf:'inferred' },    // 黃厚燥裂 + 熱極傷陰 → 絳
+  // v11.6 추가 (陰虛火旺 絳)
+  { tid:35, color:3, coating:0, conf:'inferred' },    // 裂紋(紅絳)·陰虛火旺 → 絳·少苔
   // 陰虛·胃陰虛 (少苔系)
   { tid:22, color:2, coating:0, conf:'inferred' },    // 花剝苔 + 胃陰虛 → 紅
   { tid:30, color:2, coating:0, conf:'inferred' },    // 無苔 + 胃陰虛 → 紅
   { tid:48, color:2, coating:0, conf:'inferred' },    // 剝苔 + 胃陰虛 → 紅
   { tid:28, color:3, coating:0, conf:'inferred' },    // 絳 + 陰虛/熱入營 → 少苔
   { tid:29, color:3, coating:0, conf:'inferred' },    // 絳 + 陰虛 → 少苔
+  // v11.6 추가 (陰虛·肺胃陰虛 少苔)
+  { tid: 3,  color:2, coating:0, conf:'inferred' },   // 瘦薄·陰虛 → 紅·少苔 (陰虛火旺 표준)
+  { tid: 5,  color:2, coating:0, conf:'inferred' },   // 裂紋·陰虛 → 紅·少苔
+  { tid:21, color:2, coating:0, conf:'inferred' },    // 半截剝·肺胃陰虛 → 紅·少苔
+  { tid:23, color:1, coating:0, conf:'inferred' },    // 花剝·氣虛 → 淡紅·少苔 (氣虛이므로 색 약함)
+  { tid:24, color:1, coating:0, conf:'inferred' },    // 地圖苔·氣虛 → 淡紅·少苔 (地圖=花剝)
+  { tid:31, color:2, coating:0, conf:'inferred' },    // 鏡面舌·陰虛 → 紅·無苔
   // 血瘀 紫系
   { tid:12, color:4, coating:1, conf:'inferred' },    // 紫紅 + 血瘀 → 薄白 default
+  // v11.6 추가 (熱毒·血瘀 紫)
+  { tid:32, color:4, coating:1, conf:'inferred' },    // 紫紅·熱毒/血瘀 → 紫·薄白
+  { tid:33, color:4, coating:0, conf:'inferred' },    // 紫紅·熱毒·陰虛 → 紫·少苔 (陰虛 동반)
+  // v11.6 추가 (黑苔·偏盛 — 危重/편향)
+  { tid:45, color:2, coating:4, conf:'inferred' },    // 黑苔·熱極 → 紅·黑苔 (熱極 표준)
+  { tid:46, color:2, coating:4, conf:'inferred' },    // 黑苔·熱極/極寒 → 紅·黑苔
+  { tid:47, color:1, coating:1, conf:'inferred' },    // 偏左白苔·偏盛 → 淡紅·薄白 (편향은 형태 분류)
 ];
 
 function _getTongueById(id){
@@ -119,6 +153,11 @@ function open(){
   }
   _state = _newState();
   _render();
+  // v11.6: 활동 라벨 갱신 → 의서궁의 同學 목록에 "舌診 對位" 가 표시됨.
+  try{
+    if(window.V96Activity) window.V96Activity.set('舌診 對位', '설질·설태 매트릭스 학습 중');
+    if(typeof window.recordPresence === 'function') window.recordPresence();
+  }catch(_){}
 }
 
 // ─── 4. UI: 메인 렌더 ───────────────────────────────────────────────────

@@ -601,4 +601,75 @@ if(typeof window !== 'undefined'){
   window.TONGUE_BY_ID = TONGUE_BY_ID;
   window.tonguesForMode = tonguesForMode;
   window.JINDAN_EXAMS = JINDAN_EXAMS;
+  window.TONGUE_REFERENCES = TONGUE_REFERENCES;
 }
+
+// ─── 참고서적 ────────────────────────────────────────────────────────
+// v11.6: 학습 보강용 표준 설진 참고서. 한국 한의대 표준 + 영미 임상 + 중의약 圖譜.
+//   각 entry:
+//     name_ko / name_han  — 한글·한자 제목
+//     authors             — 저자
+//     pub                 — 출판사
+//     year                — 출판연도
+//     lang                — 'ko' | 'en' | 'zh'
+//     pages               — 사진/색표 약 수
+//     why                 — 본 PWA 학습에 어떻게 활용 가능한지 (한 줄)
+//     standard            — 한국 한의대 표준교재 여부
+const TONGUE_REFERENCES = [
+  {
+    name_ko:'한방진단학', name_han:'韓方診斷學',
+    authors:'전국 한의과대학 진단학교실',
+    pub:'대성출판사', year:'2014~', lang:'ko',
+    pages:'설진 章 약 70~80p, 도판 40+',
+    why:'본 PWA 의 48장 사진·라벨 出處. 시험 표준.',
+    standard:true,
+  },
+  {
+    name_ko:'동의진단학', name_han:'東醫診斷學',
+    authors:'이봉교 외',
+    pub:'성보사', year:'1985', lang:'ko',
+    pages:'설진 도판 약 30',
+    why:'전통 韓醫 관점 설진 분류. 변증과 설상의 연계 강조.',
+    standard:true,
+  },
+  {
+    name_ko:'중의설진도보', name_han:'中醫舌診圖譜',
+    authors:'人民衛生出版社 編',
+    pub:'人民衛生出版社', year:'2010~ (개정 다수)', lang:'zh',
+    pages:'컬러 사진 200+',
+    why:'설질·설태 조합별 대표 사진 多. 對位 매트릭스 셀 보강용.',
+    standard:false,
+  },
+  {
+    name_ko:'중국 설진 아틀라스', name_han:'Atlas of Chinese Tongue Diagnosis',
+    authors:'Barbara Kirschbaum',
+    pub:'Eastland Press (US)', year:'2010 (2nd ed.)', lang:'en',
+    pages:'컬러 사진 320+',
+    why:'서양인 환자 사진 多. 五臟 別 (肺·脾胃·腎·心·肝) 정리. 임상 case 풍부.',
+    standard:false,
+  },
+  {
+    name_ko:'설진학 (Maciocia)', name_han:'Tongue Diagnosis in Chinese Medicine',
+    authors:'Giovanni Maciocia',
+    pub:'Eastland Press', year:'1995 (Rev.)', lang:'en',
+    pages:'사진 200+',
+    why:'영문 표준 텍스트. 정의·발생 기전 상세. 본 PWA 의 변증 해설 보강.',
+    standard:false,
+  },
+  {
+    name_ko:'포켓 설진 아틀라스', name_han:'Pocket Atlas of Tongue Diagnosis',
+    authors:'Claus C. Schnorrenberger',
+    pub:'Thieme', year:'2011 (2nd)', lang:'en',
+    pages:'컬러 도판',
+    why:'휴대용 아틀라스. 침구·처방·식이 가이드 통합.',
+    standard:false,
+  },
+  {
+    name_ko:'대한한의진단학회지', name_han:'大韓韓醫診斷學會誌',
+    authors:'대한한의진단학회',
+    pub:'대한한의진단학회', year:'분기 발행', lang:'ko',
+    pages:'논문',
+    why:'설진 정량화·AI 융합 최신 연구. 學會 발표 자료 참조.',
+    standard:false,
+  },
+];

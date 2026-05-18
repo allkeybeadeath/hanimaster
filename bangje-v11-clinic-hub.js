@@ -39,6 +39,13 @@ const SUBJECT_BY_ID = {}; SUBJECTS.forEach(s => SUBJECT_BY_ID[s.id] = s);
 
 // ─── CHANGELOG ─────────────────────────────────────────────────────────
 const CHANGELOG_ENTRIES = [
+  { id:'v11.6', label:'v11.6', date:'2026-05-18', title:'醫書宮 同學 활동상태 통합 · 설진 對位 48장 完備 · 參考書', body:
+    '의서궁 同學 목록의 activity 객체 렌더 버그 픽스 (이전: [object Object] / 빈 라벨 → 안 보임). ' +
+    '진단학·경혈학·설진 등 八房 전 과목 진입 시 V96Activity.set 자동 호출 → 의서궁에서 어디서 학습 중인지 실시간 표시. ' +
+    'hub 화면 머무는 동안 25초마다 同學/명전 자동 새로고침. ' +
+    '本人 항상 상단 + 「(나)」 배지. ' +
+    '對位 매트릭스: 48 설진 사진 全 매핑 완료 (이전 24/48 → 48/48). 누락된 형태계·黑苔·偏盛계 24장 추가. ' +
+    '진단학 동무대청에 표준 참고서적 7종 패널 (한방진단학·동의진단학·中医舌诊图谱·Kirschbaum·Maciocia·Schnorrenberger·진단학회지).' },
   { id:'v11.5', label:'v11.5', date:'2026-05-18', title:'醫書宮 통합 hub · 진단학 풀 구축', body:
     '醫書宮 첫 진입 시 모든 과목 시험 D-N · 프로필 변경 · 同學 · 명예의 전당 · 黃帝內經 명언 · 건의사항 · 업뎃 내역을 한 화면에. ' +
     '진단학을 방제학과 동일한 형식으로 재구축: 圖鑑·問答·主觀·速習·析究·對位 6 모드. 48 설진 사진을 사용자 규칙 (苔 글자 기준) 으로 재분류 — 舌質 24장 · 舌苔 20장 · 兼 4장. ' +
@@ -537,20 +544,38 @@ async function _loadPresence(){
         active.push({ uid, ...p });
       });
     }
-    active.sort((a,b) => (b.qi||0) - (a.qi||0));
+    // v11.6: 최근 활동 우선 (방제학 home 과 동일하게 ts 기준).
+    // 본인은 항상 최상단으로 끌어올려 “안 보임”으로 오인되지 않도록.
+    const meUid = (typeof S !== 'undefined' && S && S.userId) ? S.userId : '';
+    active.sort((a,b) => {
+      if(meUid && a.uid === meUid) return -1;
+      if(meUid && b.uid === meUid) return  1;
+      return (b.ts||0) - (a.ts||0);
+    });
     if(cnt) cnt.textContent = String(active.length);
     if(active.length === 0){
       list.innerHTML = '<span class="hub-presence-empty">아무도 없습니다.</span>';
       return;
     }
     const top = active.slice(0, 12);
-    list.innerHTML = top.map(p => `
-      <div class="hub-presence-item">
-        <div class="hub-presence-medal">${_medal(p.character||'qibo', 22)}</div>
-        <span class="hub-presence-name">${esc(p.name||'?')}</span>
-        ${p.activity ? `<span class="hub-presence-act">· ${esc(p.activity)}</span>` : ''}
-      </div>
-    `).join('') + (active.length > 12 ? `<span class="hub-presence-empty">+${active.length-12}</span>` : '');
+    list.innerHTML = top.map(p => {
+      // v11.6: activity 는 {label, sub, ts} 객체. 방제학 app.js 처리와 동일하게 label 만 표시.
+      //        (이전: esc(p.activity) → "[object Object]" 또는 빈 라벨 → 안 보이던 문제 수정)
+      const act = (p.activity && typeof p.activity === 'object') ? p.activity : null;
+      const actLabel = act && act.label ? String(act.label) : '';
+      const actSub   = act && act.sub   ? String(act.sub)   : '';
+      const actHtml  = actLabel
+        ? `<span class="hub-presence-act" title="${esc(actSub)}">· ${esc(actLabel)}</span>`
+        : '';
+      const isMe = meUid && p.uid === meUid;
+      return `
+        <div class="hub-presence-item" ${isMe?'style="background:#FFF2D8;border-color:#C9A227aa"':''}>
+          <div class="hub-presence-medal">${_medal(p.character||'qibo', 22)}</div>
+          <span class="hub-presence-name">${esc(p.name||'?')}${isMe?' <span style="font-size:9px;color:#9C3030">(나)</span>':''}</span>
+          ${actHtml}
+        </div>
+      `;
+    }).join('') + (active.length > 12 ? `<span class="hub-presence-empty">+${active.length-12}</span>` : '');
   }catch(e){
     list.innerHTML = '<span class="hub-presence-empty">불러오기 실패</span>';
   }
@@ -670,6 +695,20 @@ function _wrapSetTab(){
   window.setTab = function(name){
     document.body.classList.toggle('on-hub', name === 'hub');
     const ret = original.apply(this, arguments);
+    // v11.6: 의서궁 / 다른 과목 진입 시 활동 라벨을 명확히 설정 (방제학 setTab labels 에는 없는 키 보완).
+    //        → 의서궁의 同學 목록에 "醫書宮 둘러보는 중" / "東武之房 진단학" 등이 표시됨.
+    try{
+      if(window.V96Activity){
+        const HUB_LABELS = {
+          hub:    { label:'醫書宮',     sub:'八房 입구를 둘러보는 중' },
+          dongmu: { label:'東武之房',   sub:'진단학 학습 중' },
+          jingxue:{ label:'舍巖之房',   sub:'경혈학 학습 중' },
+          tongue: { label:'舌診 對位',  sub:'설질·설태 매트릭스' },
+        };
+        const m = HUB_LABELS[name];
+        if(m) window.V96Activity.set(m.label, m.sub);
+      }
+    }catch(_){}
     // hub/dongmu 라우트 fallback (ROUTES 미등록 시)
     const view = document.getElementById('view');
     if(view){
@@ -681,8 +720,33 @@ function _wrapSetTab(){
         try{ window.renderDongmuHome(); }catch(e){ console.error('dongmu render fail', e); }
       }
     }
+    // v11.6: 의서궁 진입 시 본인 presence 즉시 push (label 갱신을 다른 사람도 빨리 보도록)
+    if(name === 'hub'){
+      try{ if(typeof window.recordPresence === 'function') window.recordPresence(); }catch(_){}
+      // 의서궁 화면에 머물 때 同學 목록도 주기적으로 새로고침
+      _startHubAutoRefresh();
+    } else {
+      _stopHubAutoRefresh();
+    }
     return ret;
   };
+}
+
+// v11.6: 의서궁 화면에 머무는 동안 同學 / 명전 / 피드백 주기 새로고침
+let _hubRefreshTimer = null;
+function _startHubAutoRefresh(){
+  if(_hubRefreshTimer) return;
+  _hubRefreshTimer = setInterval(() => {
+    if(!document.getElementById('hub-pres-list')){
+      _stopHubAutoRefresh();
+      return;
+    }
+    try{ _loadPresence();     }catch(_){}
+    try{ _loadHallPreview();  }catch(_){}
+  }, 25 * 1000);  // 25초마다 (presence FRESH 90초 의 약 1/3 주기)
+}
+function _stopHubAutoRefresh(){
+  if(_hubRefreshTimer){ clearInterval(_hubRefreshTimer); _hubRefreshTimer = null; }
 }
 
 function _forceHubOnFreshSession(){
