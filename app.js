@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v11.0';                  // ★ 醫書宮 — 다과목 hub (2026-05) — 8房 (방제·진단·상한·한방병리·예방·양방병리·영상·경혈)
+const APP_VERSION = 'v11.1';                  // ★ 진단학 (동무의 방) 설진 학습 도구 (2026-05) — 48장 사진 + 객관/주관/드릴/사진첩, 5/19 5/26 D-N 표시
 const APP_BUILD   = '2026.05.18.v10.0.8';     // v10.0.8 scope correction
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
