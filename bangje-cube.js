@@ -632,7 +632,14 @@ async function renderLobby(){
       <div class="card-title"><span class="han">遊戲規則</span> 게임 룰</div>
       <ul style="font-size:12.5px;line-height:1.7;padding-left:18px;margin:6px 0">
         <li>2~4인 · 본초 카드로 시작 (4인 ${HAND_4P}장 / 2~3인 ${HAND_23P}장)</li>
-        <li>유효 set = 완성 방제 · 派生方 · 증상별 加減</li>
+        <li>유효 set = 완성 方劑(基方) · 派生方 · 증상별 加減 · base 의 부분집합</li>
+        <li style="background:rgba(156,48,48,.06);padding:6px 8px;border-radius:5px;list-style:none;margin-left:-18px;border-left:2px solid var(--zhusha-d)">
+          <b style="color:var(--zhusha-d)">出牌 룰 (v10.0.6)</b>
+          <div style="font-size:11.5px;color:var(--mo-l);line-height:1.6;margin-top:3px">
+            • <span class="han" style="color:var(--zhusha-d)">初手</span> <b>완성된 基方</b> — 사이즈 무관 (사역탕 3미·당귀보혈탕 2미 OK), 派生·加減·부분집합 불가<br>
+            • <span class="han" style="color:var(--feicui)">續手↑</span> 完成 方劑 · 派生方 · 加減方 · <b>base 의 부분집합 (≥3 본초, 어떤 처방의 구성본초로만 구성)</b>
+          </div>
+        </li>
         <li>보드 처방에 본초 추가 → 가감방 변형 · set 분해 후 재조합 가능</li>
         <li>턴 종료 시 모든 set 유효 + 손패 1장 이상 출패</li>
         <li>위반 시 <b>${PENALTY_DRAW}장 페널티 드로우</b>, 못 내면 1장 뽑고 턴 종료</li>
@@ -1409,12 +1416,18 @@ function bindHelpAndLeave(rid){
           <li><b>「創」 새 set</b> — 손패 선택 카드들로 새 set 만들기 (최소 2장)</li>
           <li><b>「加」 set에 추가</b> — 손패 선택 + 보드 set 선택 → 그 set 에 추가 (가감방 변형)</li>
           <li><b>「取」 손패로</b> — 보드 set 의 선택 카드를 손패로 회수 (split)</li>
-          <li><b>「終」 턴 종료</b> — 모든 set 유효 + 손패 1장 이상 출패 → 인정</li>
+          <li><b>「終」 턴 종료</b> — 모든 set 유효 + 손패 1장 이상 출패 → 인정
+            <div style="font-size:11.5px;color:var(--mo-l);margin-top:5px;line-height:1.55;background:rgba(156,48,48,.06);padding:7px 9px;border-radius:5px;border-left:2px solid var(--zhusha-d)">
+              <b style="color:var(--zhusha-d)">出牌 룰 (v10.0.6)</b><br>
+              • <span class="han" style="color:var(--zhusha-d)">初手</span> <b>완성된 基方</b> 강제. 派生方·加減方·부분집합 不可.<br>
+              • <span class="han" style="color:var(--feicui)">續手↑</span> 完成 方劑 · 派生方 · 加減方 · <b>base 의 부분집합 (≥3 본초)</b> 모두 OK.
+            </div>
+          </li>
           <li><b>「摸」 패 뽑기</b> — 변경 없을 때만, 덱 1장 + 턴 종료</li>
           <li><b>「↺」 되돌리기</b> — 턴 시작 시점으로</li>
         </ol>
         <div style="font-size:12px;color:var(--gutong);margin-top:14px;background:rgba(0,0,0,.04);padding:8px;border-radius:6px;line-height:1.6">
-          <b>예시:</b> 보드에 사군자탕(인삼·백출·복령·감초) 이 있을 때, 손패의 진피 선택 → 사군자탕 헤더 탭 → 「加」 → <b>이공산</b> 으로 변형. 보드의 처방을 분해해 다른 set 과 재조합도 가능.
+          <b>예시:</b> 보드에 사군자탕(인삼·백출·복령·감초) 이 있을 때, 손패의 진피 선택 → 사군자탕 헤더 탭 → 「加」 → <b>이공산</b> 으로 변형. 보드의 처방을 분해해 다른 set 과 재조합도 가능. 続手 부분집합 예: 인삼·백출·복령 (사군자 3미) 출패 → "사군자탕 부분" 으로 보드에 올림.
         </div>
         <div style="text-align:center;margin-top:14px">
           <button class="btn" id="bc-help-close" type="button">알겠습니다</button>

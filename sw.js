@@ -10,7 +10,7 @@
  *   • 캐릭터 사진 → images/characters/ 폴더로 이동
  *   • 캐시 키 갱신
  */
-const CACHE = 'bangje-pwa-v10-0-6-2026-05';
+const CACHE = 'bangje-pwa-v10-0-7-2026-05';
 const PRECACHE = [
   './',
   './index.html',
@@ -60,9 +60,7 @@ const PRECACHE = [
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
-  './apple-touch-icon.png',
-  './shennong.png',
-  './leesoonjae-medallion.jpeg'
+  './apple-touch-icon.png'
 ];
 
 self.addEventListener('install', e => {

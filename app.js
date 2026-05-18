@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v10.0.6';                // ★ 로비 (2026-05) — 큐브 둘째 出牌부터 base 부분집합(≥3미) 허용 + v10.0.5 누계
-const APP_BUILD   = '2026.05.18.v10.0.6';     // v10.0.6 partial subset
+const APP_VERSION = 'v10.0.7';                // ★ 로비 (2026-05) — 룰 표시 갱신 (初手/續手 명시) + v10.0.6 누계
+const APP_BUILD   = '2026.05.18.v10.0.7';     // v10.0.7 룰 UI
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
