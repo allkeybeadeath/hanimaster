@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v11.1a';                  // ★ 진단학 (동무의 방) 설진 학습 도구 (2026-05) — 48장 사진 + 객관/주관/드릴/사진첩, 5/19 5/26 D-N 표시
+const APP_VERSION = 'v11.2';                  // ★ 醫書宮 1st-screen + 도구4종 + 업뎃 상시 표시 (2026-05)
 const APP_BUILD   = '2026.05.18.v10.0.8';     // v10.0.8 scope correction
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
@@ -8667,8 +8667,13 @@ function _initContinue(){
   //   ① URL hash 가 #admin 이면 자동 진입 (예: index.html#admin)
   //   ② 헤더의 朱砂 도장(rank-chip) 5초 안에 5회 연타로 진입
   const hashIsAdmin = () => (location.hash || '').toLowerCase() === '#admin';
-  let firstTab = S.lastTab || 'home';
+  let firstTab = 'hub';                          // v11.2: 항상 醫書宮 시작 (방제학 home → 의서궁의 神農之房 클릭)
   if(hashIsAdmin()) firstTab = 'admin';
+  // 특수 hash 로 직접 진입 (#home #hall #cube 등) 지원 — 디버그·딥링크용
+  const specialHash = (location.hash || '').toLowerCase().slice(1);
+  if(specialHash && ['home','hall','cube','flash','quiz','formula','herb','stats','dongmu'].includes(specialHash)){
+    firstTab = specialHash;
+  }
   setTab(firstTab);
   // 朱砂 5연타 카운터
   let _adminTaps = []; const _ADMIN_TAP_WINDOW = 5000;
