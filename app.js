@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v10.0.4';                // ★ 로비 (2026-05) — 신급 스킬 복구·女媧 키·큐브 첫출패 base만·시험범위밖 표시·카드對決 가로 wrap·드로어 통과 클릭
-const APP_BUILD   = '2026.05.18.v10.0.4';     // v10.0.4 패치 5건
+const APP_VERSION = 'v10.0.5';                // ★ 로비 (2026-05) — 多本草 同含 검색 모드 추가 + v10.0.4 패치 누계
+const APP_BUILD   = '2026.05.18.v10.0.5';     // v10.0.5 同含 모드
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 

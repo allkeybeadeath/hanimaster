@@ -1,9 +1,15 @@
-/* bangje-v99-herbtap.js — v10.0.4
+/* bangje-v99-herbtap.js — v10.0.5
  * ============================================================================
  * 본초 단탭 + 하단 드로어 popup + 大廳 학습 토글
  *
  *   v98-herbpop 의 전체화면 overlay 가 게임을 가려서 진행 불가 → 화면 하단
  *   드로어 (최대 38vh) 로 대체. 위쪽 62vh 는 게임 화면 그대로 사용 가능.
+ *
+ *   v10.0.5 신규 — 큐브 손패 다중 선택 (≥2장) intersection 모드:
+ *     선택된 모든 本草를 composition 에 포함하는 處方만 노출.
+ *     派生方·加減方도 최종 (base − remove + add) composition 기준 intersection.
+ *     선택 ≤ 1 이면 기존 단일 본초 모드로 자동 복귀.
+ *     선택 상태는 DOM (.bc-card.bc-card-sel) 에서 setTimeout(0) deferred 로 읽음.
  *
  *   v10.0.4 변경 (2건):
  *     1. 카드 탭이 학습 측 capture-listener 에서 stopPropagation/preventDefault 로
@@ -99,9 +105,84 @@ function _additionsContaining(han){
 
 function _adjuncts(f, currentHan){
   if(!Array.isArray(f.composition)) return [];
+  const targets = Array.isArray(currentHan) ? currentHan : [currentHan];
   const others = f.composition.map(_herbName)
-    .filter(n => n && n !== currentHan && !n.startsWith(currentHan) && !currentHan.startsWith(n));
+    .filter(n => {
+      if(!n) return false;
+      return !targets.some(t => t && (n === t || n.startsWith(t) || t.startsWith(n)));
+    });
   return Array.from(new Set(others));
+}
+
+// v10.0.5: 큐브 손패에서 현재 선택된 본초 (DOM 의 .bc-card.bc-card-sel 기반).
+// LOCAL.selHand 가 외부에 노출되지 않으므로 DOM 으로 읽음. capture 호출자가
+// setTimeout(0) 으로 deferred 호출하면 bubble (큐브 renderHand) 후의 갱신 상태가 보임.
+function _getCubeSelectedHerbs(){
+  const out = [];
+  const seen = new Set();
+  document.querySelectorAll('.bc-card.bc-card-sel').forEach(el => {
+    const h = el.dataset && el.dataset.han;
+    if(h && !seen.has(h)){ seen.add(h); out.push(h); }
+  });
+  return out;
+}
+
+// v10.0.5: 본초들이 모두 등장하는 처방 — base composition intersection.
+function _formulasContainingAll(hans){
+  if(!hans || !hans.length) return [];
+  const FORMULAS_IN  = window.FORMULAS || [];
+  const FORMULAS_OUT = window.FORMULAS_EXTRA || [];
+  const inIds = new Set(FORMULAS_IN.map(f => f && f.id).filter(Boolean));
+  const all = FORMULAS_IN.concat(FORMULAS_OUT);
+  const out = [];
+  for(const f of all){
+    if(!f.composition || !f.composition.length) continue;
+    const herbs = f.composition.map(_herbName);
+    const ok = hans.every(han =>
+      herbs.some(h => h === han || h.startsWith(han) || han.startsWith(h))
+    );
+    if(ok){
+      out.push({ f, outOfScope: !inIds.has(f.id) });
+    }
+  }
+  return out;
+}
+
+// v10.0.5: 派生方·加減方 intersection — 최종 composition = base − remove + add 기준.
+function _additionsContainingAll(hans){
+  if(!hans || !hans.length) return [];
+  const FORMULAS_IN  = window.FORMULAS || [];
+  const inIds = new Set(FORMULAS_IN.map(f => f && f.id).filter(Boolean));
+  const allFormulasById = {};
+  (window.FORMULAS||[]).concat(window.FORMULAS_EXTRA||[]).forEach(f => { if(f && f.id) allFormulasById[f.id] = f; });
+  const sources = [ window.FORMULA_ADDITIONS || {}, window.EXTRA_ADDITIONS || {} ];
+  const out = [];
+  for(const adds of sources){
+    for(const [fid, obj] of Object.entries(adds)){
+      const parent = allFormulasById[fid];
+      if(!parent || !parent.composition) continue;
+      const baseHerbs = parent.composition.map(_herbName);
+      for(const it of (obj.items||[])){
+        const removeH = (it.remove||[]).map(_herbName);
+        const addH    = (it.herbs||[]).map(_herbName);
+        const finalH  = baseHerbs.filter(h => !removeH.includes(h)).concat(addH);
+        const ok = hans.every(han =>
+          finalH.some(h => h === han || h.startsWith(han) || han.startsWith(h))
+        );
+        if(ok){
+          out.push({
+            parent,
+            target: it.target||'',
+            mod: it.mod||'',
+            kind: it.kind||'symptom',
+            parentInScope: inIds.has(fid),
+            finalHerbs: finalH,
+          });
+        }
+      }
+    }
+  }
+  return out;
 }
 
 let _drawer = null;
@@ -114,6 +195,47 @@ function close(){
       _drawer = null;
     }, 220);
   } else { _drawer = null; }
+}
+
+// v10.0.5: 다중 선택 intersection 모드. 큐브 손패에서 2장 이상 선택 시 발동.
+function openForMulti(hans){
+  if(!hans || hans.length < 2){
+    if(hans && hans.length === 1) return openFor(hans[0]);
+    return;
+  }
+  _injectCSS();
+  const matches = _formulasContainingAll(hans);
+  const additions = _additionsContainingAll(hans);
+  const total = matches.length + additions.length;
+  const inMatches  = matches.filter(x => !x.outOfScope);
+  const outMatches = matches.filter(x =>  x.outOfScope);
+
+  const headHTML = `
+    <div class="v99hd-bar"></div>
+    <div class="v99hd-head">
+      <span class="v99hd-han">${hans.map(esc).join(' · ')}</span>
+      <span class="v99hd-mode">同含 검색</span>
+      <span class="v99hd-cnt">${total}개</span>
+      <button type="button" class="v99hd-close" aria-label="닫기">×</button>
+    </div>`;
+  const bodyHTML = `
+    <div class="v99hd-meaning">선택한 ${hans.length}本 本草를 모두 포함하는 處方</div>
+    ${total === 0 ? `<div class="v99hd-empty">선택한 本草 (${hans.map(esc).join('·')})를 모두 포함하는 處方이 발견되지 않음. 선택을 줄여 보세요.</div>` : ''}
+    ${inMatches.length ? `<div class="v99hd-sect"><div class="v99hd-sect-head" style="color:#876A36">시험범위 안 處方 <span class="v99hd-sect-cnt">${inMatches.length}</span></div><div class="v99hd-chips">${inMatches.map(x => _chip(x.f, '#876A36', '', hans, false)).join('')}</div></div>` : ''}
+    ${outMatches.length ? `<div class="v99hd-sect"><div class="v99hd-sect-head" style="color:#9C7030">시험범위 밖 處方 <span class="v99hd-sect-cnt">${outMatches.length}</span></div><div class="v99hd-chips">${outMatches.map(x => _chip(x.f, '#9C7030', '', hans, true)).join('')}</div></div>` : ''}
+    ${additions.length ? `<div class="v99hd-sect"><div class="v99hd-sect-head" style="color:#6B5A8A">派生方·加減方 <span class="v99hd-sect-cnt">${additions.length}</span></div><div class="v99hd-chips">${additions.map(a => _chipDerived(a, hans)).join('')}</div></div>` : ''}
+  `;
+  if(_drawer){
+    _drawer.querySelector('.v99hd-head-wrap').innerHTML = headHTML;
+    _drawer.querySelector('.v99hd-body').innerHTML = bodyHTML;
+  } else {
+    _drawer = document.createElement('div');
+    _drawer.id = 'v99-herbtap-drawer';
+    _drawer.innerHTML = `<div class="v99hd-head-wrap">${headHTML}</div><div class="v99hd-body">${bodyHTML}</div>`;
+    document.body.appendChild(_drawer);
+    requestAnimationFrame(() => requestAnimationFrame(() => _drawer && _drawer.classList.add('vis')));
+  }
+  _attachDrawerHandlers();
 }
 
 function openFor(han){
@@ -214,10 +336,20 @@ function _onClickCapture(e){
   if(!card) return;
   const han = (card.dataset && (card.dataset.han || card.dataset.herb)) || '';
   if(!han) return;
-  // v10.0.4: stopPropagation/preventDefault 제거 — capture-phase 에서 드로어만
-  //          열고 클릭은 그대로 bubble 시켜 게임 카드 선택 핸들러
-  //          (.bc-card → onHandCardClick) 가 정상 발동되도록 함. 두 동작 동시.
-  openFor(han);
+  // v10.0.4: stopPropagation/preventDefault 제거 — 클릭 그대로 bubble 시켜 게임 카드
+  //          선택 핸들러 (.bc-card → onHandCardClick) 정상 발동.
+  // v10.0.5: 큐브 손패 다중 선택 (≥2) 이면 intersection 모드. setTimeout(0) 으로
+  //          bubble 후의 갱신된 .bc-card-sel 상태를 읽음. 그 외 (선택 0·1) 단일 모드.
+  setTimeout(() => {
+    const sel = _getCubeSelectedHerbs();
+    if(sel.length >= 2){
+      openForMulti(sel);
+    } else if(sel.length === 1){
+      openFor(sel[0]);
+    } else {
+      openFor(han);
+    }
+  }, 0);
 }
 
 function _injectCSS(){
@@ -241,6 +373,8 @@ function _injectCSS(){
     .v99hd-ko { font-size:12.5px; color:#C9A227; }
     .v99hd-sm { font-size:10.5px; color:#876A36; }
     .v99hd-cnt { font-size:10px; color:#C9A227; background:#876A3622; padding:2px 7px; border-radius:7px; margin-left:4px; }
+    .v99hd-mode { font-size:9.5px; color:#6B5A8A; background:rgba(107,90,138,.16); padding:2px 7px; border-radius:7px; margin-left:4px; letter-spacing:.04em; }
+    .v99hd-head .v99hd-han { white-space:normal; word-break:keep-all; line-height:1.25; max-width:62%; }
     .v99hd-close { margin-left:auto; width:26px; height:26px; border-radius:5px; background:#876A3633; border:1px solid #876A3666; color:#FFE08A; font-size:17px; cursor:pointer; line-height:1; font-family:inherit; }
     .v99hd-body { flex:1; overflow-y:auto; padding:8px 12px 14px; -webkit-overflow-scrolling:touch; }
     .v99hd-meaning { padding:5px 0 8px; font-size:11.5px; color:#E8D4B8; font-family:'Noto Serif SC',serif; line-height:1.5; border-bottom:1px solid #876A3622; margin-bottom:6px; }
