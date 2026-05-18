@@ -578,13 +578,43 @@ function baguaSVG(size){
 }
 
 // ───── 5. 헤더 갱신 ─────────────────────────────────────────────────────────
+// v11.6: 과목별 헤더 컨텍스트 시스템 — 다른 房에 진입 시 logo·title·subtitle 자동 전환.
+//   각 모듈(jindan/jingxue 등)이 `setHeaderContext('dongmu')` 등으로 헤더 정체성 갱신.
+//   user-name-mini 는 더 이상 사용자명이 아니라 房의 부제(室號) 표시 — 정체성 통합.
+const HEADER_CTX = {
+  shennong: { title:'方劑學', subtitle:'神農의 방',   logo:'icon-192.png',   accent:'#9C3030' },
+  hub:      { title:'醫書宮', subtitle:'八房 입구',   logo:'icon-192.png',   accent:'#7A3D27' },
+  dongmu:   { title:'診斷學', subtitle:'東武의 방',   logo:'',               accent:'#9C3030' },
+  saamdoin: { title:'經穴',   subtitle:'舍巖의 방',   logo:'',               accent:'#3A6A4A' },
+};
+let _curHeaderCtx = 'shennong';
+function setHeaderContext(ctx){
+  const c = (typeof ctx === 'string') ? (HEADER_CTX[ctx] || HEADER_CTX.shennong) : (ctx || {});
+  if(typeof ctx === 'string') _curHeaderCtx = ctx;
+  const ttl = $('.app-header .title');
+  const sub = $('#user-name-mini');
+  const lg  = $('#logo-img');
+  if(ttl && c.title)    ttl.textContent = c.title;
+  if(sub && c.subtitle) sub.textContent = c.subtitle;
+  if(lg){
+    if(c.logo){ lg.style.display=''; lg.src = c.logo; lg.alt = c.title || ''; }
+    else      { lg.style.display='none'; }  // 房별 banner 가 신원 표시
+  }
+}
+window.setHeaderContext = setHeaderContext;
+
 function refreshHeader(){
   const rk = getRank(S.qi);
   $('#rank-seal').textContent = rk.seal;
   $('#rank-seal').style.background = rk.color;
   $('#rank-name').textContent = rk.ko;
   $('#qi-amt').textContent = S.qi.toLocaleString();
-  $('#user-name-mini').textContent = S.name || '黃帝의 방';
+  // v11.6: 기본 컨텍스트(shennong)일 때만 user-name 보조 표시.
+  //   다른 컨텍스트에서는 setHeaderContext 가 subtitle 을 房 부제로 설정한 상태 유지.
+  const sub = $('#user-name-mini');
+  if(sub && _curHeaderCtx === 'shennong'){
+    sub.textContent = S.name ? `${S.name} · 神農의 방` : '神農의 방';
+  }
   // BGM 아이콘 상태
   $('#bgm-icon').textContent = bgm.on ? '♫' : '♪';
   $('#bgm-icon').style.opacity = bgm.on ? '1' : '.55';
