@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v11.1';                  // ★ 진단학 (동무의 방) 설진 학습 도구 (2026-05) — 48장 사진 + 객관/주관/드릴/사진첩, 5/19 5/26 D-N 표시
+const APP_VERSION = 'v11.1a';                  // ★ 진단학 (동무의 방) 설진 학습 도구 (2026-05) — 48장 사진 + 객관/주관/드릴/사진첩, 5/19 5/26 D-N 표시
 const APP_BUILD   = '2026.05.18.v10.0.8';     // v10.0.8 scope correction
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';

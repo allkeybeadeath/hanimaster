@@ -86,7 +86,7 @@ PDF 圖-1~圖-8 추출 → 각 사진별 라벨링:
 |---|---|
 | `data-jindan-tongue.js` | 신규 (48 사진 데이터) |
 | `bangje-v11-jindan.js` | 신규 (학습 도구 모듈, ~530 lines) |
-| `tongues/t01.jpg ~ t48.jpg` | 신규 (48장 사진, 2.1MB) |
+| `t01.jpg ~ t48.jpg` | 신규 (48장 사진, 2.1MB, 루트 평탄화 — 모바일 호스팅 호환) |
 | `index.html` | jindan 2개 script tag 추가 |
 | `sw.js` | 캐시 키 `v11-0` → `v11-1`, PRECACHE에 jindan 모듈 추가 |
 | `app.js` | APP_VERSION `v11.0` → `v11.1` |

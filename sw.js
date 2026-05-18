@@ -10,7 +10,7 @@
  *   • 캐릭터 사진 → images/characters/ 폴더로 이동
  *   • 캐시 키 갱신
  */
-const CACHE = 'bangje-pwa-v11-1-2026-05';
+const CACHE = 'bangje-pwa-v11-1a-2026-05';
 const PRECACHE = [
   './',
   './index.html',

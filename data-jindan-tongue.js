@@ -17,7 +17,7 @@
 const TONGUES = [
   // ─── 圖-1 (①~⑥) ───
   {
-    id: 1, img: 'tongues/t01.jpg',
+    id: 1, img: 't01.jpg',
     han: '正常舌', label_full: '正常舌(淡紅舌)',
     ko: '정상설(담홍설)',
     body_features: ['正常'],
@@ -28,7 +28,7 @@ const TONGUES = [
     notes: '淡紅 + 薄白苔 — 健康人 의 표준',
   },
   {
-    id: 2, img: 'tongues/t02.jpg',
+    id: 2, img: 't02.jpg',
     han: '胖大舌·齒痕', label_full: '胖大(齒痕)·淡紅 [氣虛]',
     ko: '반대(치흔)·담홍',
     body_features: ['胖大', '齒痕'],
@@ -39,7 +39,7 @@ const TONGUES = [
     notes: '舌體 가 두꺼워 잇자국이 남음 — 氣虛·陽虛 의 전형',
   },
   {
-    id: 3, img: 'tongues/t03.jpg',
+    id: 3, img: 't03.jpg',
     han: '瘦薄舌', label_full: '瘦薄舌 [陰虛]',
     ko: '수박설',
     body_features: ['瘦薄'],
@@ -50,7 +50,7 @@ const TONGUES = [
     notes: '舌體 가 야위어 얇음 — 氣血兩虛 또는 陰虛火旺',
   },
   {
-    id: 4, img: 'tongues/t04.jpg',
+    id: 4, img: 't04.jpg',
     han: '舌尖紅·點刺', label_full: '舌尖·紅点(点刺) [心火盛]',
     ko: '설첨·홍점(점자)',
     body_features: ['點刺'],
@@ -61,7 +61,7 @@ const TONGUES = [
     notes: '舌尖 의 紅点 = 點刺 — 心火上炎. 設邊은 肝膽火, 設中은 胃火.',
   },
   {
-    id: 5, img: 'tongues/t05.jpg',
+    id: 5, img: 't05.jpg',
     han: '皺紋(裂紋)', label_full: '皺紋(裂紋) [陰虛]',
     ko: '추문(열문)',
     body_features: ['裂紋', '皺紋'],
@@ -72,7 +72,7 @@ const TONGUES = [
     notes: '舌面 의 깊은 균열 — 陰液 부족·津傷',
   },
   {
-    id: 6, img: 'tongues/t06.jpg',
+    id: 6, img: 't06.jpg',
     han: '鏡面舌·淡白', label_full: '鏡面舌·淡白 [陽虛]',
     ko: '경면설·담백',
     body_features: ['鏡面'],
@@ -85,7 +85,7 @@ const TONGUES = [
 
   // ─── 圖-2 (⑦~⑫) ───
   {
-    id: 7, img: 'tongues/t07.jpg',
+    id: 7, img: 't07.jpg',
     han: '淡紅薄滑舌', label_full: '淡紅舌·薄滑舌 [濕證]',
     ko: '담홍·박활설',
     body_features: [],
@@ -96,7 +96,7 @@ const TONGUES = [
     notes: '舌面 이 미끌미끌 (滑) — 痰飲·水濕',
   },
   {
-    id: 8, img: 'tongues/t08.jpg',
+    id: 8, img: 't08.jpg',
     han: '紅舌', label_full: '紅舌 [熱證]',
     ko: '홍설',
     body_features: [],
@@ -107,7 +107,7 @@ const TONGUES = [
     notes: '舌色 紅 — 實熱 또는 虛熱',
   },
   {
-    id: 9, img: 'tongues/t09.jpg',
+    id: 9, img: 't09.jpg',
     han: '尖辺紅舌', label_full: '尖辺紅舌 [心肝火旺]',
     ko: '첨변홍설',
     body_features: [],
@@ -118,7 +118,7 @@ const TONGUES = [
     notes: '舌尖 = 心火, 舌邊 = 肝膽火',
   },
   {
-    id: 10, img: 'tongues/t10.jpg',
+    id: 10, img: 't10.jpg',
     han: '紫紅舌·白膩苔', label_full: '紫紅舌·白膩苔 [血瘀·食積]',
     ko: '자홍·백니태',
     body_features: [],
@@ -129,7 +129,7 @@ const TONGUES = [
     notes: '紫紅 = 血瘀 / 白膩 = 食積·痰濕',
   },
   {
-    id: 11, img: 'tongues/t11.jpg',
+    id: 11, img: 't11.jpg',
     han: '深紅舌·光滑腐苔', label_full: '深紅舌·光滑·腐苔 [陰虛]',
     ko: '심홍·광활·부태',
     body_features: ['光滑'],
@@ -140,7 +140,7 @@ const TONGUES = [
     notes: '深紅 + 腐苔 — 陰液 大傷',
   },
   {
-    id: 12, img: 'tongues/t12.jpg',
+    id: 12, img: 't12.jpg',
     han: '紫紅舌', label_full: '紫紅舌',
     ko: '자홍설',
     body_features: [],
@@ -153,7 +153,7 @@ const TONGUES = [
 
   // ─── 圖-3 (⑬~⑱) ───
   {
-    id: 13, img: 'tongues/t13.jpg',
+    id: 13, img: 't13.jpg',
     han: '紫舌·白膩苔', label_full: '紫舌·白膩苔 [血瘀挾湿]',
     ko: '자설·백니태',
     body_features: [],
@@ -164,7 +164,7 @@ const TONGUES = [
     notes: '紫 = 寒凝/血瘀, 白膩 = 寒濕痰飲',
   },
   {
-    id: 14, img: 'tongues/t14.jpg',
+    id: 14, img: 't14.jpg',
     han: '暗紅舌·瘀斑·薄黃苔', label_full: '暗紅舌·舌辺에 瘀斑·薄黃苔 [血瘀]',
     ko: '암홍·어반·박황태',
     body_features: ['瘀斑'],
@@ -175,7 +175,7 @@ const TONGUES = [
     notes: '舌邊 의 紫斑 = 瘀斑 — 血瘀 의 결정적 단서',
   },
   {
-    id: 15, img: 'tongues/t15.jpg',
+    id: 15, img: 't15.jpg',
     han: '滑苔', label_full: '滑苔 [濕証]',
     ko: '활태',
     body_features: [],
@@ -186,7 +186,7 @@ const TONGUES = [
     notes: '舌面 에 물기 — 痰飲·水濕',
   },
   {
-    id: 16, img: 'tongues/t16.jpg',
+    id: 16, img: 't16.jpg',
     han: '白厚苔', label_full: '白厚苔 [痰湿]',
     ko: '백후태',
     body_features: [],
@@ -197,7 +197,7 @@ const TONGUES = [
     notes: '백색의 두꺼운 苔 — 寒濕·痰濁 내성',
   },
   {
-    id: 17, img: 'tongues/t17.jpg',
+    id: 17, img: 't17.jpg',
     han: '淡黃膩苔', label_full: '淡黃膩苔 [痰湿化熱]',
     ko: '담황니태',
     body_features: [],
@@ -208,7 +208,7 @@ const TONGUES = [
     notes: '白苔 → 黃 변화는 화열의 신호',
   },
   {
-    id: 18, img: 'tongues/t18.jpg',
+    id: 18, img: 't18.jpg',
     han: '淡黃垢膩苔', label_full: '淡黃垢膩苔 [痰湿化熱·挟食]',
     ko: '담황구니태',
     body_features: [],
@@ -221,7 +221,7 @@ const TONGUES = [
 
   // ─── 圖-4 (⑲~㉔) ───
   {
-    id: 19, img: 'tongues/t19.jpg',
+    id: 19, img: 't19.jpg',
     han: '黃膩苔', label_full: '黃膩苔 [湿熱]',
     ko: '황니태',
     body_features: [],
@@ -232,7 +232,7 @@ const TONGUES = [
     notes: '黃 + 膩 의 결합 — 濕熱의 가장 흔한 표상',
   },
   {
-    id: 20, img: 'tongues/t20.jpg',
+    id: 20, img: 't20.jpg',
     han: '黃膩苔·剝苔', label_full: '黃膩苔·剝苔 [陰虛]',
     ko: '황니태·박태',
     body_features: [],
@@ -243,7 +243,7 @@ const TONGUES = [
     notes: '苔 가 부분적으로 박락 — 胃陰·肝陰 손상',
   },
   {
-    id: 21, img: 'tongues/t21.jpg',
+    id: 21, img: 't21.jpg',
     han: '半截剝苔', label_full: '半截剝苔 [肺胃陰虛]',
     ko: '반절박태',
     body_features: [],
@@ -254,7 +254,7 @@ const TONGUES = [
     notes: '舌의 절반만 苔가 박락 — 부위에 따른 변증',
   },
   {
-    id: 22, img: 'tongues/t22.jpg',
+    id: 22, img: 't22.jpg',
     han: '花剝苔', label_full: '花剝苔 [気虛]',
     ko: '화박태',
     body_features: [],
@@ -265,7 +265,7 @@ const TONGUES = [
     notes: '苔 가 꽃잎처럼 군데군데 박락 — 胃氣陰兩虛',
   },
   {
-    id: 23, img: 'tongues/t23.jpg',
+    id: 23, img: 't23.jpg',
     han: '花剝苔·滑苔', label_full: '花剝苔·滑苔 [気虛]',
     ko: '화박태·활태',
     body_features: [],
@@ -276,7 +276,7 @@ const TONGUES = [
     notes: '花剝 + 滑 — 기허·습체 동시',
   },
   {
-    id: 24, img: 'tongues/t24.jpg',
+    id: 24, img: 't24.jpg',
     han: '地圖舌', label_full: '地図舌 [気虛]',
     ko: '지도설',
     body_features: [],
@@ -289,7 +289,7 @@ const TONGUES = [
 
   // ─── 圖-5 (㉕~㉚) ───
   {
-    id: 25, img: 'tongues/t25.jpg',
+    id: 25, img: 't25.jpg',
     han: '齒痕舌', label_full: '齒痕舌',
     ko: '치흔설',
     body_features: ['齒痕'],
@@ -300,7 +300,7 @@ const TONGUES = [
     notes: '잇자국 — 胖大 동반 多, 氣虛·陽虛',
   },
   {
-    id: 26, img: 'tongues/t26.jpg',
+    id: 26, img: 't26.jpg',
     han: '齒痕舌(肥大)', label_full: '齒痕舌(肥大)',
     ko: '치흔설(비대)',
     body_features: ['齒痕', '肥大'],
@@ -311,7 +311,7 @@ const TONGUES = [
     notes: '胖大 + 齒痕 — 氣虛·脾虛',
   },
   {
-    id: 27, img: 'tongues/t27.jpg',
+    id: 27, img: 't27.jpg',
     han: '齒痕舌(肥大)', label_full: '齒痕舌[肥大]',
     ko: '치흔설[비대]',
     body_features: ['齒痕', '肥大'],
@@ -322,7 +322,7 @@ const TONGUES = [
     notes: '심한 齒痕 + 肥大 — 脾陽虛',
   },
   {
-    id: 28, img: 'tongues/t28.jpg',
+    id: 28, img: 't28.jpg',
     han: '絳舌', label_full: '絳舌',
     ko: '강설',
     body_features: [],
@@ -333,7 +333,7 @@ const TONGUES = [
     notes: '紅 보다 더 짙은 색 — 營血分熱·陰虛火旺',
   },
   {
-    id: 29, img: 'tongues/t29.jpg',
+    id: 29, img: 't29.jpg',
     han: '絳舌', label_full: '絳舌',
     ko: '강설',
     body_features: [],
@@ -344,7 +344,7 @@ const TONGUES = [
     notes: '絳 + 裂紋 — 陰液 大傷',
   },
   {
-    id: 30, img: 'tongues/t30.jpg',
+    id: 30, img: 't30.jpg',
     han: '鏡面舌', label_full: '鏡面舌',
     ko: '경면설',
     body_features: ['鏡面'],
@@ -357,7 +357,7 @@ const TONGUES = [
 
   // ─── 圖-6 (㉛~㊱) ───
   {
-    id: 31, img: 'tongues/t31.jpg',
+    id: 31, img: 't31.jpg',
     han: '鏡面舌', label_full: '鏡面舌',
     ko: '경면설',
     body_features: ['鏡面'],
@@ -368,7 +368,7 @@ const TONGUES = [
     notes: '심한 鏡面舌 — 危重 신호',
   },
   {
-    id: 32, img: 'tongues/t32.jpg',
+    id: 32, img: 't32.jpg',
     han: '紫紅舌', label_full: '紫紅舌',
     ko: '자홍설',
     body_features: [],
@@ -379,7 +379,7 @@ const TONGUES = [
     notes: '진한 紫紅 — 熱毒·瘀血',
   },
   {
-    id: 33, img: 'tongues/t33.jpg',
+    id: 33, img: 't33.jpg',
     han: '紫紅舌', label_full: '紫紅舌',
     ko: '자홍설',
     body_features: ['裂紋'],
@@ -390,7 +390,7 @@ const TONGUES = [
     notes: '紫紅 + 裂紋 — 熱毒 + 陰傷',
   },
   {
-    id: 34, img: 'tongues/t34.jpg',
+    id: 34, img: 't34.jpg',
     han: '粗老舌', label_full: '粗老',
     ko: '조로설',
     body_features: ['粗老'],
@@ -401,7 +401,7 @@ const TONGUES = [
     notes: '舌質이 거칠고 늙어 보임 — 實證 / 실독',
   },
   {
-    id: 35, img: 'tongues/t35.jpg',
+    id: 35, img: 't35.jpg',
     han: '裂紋舌(紅絳)', label_full: '裂紋(紅絳)',
     ko: '열문(홍강)',
     body_features: ['裂紋'],
@@ -412,7 +412,7 @@ const TONGUES = [
     notes: '紅絳 + 裂紋 — 陰虛火旺·熱盛',
   },
   {
-    id: 36, img: 'tongues/t36.jpg',
+    id: 36, img: 't36.jpg',
     han: '裂紋舌(淡白)', label_full: '裂紋(淡白)',
     ko: '열문(담백)',
     body_features: ['裂紋'],
@@ -425,7 +425,7 @@ const TONGUES = [
 
   // ─── 圖-7 (㊲~㊷) ───
   {
-    id: 37, img: 'tongues/t37.jpg',
+    id: 37, img: 't37.jpg',
     han: '芒刺', label_full: '芒刺',
     ko: '망자',
     body_features: ['芒刺'],
@@ -436,7 +436,7 @@ const TONGUES = [
     notes: '점자가 융기되어 가시처럼 — 熱盛·心肝火 (영분 진입)',
   },
   {
-    id: 38, img: 'tongues/t38.jpg',
+    id: 38, img: 't38.jpg',
     han: '正常薄白苔', label_full: '正常舌의 薄白苔',
     ko: '정상박백태',
     body_features: [],
@@ -447,7 +447,7 @@ const TONGUES = [
     notes: '얇고 균일한 백색 苔 — 정상',
   },
   {
-    id: 39, img: 'tongues/t39.jpg',
+    id: 39, img: 't39.jpg',
     han: '白厚腐苔', label_full: '白厚腐苔',
     ko: '백후부태',
     body_features: [],
@@ -458,7 +458,7 @@ const TONGUES = [
     notes: '두께운 백색 + 두부 같은 부태 — 食滯',
   },
   {
-    id: 40, img: 'tongues/t40.jpg',
+    id: 40, img: 't40.jpg',
     han: '白厚滑膩苔', label_full: '白厚滑膩苔',
     ko: '백후활니태',
     body_features: [],
@@ -469,7 +469,7 @@ const TONGUES = [
     notes: '白 + 厚 + 滑 + 膩 — 寒濕困脾',
   },
   {
-    id: 41, img: 'tongues/t41.jpg',
+    id: 41, img: 't41.jpg',
     han: '白滑亮苔', label_full: '白滑亮苔',
     ko: '백활량태',
     body_features: [],
@@ -480,7 +480,7 @@ const TONGUES = [
     notes: '白 + 윤기 — 陽虛水濕',
   },
   {
-    id: 42, img: 'tongues/t42.jpg',
+    id: 42, img: 't42.jpg',
     han: '黃薄乾苔', label_full: '黃薄乾苔',
     ko: '황박건태',
     body_features: [],
@@ -493,7 +493,7 @@ const TONGUES = [
 
   // ─── 圖-8 (㊸~㊽) ───
   {
-    id: 43, img: 'tongues/t43.jpg',
+    id: 43, img: 't43.jpg',
     han: '黃厚燥苔', label_full: '黃厚燥苔',
     ko: '황후조태',
     body_features: [],
@@ -504,7 +504,7 @@ const TONGUES = [
     notes: '두꺼운 황색 + 건조 — 陽明腑實/熱結',
   },
   {
-    id: 44, img: 'tongues/t44.jpg',
+    id: 44, img: 't44.jpg',
     han: '黃厚燥裂苔', label_full: '黃厚燥裂苔',
     ko: '황후조열태',
     body_features: ['裂紋'],
@@ -515,7 +515,7 @@ const TONGUES = [
     notes: '두꺼운 황색 + 갈라짐 — 熱極·陰大傷',
   },
   {
-    id: 45, img: 'tongues/t45.jpg',
+    id: 45, img: 't45.jpg',
     han: '黑苔', label_full: '黑苔',
     ko: '흑태',
     body_features: [],
@@ -526,7 +526,7 @@ const TONGUES = [
     notes: '黑 — 燥黑은 熱極傷陰, 滑黑은 陽虛寒盛',
   },
   {
-    id: 46, img: 'tongues/t46.jpg',
+    id: 46, img: 't46.jpg',
     han: '黑苔', label_full: '黑苔',
     ko: '흑태',
     body_features: [],
@@ -537,7 +537,7 @@ const TONGUES = [
     notes: '黑苔 위중증의 신호',
   },
   {
-    id: 47, img: 'tongues/t47.jpg',
+    id: 47, img: 't47.jpg',
     han: '偏左白苔', label_full: '偏左白苔',
     ko: '편좌백태',
     body_features: ['偏左'],
@@ -548,7 +548,7 @@ const TONGUES = [
     notes: '舌의 한쪽 (좌측) 에만 苔 — 좌측 邪盛',
   },
   {
-    id: 48, img: 'tongues/t48.jpg',
+    id: 48, img: 't48.jpg',
     han: '剝苔', label_full: '剝苔',
     ko: '박태',
     body_features: [],
