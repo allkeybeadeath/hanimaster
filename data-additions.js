@@ -1,6 +1,7 @@
 /* data-additions.js — 方劑學 v9.4 처방별 加減 데이터
  * ============================================================================
- * 26 처방의 加減法 (증상 → 가감약물) 구조화.
+ * 19 처방의 加減法 (증상 → 가감약물) 구조화.
+ *   ※ v10.0.8 — 6장 溫裏劑 7處方 加減 블록 제거 (2차 수시 범위 외).
  *
  * 출처: 강의 PDF [배오·가감] 항 + 22학번 기출 + 北京中醫藥大學 統編教材 加減法 절.
  *
@@ -176,94 +177,6 @@ const FORMULA_ADDITIONS = {
         kind: 'symptom', note: '清化痰熱. 痰熱이 重하면 溫陽藥 去' },
       { symptom: '陰虛 偏盛(舌絳·脈細數)', symptomKo: '음허가 더 두드러짐',
         mod: '減 附子·肉桂, 加 玄蔘·麥冬', herbs: ['玄蔘','麥冬'], kind: 'symptom', note: '滋陰更强' },
-    ]
-  },
-
-  // ════════════════════ 6장 溫裏劑 ════════════════════
-  'ijung-hwan': {
-    items: [
-      { symptom: '臍上動悸(衝氣 沖逆)', symptomKo: '배꼽 위 동계 (衝氣)',
-        mod: '加 桂(桂枝)', herbs: ['桂枝'], kind: 'symptom', note: '★[가감] 平衝降逆' },
-      { symptom: '嘔多(吐가 잦음)', symptomKo: '구토가 심함',
-        mod: '生薑을 多用 (重用)', herbs: ['生薑'], kind: 'symptom', note: '★[가감] 降逆止嘔' },
-      { symptom: '渴欲得水(갈증)', symptomKo: '갈증으로 물을 마시고자 함',
-        mod: '白朮을 多用 (4.5兩)', herbs: ['白朮'], kind: 'symptom', note: '★[가감] 健脾運化津液' },
-      { symptom: '心下悸(心下 두근거림)', symptomKo: '심하부 동계',
-        mod: '加 茯苓', herbs: ['茯苓'], kind: 'symptom', note: '★[가감] 寧心利水' },
-      { symptom: '寒甚(한증 重)', symptomKo: '한증이 매우 심함',
-        mod: '乾薑을 多用 (4.5兩)', herbs: ['乾薑'], kind: 'symptom', note: '★[가감] 溫中散寒 强化' },
-      { symptom: '腹滿(배가 빵빵함)', symptomKo: '복부 팽만 — 滿者 白朮 禁',
-        mod: '去 白朮, 加 附子 1매', herbs: ['附子'], remove: ['白朮'], kind: 'symptom',
-        note: '★[가감] 滿者는 白朮을 禁. 仲景 6가감의 마지막' },
-      { symptom: '脾腎陽虛(下利淸穀·四肢厥冷)', symptomKo: '비신양허로 五更泄瀉',
-        mod: '+附子 → 附子理中湯', herbs: ['附子'], target: '附子理中湯',
-        kind: 'derive', note: '溫陽 强化. 脾陽 + 腎陽 同補' },
-    ]
-  },
-
-  'osuyu-tang': {
-    items: [
-      { symptom: '頭痛 偏盛(厥陰巓頂痛)', symptomKo: '궐음두통이 두드러짐',
-        mod: '加 川芎', herbs: ['川芎'], kind: 'symptom', note: '活血祛風止痛' },
-      { symptom: '寒甚·肢冷', symptomKo: '한증이 심하고 사지가 차가움',
-        mod: '加 附子·乾薑', herbs: ['附子','乾薑'], kind: 'symptom', note: '溫陽散寒' },
-      { symptom: '兼脾胃氣虛 重', symptomKo: '비위기허 重',
-        mod: '加 白朮·茯苓', herbs: ['白朮','茯苓'], kind: 'symptom', note: '健脾益氣' },
-    ]
-  },
-
-  'sogeonjung-tang': {
-    items: [
-      { symptom: '虛勞裏急 + 氣虛(自汗·氣短)', symptomKo: '허로이급 + 기허(자한·기단)',
-        mod: '+黃耆 → 黃耆建中湯', herbs: ['黃耆'], target: '黃耆建中湯',
-        kind: 'derive', note: '益氣建中. ★서술기출(20)' },
-      { symptom: '虛勞裏急 + 血虛(産後 등)', symptomKo: '허로이급 + 혈허(산후 등)',
-        mod: '+當歸 → 當歸建中湯', herbs: ['當歸'], target: '當歸建中湯',
-        kind: 'derive', note: '養血和血. ★기출' },
-    ]
-  },
-
-  'daegeonjung-tang': {
-    items: [
-      { symptom: '寒甚·痛劇', symptomKo: '한증이 심하고 통증이 격렬',
-        mod: '加 附子·吳茱萸', herbs: ['附子','吳茱萸'], kind: 'symptom', note: '溫陽散寒 强化' },
-      { symptom: '兼氣滯(脘脹)', symptomKo: '기체 兼 — 완복 창만',
-        mod: '加 木香·砂仁', herbs: ['木香','砂仁'], kind: 'symptom', note: '行氣消脹' },
-    ]
-  },
-
-  'sayeok-tang': {
-    items: [
-      { symptom: '亡陽兼氣虛欲脫(脈微欲絶)', symptomKo: '망양 + 기허 — 절망적 厥逆',
-        mod: '+人蔘 → 四逆加人蔘湯', herbs: ['人蔘'], target: '四逆加人蔘湯',
-        kind: 'derive', note: '大補元氣. ★기출' },
-      { symptom: '陰盛戴陽(面赤·咽痛 假熱)', symptomKo: '음성격양 — 면적·인후통이 가열',
-        mod: '+猪膽汁 → 白通加猪膽汁湯', herbs: ['猪膽汁'], target: '白通加猪膽汁湯',
-        kind: 'derive', note: '反佐法. 鹹寒 引陽藥' },
-      { symptom: '厥逆 重(脈不出)', symptomKo: '궐역이 더욱 심함',
-        mod: '附子·乾薑 倍量 → 通脈四逆湯', herbs: [], target: '通脈四逆湯',
-        kind: 'derive', note: '★기출(16,19,21). 약미 동일, 用量 차이' },
-    ]
-  },
-
-  'danggwi-sayeok-tang': {
-    items: [
-      { symptom: '兼內有久寒(嘔逆·腹痛)', symptomKo: '안에 오래된 한이 있어 구역·복통',
-        mod: '+吳茱萸·生薑 → 當歸四逆加吳茱萸生薑湯', herbs: ['吳茱萸','生薑'], target: '當歸四逆加吳茱萸生薑湯',
-        kind: 'derive', note: '★서술기출(15,16,18,19). 暖肝散寒 强化' },
-      { symptom: '寒疝 腹痛', symptomKo: '한산 복통',
-        mod: '加 烏藥·小茴香', herbs: ['烏藥','小茴香'], kind: 'symptom', note: '溫經止痛' },
-      { symptom: '腰股冷痛', symptomKo: '허리·다리가 시리고 아픔',
-        mod: '加 牛膝·杜仲', herbs: ['牛膝','杜仲'], kind: 'symptom', note: '補肝腎·强筋骨' },
-    ]
-  },
-
-  'hwanggi-gyejigol-mul-tang': {
-    items: [
-      { symptom: '麻木 重·疼痛', symptomKo: '저림과 통증이 심함',
-        mod: '加 雞血藤·當歸', herbs: ['雞血藤','當歸'], kind: 'symptom', note: '活血通絡' },
-      { symptom: '兼風邪(痠痛遊走)', symptomKo: '풍사 兼 — 통증이 옮겨감',
-        mod: '加 防風·秦艽', herbs: ['防風','秦艽'], kind: 'symptom', note: '祛風通絡' },
     ]
   },
 

@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v10.0.7';                // ★ 로비 (2026-05) — 룰 표시 갱신 (初手/續手 명시) + v10.0.6 누계
-const APP_BUILD   = '2026.05.18.v10.0.7';     // v10.0.7 룰 UI
+const APP_VERSION = 'v10.0.8';                // ★ 시험 범위 (2026-05) — 6장 溫裏劑 제거 (2차 수시 외)
+const APP_BUILD   = '2026.05.18.v10.0.8';     // v10.0.8 scope correction
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -30,8 +30,8 @@ const EXAM_DATE_ISO = '2026-05-20T00:00:00+09:00';
 const EXAM_META = {
   course: '方劑學',
   examTitle: '2차 수시',
-  rangeKR: '6장 온경산한제 · 7장 표리쌍해제 · 8장 보익제',
-  rangeHan: '溫經散寒 · 表裏雙解 · 補益(補氣血·陰陽幷補)',
+  rangeKR: '7장 표리쌍해제 · 8장 보익제',
+  rangeHan: '表裏雙解 · 補益(補氣血·陰陽幷補)',
 };
 
 const PRESENCE_REFRESH_MS = 30 * 1000;     // 30초마다 presence 갱신
@@ -3816,7 +3816,6 @@ async function renderFormulaIndex(det){
     </div>
     <div class="fidx-scatter-legend">
       <span class="lg-dot bu"></span>補益劑
-      <span class="lg-dot wen"></span>溫裏劑
       <span class="lg-dot biao"></span>表裏雙解劑
     </div>
     <div style="font-size:10.5px;color:var(--gutong);margin-top:6px;font-style:italic">
@@ -4455,7 +4454,7 @@ function renderExamAnalysis(det){
         </div>
       </div>`,
     type:       () => `<div><b style="font-size:13px;color:var(--zhusha-d)">유형별 분포</b>${bar(sort(byType))}</div>`,
-    chapter:    () => `<div><b style="font-size:13px;color:var(--zhusha-d)">章별 분포</b><div style="font-size:11px;color:var(--gutong);margin-bottom:6px">6장 溫經散寒·7장 表裏雙解·8장 補益</div>${bar(sort(byChapter))}</div>`,
+    chapter:    () => `<div><b style="font-size:13px;color:var(--zhusha-d)">章별 분포</b><div style="font-size:11px;color:var(--gutong);margin-bottom:6px">7장 表裏雙解·8장 補益</div>${bar(sort(byChapter))}</div>`,
     difficulty: () => {
       const dm = (typeof DIFFICULTY_META !== 'undefined') ? DIFFICULTY_META : {1:{ko:'초급',han:'初級'},2:{ko:'중급',han:'中級'},3:{ko:'고급',han:'高級'},4:{ko:'지옥',han:'地獄'}};
       const arr = [1,2,3,4].map(d => [`${dm[d].han} ${dm[d].ko}`, byDiff[d]||0]);
@@ -6069,7 +6068,6 @@ function renderFlashHub(){
       <div class="flash-tabs" id="fl-scope-tabs">
         <button type="button" class="flash-tab on" data-s="all">전체 ${formulaCount}처방</button>
         <button type="button" class="flash-tab" data-s="8">8장 補益劑</button>
-        <button type="button" class="flash-tab" data-s="6">6장 溫裏劑</button>
         <button type="button" class="flash-tab" data-s="7">7장 表裏雙解劑</button>
         <button type="button" class="flash-tab" data-s="bookmark">★ 북마크</button>
         <button type="button" class="flash-tab" data-s="weak">↻ 다시 보기·어려움</button>

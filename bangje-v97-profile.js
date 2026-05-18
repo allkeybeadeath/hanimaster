@@ -134,9 +134,10 @@ function _progress(ach){
     }
     case 'achievementCount': val = (s.achievements||[]).length; target = c.threshold; break;
     case 'allChaptersCleared': {
+      // v10.0.8: 6장 제외 — 兩章(7+8) 기준, 만점 40
       const map = stats._rightByChapter || {};
-      val = Math.min(map['6']||0, 20) + Math.min(map['7']||0, 20) + Math.min(map['8']||0, 20);
-      target = 60; break;
+      val = Math.min(map['7']||0, 20) + Math.min(map['8']||0, 20);
+      target = 40; break;
     }
     default:
       val = 0; target = 1;

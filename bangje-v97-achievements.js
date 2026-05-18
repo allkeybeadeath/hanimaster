@@ -229,9 +229,10 @@ function _evalCond(ach, ctx){
       return days === c.value;
     }
     case 'allChaptersCleared': {
+      // v10.0.8: 6장 제외 — 兩章(7+8) 기준
       const map = (s.achStats && s.achStats._rightByChapter) || {};
-      const six = (map['6']||0), seven = (map['7']||0), eight = (map['8']||0);
-      return six >= 20 && seven >= 20 && eight >= 20;
+      const seven = (map['7']||0), eight = (map['8']||0);
+      return seven >= 20 && eight >= 20;
     }
     case 'achievementCount':
       return (s.achievements || []).length >= c.threshold;

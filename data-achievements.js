@@ -102,19 +102,17 @@ const ACHIEVEMENTS = [
     desc:'오답함을 비워본 적 있음',
     cond:{type:'wrongCleared'} },
 
-  // ═══ 章典 (章별 마스터) — 4 ═══════════════════════════════════════════
+  // ═══ 章典 (章별 마스터) — 3 ═══════════════════════════════════════════
   { id:'chap_buik',      han:'補益',   ko:'補益章 通',         cat:'章典', sealHan:'補', color:'#C9A227', tier:'gold',
     desc:'8장 補益劑 문제 30개 정답',
     cond:{type:'counter_gte', name:'rightByChapter:8', threshold:30} },
-  { id:'chap_wenli',     han:'溫裏',   ko:'溫經章 通',         cat:'章典', sealHan:'溫', color:'#C9A227', tier:'gold',
-    desc:'6장 溫經散寒劑 문제 20개 정답',
-    cond:{type:'counter_gte', name:'rightByChapter:6', threshold:20} },
   { id:'chap_biaoli',    han:'雙解',   ko:'表裏雙解章 通',     cat:'章典', sealHan:'雙', color:'#C9A227', tier:'gold',
     desc:'7장 表裏雙解劑 문제 20개 정답',
     cond:{type:'counter_gte', name:'rightByChapter:7', threshold:20} },
-  { id:'chap_three',     han:'三章',   ko:'三章 貫通',         cat:'章典', sealHan:'貫', color:'#2A7060', tier:'jade',
-    desc:'6·7·8장 모두 각 20문제 이상 정답',
+  { id:'chap_three',     han:'兩章',   ko:'兩章 貫通',         cat:'章典', sealHan:'貫', color:'#2A7060', tier:'jade',
+    desc:'7·8장 모두 각 20문제 이상 정답',
     cond:{type:'allChaptersCleared'} },
+  // v10.0.8: 6장 溫裏劑 章典(chap_wenli) 제거 — 2차 수시 범위 외. chap_three는 兩章(7+8) 기준으로 갱신.
 
   // ═══ 氣博 (멀티 對決) — 6 ════════════════════════════════════════════
   { id:'battle_1',       han:'初戰',   ko:'첫 對決',           cat:'氣博', sealHan:'初', color:'#2A7060', tier:'bronze',
