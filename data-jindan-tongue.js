@@ -566,16 +566,34 @@ TONGUES.forEach(t => { TONGUE_BY_ID[t.id] = t; });
 
 // 시험 모드별 사진 필터
 function tonguesForMode(mode){
-  // mode: 'body' | 'quality' | 'both'
-  if(mode === 'body')    return TONGUES.filter(t => t.test_body);
-  if(mode === 'quality') return TONGUES.filter(t => t.test_quality);
+  // v11.5: 새 분류 (사용자 규칙 — 라벨에 "苔" 있으면 설태, 없으면 설질, 둘 다 있으면 복합)
+  // mode: 'jilji' (설질) | 'seoltai' (설태) | 'both' (전체) | 'body'·'quality' (legacy)
+  if(mode === 'jilji')   return TONGUES.filter(t => t.category === 'jilji' || t.category === 'both');
+  if(mode === 'seoltai') return TONGUES.filter(t => t.category === 'seoltai' || t.category === 'both');
+  if(mode === 'body')    return TONGUES.filter(t => t.test_body);      // legacy
+  if(mode === 'quality') return TONGUES.filter(t => t.test_quality);   // legacy
   return TONGUES;
 }
 
+// ─── v11.5 분류 patch — 사용자 규칙 「苔 = 설태, 아니면 설질, 둘 다 = 복합」 ───
+// (기존 데이터 객체에 category 필드 주입. 사진 라벨/변증/notes 는 그대로 유지.)
+// v11.5.1: 38 (正常舌의 薄白苔) → 설태로 이전 (사용자 결정 — 사진 본질이 苔 학습).
+const _CAT_SEOLTAI = new Set([15,16,17,18,19,20,21,22,23,38,39,40,41,42,43,44,45,46,47,48]);
+const _CAT_BOTH    = new Set([10,11,13,14]);
+// 나머지 (24장): jilji
+TONGUES.forEach(t => {
+  if(_CAT_BOTH.has(t.id))         t.category = 'both';
+  else if(_CAT_SEOLTAI.has(t.id)) t.category = 'seoltai';
+  else                            t.category = 'jilji';
+});
+
 // ─── 시험 일정 ────────────────────────────────────────────────────────
+// v11.5: 사용자 명명 그대로 — 5/19 「설체」 시험, 5/26 「설질」 시험.
+//   진단학적으로 「설체 = 설질」 (舌體 ≡ 舌質) 이나 강의 용어 존중.
+//   학습은 분류 (jilji / seoltai) 로 진행되며 시험 일정은 D-N 표시 용도.
 const JINDAN_EXAMS = [
-  { id:'body',    label:'설체 시험', date:'2026-05-19T10:00:00+09:00', range:'5/19 (중간 성적)', han:'舌體', accent:'#9C3030' },
-  { id:'quality', label:'설질 시험', date:'2026-05-26T10:00:00+09:00', range:'5/26 (기말 성적)', han:'舌質', accent:'#2A7060' },
+  { id:'tongue1', subject:'진단학', label:'설진 1차', date:'2026-05-19T10:00:00+09:00', han:'舌體', accent:'#9C3030', desc:'중간 성적' },
+  { id:'tongue2', subject:'진단학', label:'설진 2차', date:'2026-05-26T10:00:00+09:00', han:'舌質', accent:'#2A7060', desc:'기말 성적' },
 ];
 
 if(typeof window !== 'undefined'){

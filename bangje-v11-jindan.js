@@ -1,21 +1,23 @@
-/* bangje-v11-jindan.js — 진단학 설진 학습 도구 v1.0
+/* bangje-v11-jindan.js — 진단학 (東武之房) 학습 시스템 v2.0 (v11.5)
  * ============================================================================
- * 5/19 설체 시험·5/26 설질 시험 대비 — 사진 기반 문제 풀이.
+ *  방제학 home 과 동일한 형식의 탭 구조:
  *
- *  학습 모드:
- *   • 객관식 (4지선다) — 사진 보고 변증/특징 선택
- *   • 주관식 — 한자/한글 직접 입력
- *   • 드릴 — 빠른 반복, 점수 X
- *   • 사진첩 — 48장 전체 펼쳐 보기 (라벨 토글)
+ *    동무대청 (홈)
+ *    ├── 圖鑑 (사진첩)       — 라벨 토글, 분류 필터
+ *    ├── 問答 (객관식 퀴즈)   — 4지선다, 즉시 정답·해설
+ *    ├── 主觀 (주관식 입력)   — 직접 입력 채점
+ *    ├── 速習 (드릴)         — 자동 진행
+ *    ├── 析究 (통계)         — 정답률·범위별 진도
+ *    └── 對位 (매트릭스)     — 설색×설태 끌어다 놓기
  *
- *  시험 범위:
- *   • body (설체)  — 形態: 胖大·瘦薄·齒痕·點刺·芒刺·裂紋·鏡面·粗老·瘀斑·偏
- *   • quality (설질) — 色 + 苔
- *   • both (통합) — 모두
+ *  분류 (v11.5):
+ *    JILJI    설질 (24장)  — 색·형·태 (苔 글자 없는 라벨)
+ *    SEOLTAI  설태 (19장)  — 苔色·苔質
+ *    BOTH     복합 (5장)   — 라벨에 舌+苔 모두
  *
- *  V11Jindan.start(mode, range)         — 모드별 학습 세션 시작
- *  V11Jindan.openGallery()              — 사진첩 모드
- *  V11Jindan.expand()                   — 동무의 방 home 에 inject
+ *  외부 API: window.V11Jindan = {
+ *    openHome, openGallery, openMcq, openSubj, openDrill, openStats, openMatrix
+ *  }
  * ============================================================================ */
 
 (function(){
@@ -24,542 +26,599 @@
 function $(s, r){ return (r||document).querySelector(s); }
 function $$(s, r){ return Array.from((r||document).querySelectorAll(s)); }
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function shuffle(arr){
-  const a = arr.slice();
-  for(let i = a.length - 1; i > 0; i--){
-    const j = Math.floor(Math.random() * (i+1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
 function toast(m,k){ try{ window.toast && window.toast(m,k); }catch(_){} }
 
-// ─── 0. 색·苔 풀 (distractor 용) ────────────────────────────────────────
-const COLOR_POOL = ['淡白', '淡紅', '紅', '絳', '紫紅', '紫', '暗紅'];
-const COATING_POOL = ['薄白苔', '白厚苔', '白滑苔', '白膩苔', '白厚腐苔', '黃薄苔', '黃膩苔', '黃厚燥苔', '黑苔', '無苔', '剝苔', '花剝苔', '半截剝苔', '地圖苔', '滑苔'];
-const BODY_POOL = ['正常', '胖大', '瘦薄', '齒痕', '點刺', '芒刺', '裂紋', '鏡面', '粗老', '瘀斑', '偏左', '光滑', '肥大'];
-const PATTERN_POOL = ['정상', '기허', '음허', '양허', '기혈양허', '심화성', '심간화왕', '습증', '습열', '담습', '담습화열', '혈어', '혈어식적', '혈어협습', '열입영혈', '열성', '열독', '실증', '음허화왕', '폐위음허', '위음허', '열극상음'];
+const CATEGORIES = [
+  { id:'all',     han:'全',   ko:'전체', accent:'#7C3030', desc:'48 장 전체' },
+  { id:'jilji',   han:'舌質', ko:'설질', accent:'#9C3030', desc:'色·形·態 (苔 글자 없는 라벨)' },
+  { id:'seoltai', han:'舌苔', ko:'설태', accent:'#2A7060', desc:'苔色·苔質 (라벨에 苔)' },
+  { id:'both',    han:'兼',   ko:'복합', accent:'#C9A227', desc:'설질+설태 동시 명시' },
+];
+const CATEGORY_BY_ID = {}; CATEGORIES.forEach(c => CATEGORY_BY_ID[c.id] = c);
 
-// ─── 1. 문제 생성 ────────────────────────────────────────────────────────
-// 사진 → 질문 유형: 변증·설질·설체·특징·완전라벨
-function _generateQuestion(tongue, mode){
-  // mode: 'body' | 'quality' | 'both'
-  const types = [];
-  if(mode === 'body' || mode === 'both'){
-    if(tongue.body_features && tongue.body_features.length){
-      types.push('body_feature');
-    }
-  }
-  if(mode === 'quality' || mode === 'both'){
-    if(tongue.quality_features && tongue.quality_features.length){
-      types.push('quality_feature');
-    }
-  }
-  if(mode === 'both' || (mode === 'body' && tongue.test_body) || (mode === 'quality' && tongue.test_quality)){
-    types.push('pattern');
-  }
-  if(!types.length) types.push('pattern');
-
-  const type = types[Math.floor(Math.random() * types.length)];
-
-  if(type === 'body_feature'){
-    const correct = tongue.body_features[0];
-    const wrong = shuffle(BODY_POOL.filter(x => !tongue.body_features.includes(x))).slice(0, 3);
-    return {
-      question: '이 사진의 設體(설체) 특징은?',
-      correct,
-      options: shuffle([correct, ...wrong]),
-      type: 'body_feature',
-    };
-  } else if(type === 'quality_feature'){
-    const correct = tongue.quality_features[0];
-    const pool = correct.includes('苔') ? COATING_POOL : COLOR_POOL;
-    const wrong = shuffle(pool.filter(x => !tongue.quality_features.includes(x))).slice(0, 3);
-    return {
-      question: correct.includes('苔') ? '이 사진의 설태(舌苔)는?' : '이 사진의 舌色은?',
-      correct,
-      options: shuffle([correct, ...wrong]),
-      type: 'quality_feature',
-    };
-  } else { // pattern
-    const correct = tongue.pattern_han;
-    const wrong = shuffle(PATTERN_POOL.map(p => {
-      // pattern_han 형식으로 변환
-      const mapping = {'정상':'正常','기허':'氣虛','음허':'陰虛','양허':'陽虛','기혈양허':'氣血兩虛',
-        '심화성':'心火盛','심간화왕':'心肝火旺','습증':'濕證','습열':'濕熱','담습':'痰濕','담습화열':'痰濕化熱',
-        '혈어':'血瘀','혈어식적':'血瘀·食積','혈어협습':'血瘀挾濕','열입영혈':'熱入營血',
-        '열성':'熱盛','열독':'熱毒/血瘀','실증':'實證','음허화왕':'陰虛火旺','폐위음허':'肺胃陰虛',
-        '위음허':'胃陰虛','열극상음':'熱極傷陰',
-      };
-      return mapping[p] || p;
-    }).filter(x => x !== correct)).slice(0, 3);
-    return {
-      question: '이 사진의 辨證은?',
-      correct,
-      options: shuffle([correct, ...wrong]),
-      type: 'pattern',
-    };
-  }
+function _tonguesIn(catId){
+  const T = window.TONGUES || [];
+  if(catId === 'all')     return T.slice();
+  if(catId === 'jilji')   return T.filter(t => t.category === 'jilji'   || t.category === 'both');
+  if(catId === 'seoltai') return T.filter(t => t.category === 'seoltai' || t.category === 'both');
+  if(catId === 'both')    return T.filter(t => t.category === 'both');
+  return T;
 }
 
-// ─── 2. 메인 학습 세션 ──────────────────────────────────────────────────
-let _session = null;
+function _daysUntil(iso){
+  if(!iso) return null;
+  const d = new Date(iso).getTime();
+  if(!isFinite(d)) return null;
+  return Math.ceil((d - Date.now()) / 86400000);
+}
+function _examPillHTML(exam){
+  const d = _daysUntil(exam.date);
+  if(d === null) return '';
+  const txt = d > 0 ? `D-${d}` : (d === 0 ? 'D-Day' : `D+${-d}`);
+  const urgent = d >= 0 && d <= 3;
+  const bg = urgent ? '#9C3030' : (d < 0 ? '#7A5C40' : exam.accent);
+  return `<span class="dm-exam-pill" style="background:${bg}"><span class="han">${esc(exam.han||'')}</span> ${esc(exam.label)} · <b>${txt}</b></span>`;
+}
 
-function start(modeStudy, modeRange){
-  // modeStudy: 'mcq' | 'subjective' | 'drill'
-  // modeRange: 'body' | 'quality' | 'both'
-  const pool = (typeof window.tonguesForMode === 'function')
-    ? window.tonguesForMode(modeRange)
-    : (window.TONGUES || []);
-  if(!pool.length){ toast('데이터셋 미로드','warn'); return; }
-  const cards = shuffle(pool);
-  _session = {
-    modeStudy, modeRange, cards, idx: 0,
-    correct: 0, wrong: 0, history: [],
-    startedAt: Date.now(),
-  };
-  _renderQuestion();
+function _medal(charId, size){
+  if(typeof window._charPhotoMedallion === 'function') return window._charPhotoMedallion(charId, size);
+  if(typeof window._charMedallion === 'function')      return window._charMedallion(charId, size);
+  return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:#E8C8A0;display:flex;align-items:center;justify-content:center;font-family:'ZCOOL XiaoWei',serif;font-size:${Math.round(size*0.4)}px;color:#3A1810">人</div>`;
+}
+
+function _baseStyles(){
+  return `
+    <style>
+      .dm-banner { background:linear-gradient(135deg,#9C3030,#6E1818); color:#FFE08A; padding:14px; border-radius:10px; margin-bottom:10px; display:flex; align-items:center; gap:12px; box-shadow:0 4px 12px rgba(60,12,12,.3); }
+      .dm-banner-medal { width:60px; height:60px; border-radius:50%; overflow:hidden; flex-shrink:0; box-shadow:0 2px 8px rgba(0,0,0,.3); }
+      .dm-banner-medal .cmedal, .dm-banner-medal img { width:100%; height:100%; }
+      .dm-banner-title { font-family:'ZCOOL XiaoWei',serif; font-size:22px; letter-spacing:.05em; }
+      .dm-banner-sub { font-size:11.5px; opacity:.88; margin-top:1px; letter-spacing:.04em; }
+      .dm-back { background:transparent; border:1px solid #FFE08A; color:#FFE08A; padding:4px 9px; border-radius:6px; font-size:11px; cursor:pointer; margin-left:auto; }
+      .dm-back:hover { background:rgba(255,224,138,.12); }
+      .dm-exam-row { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+      .dm-exam-pill { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:11px; color:#FFE08A; font-size:11px; }
+      .dm-exam-pill .han { font-family:'Noto Serif SC',serif; font-size:12px; }
+      .dm-modes { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:10px; }
+      .dm-mode-btn { background:#fff; border:1px solid #9C303055; padding:11px 6px; border-radius:8px; text-align:center; cursor:pointer; font-size:12px; font-family:inherit; color:var(--mo); transition:all .15s ease; }
+      .dm-mode-btn:hover { background:#FFF0D0; border-color:#9C3030; transform:translateY(-1px); }
+      .dm-mode-han { font-family:'Noto Serif SC',serif; font-size:15px; color:var(--zhusha-d); font-weight:700; }
+      .dm-mode-ko { font-size:10.5px; color:var(--mo-l); margin-top:2px; }
+      .dm-mode-btn.duiwei { background:linear-gradient(135deg,#FFF8E8,#FFE0B0); border-color:#C9A227; }
+      .dm-mode-btn.duiwei .dm-mode-han { color:#7C1818; }
+      .dm-cat-tabs { display:flex; gap:4px; background:#FAF1E0; border-radius:8px; padding:4px; margin-bottom:10px; border:1px solid #C9A22744; }
+      .dm-cat-tab { flex:1; padding:7px 6px; background:transparent; border:0; border-radius:5px; font-size:11.5px; cursor:pointer; font-family:inherit; color:var(--mo-l); display:flex; flex-direction:column; align-items:center; gap:1px; }
+      .dm-cat-tab .han { font-family:'Noto Serif SC',serif; font-size:13px; color:var(--mo-l); font-weight:600; }
+      .dm-cat-tab.active { background:#9C3030; color:#FFE08A; }
+      .dm-cat-tab.active .han { color:#FFE08A; }
+      .dm-cat-tab .ct { font-size:9.5px; opacity:.75; }
+      .dm-progress { display:flex; gap:8px; align-items:center; font-size:11.5px; color:var(--mo); padding:7px 11px; background:#FAF1E0; border:1px solid #C9A22744; border-radius:8px; margin-bottom:10px; }
+      .dm-progress .bar { flex:1; height:6px; background:#E8DCC0; border-radius:3px; overflow:hidden; position:relative; }
+      .dm-progress .fill { position:absolute; left:0; top:0; bottom:0; background:linear-gradient(90deg,#C9A227,#9C3030); transition:width .4s ease; border-radius:3px; }
+      .dm-progress .stat { font-family:var(--font-display); color:var(--zhusha-d); }
+      .dm-sub-header { display:flex; align-items:center; gap:10px; margin-bottom:8px; padding:9px 11px; background:linear-gradient(135deg,#9C3030,#6E1818); color:#FFE08A; border-radius:9px; }
+      .dm-sub-header .ttl { font-family:'ZCOOL XiaoWei',serif; font-size:18px; letter-spacing:.05em; }
+      .dm-sub-header .sub { font-size:10.5px; opacity:.85; margin-top:1px; }
+      .dm-sub-header .back { margin-left:auto; background:transparent; border:1px solid #FFE08A; color:#FFE08A; padding:4px 9px; border-radius:6px; font-size:11px; cursor:pointer; }
+      .dm-sub-header .back:hover { background:rgba(255,224,138,.12); }
+      .dm-card-q { background:#FFF8E8; border:1px solid #C9A22744; border-radius:10px; padding:12px; margin-bottom:10px; }
+      .dm-img { width:100%; max-width:320px; aspect-ratio:1; object-fit:cover; border-radius:8px; display:block; margin:0 auto 10px; border:2px solid #9C303033; }
+      .dm-q-text { font-size:13.5px; color:var(--mo); margin-bottom:10px; text-align:center; line-height:1.55; }
+      .dm-q-text .han { font-family:'Noto Serif SC',serif; color:var(--zhusha-d); font-weight:700; }
+      .dm-opts { display:grid; gap:6px; margin-bottom:8px; }
+      .dm-opt-btn { background:#fff; border:1.5px solid #C9A22755; padding:9px 11px; border-radius:7px; text-align:left; font-size:12.5px; cursor:pointer; font-family:inherit; color:var(--mo); transition:all .12s ease; line-height:1.5; }
+      .dm-opt-btn:hover { border-color:#9C3030; background:#FFF8E0; }
+      .dm-opt-btn.correct { background:#E8F5E8; border-color:#2A7060; color:#1A5A3A; }
+      .dm-opt-btn.wrong   { background:#FDE8E8; border-color:#9C3030; color:#7A2424; }
+      .dm-opt-btn.disabled { pointer-events:none; opacity:.7; }
+      .dm-opt-btn .han { font-family:'Noto Serif SC',serif; color:var(--zhusha-d); font-weight:600; }
+      .dm-feedback { padding:9px 11px; border-radius:6px; font-size:12px; line-height:1.65; margin-top:6px; }
+      .dm-feedback.ok { background:#E8F5E8; color:#1A5A3A; border-left:3px solid #2A7060; }
+      .dm-feedback.no { background:#FDE8E8; color:#7A2424; border-left:3px solid #9C3030; }
+      .dm-feedback .han { font-family:'Noto Serif SC',serif; font-weight:700; }
+      .dm-gal-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; }
+      @media (min-width:520px) { .dm-gal-grid { grid-template-columns:repeat(4,1fr); } }
+      .dm-gal-card { position:relative; aspect-ratio:1; border-radius:7px; overflow:hidden; cursor:pointer; border:1px solid #C9A22755; background:#fff; }
+      .dm-gal-card img { width:100%; height:100%; object-fit:cover; display:block; }
+      .dm-gal-card:hover img { transform:scale(1.04); transition:transform .2s; }
+      .dm-gal-num { position:absolute; left:2px; top:2px; background:rgba(0,0,0,.55); color:#FFE08A; font-family:var(--font-display); font-size:9.5px; padding:1px 4px; border-radius:3px; }
+      .dm-gal-cat { position:absolute; right:2px; top:2px; padding:1px 4px; border-radius:3px; font-size:9px; font-family:'Noto Serif SC',serif; font-weight:700; }
+      .dm-gal-cat.jilji   { background:#9C3030; color:#FFE08A; }
+      .dm-gal-cat.seoltai { background:#2A7060; color:#FFE08A; }
+      .dm-gal-cat.both    { background:#C9A227; color:#3A1810; }
+      .dm-gal-label { position:absolute; left:0; right:0; bottom:0; background:linear-gradient(to top,rgba(0,0,0,.82),transparent); color:#FFE08A; font-size:9.5px; padding:14px 4px 4px; text-align:center; line-height:1.25; font-family:'Noto Serif SC',serif; }
+      .dm-gal-card.hide-label .dm-gal-label { display:none; }
+      .dm-result { background:linear-gradient(135deg,#FFF8E0,#FFE0B0); border:1.5px solid #C9A227; border-radius:10px; padding:16px; margin-bottom:12px; text-align:center; }
+      .dm-result .pct { font-family:'ZCOOL XiaoWei',serif; font-size:50px; color:#9C3030; line-height:1; }
+      .dm-result .meta { font-size:12px; color:var(--mo); margin-top:6px; }
+      .dm-stat-row { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:8px 0; }
+      .dm-stat-card { background:#FAF1E0; border:1px solid #C9A22755; border-radius:8px; padding:10px; text-align:center; }
+      .dm-stat-card .v { font-family:'ZCOOL XiaoWei',serif; font-size:24px; color:#9C3030; line-height:1; }
+      .dm-stat-card .l { font-size:10.5px; color:var(--mo-l); margin-top:4px; }
+      .dm-bar-row { display:flex; align-items:center; gap:7px; font-size:11.5px; margin:5px 0; }
+      .dm-bar-row .name { width:62px; font-family:'Noto Serif SC',serif; color:var(--zhusha-d); }
+      .dm-bar-row .barOuter { flex:1; height:8px; background:#E8DCC0; border-radius:4px; overflow:hidden; }
+      .dm-bar-row .barFill { height:100%; background:linear-gradient(90deg,#C9A227,#9C3030); border-radius:4px; transition:width .4s; }
+      .dm-bar-row .num { font-family:var(--font-display); color:var(--zhusha-d); min-width:56px; text-align:right; }
+      .dm-modal-bg { position:fixed; inset:0; background:rgba(20,8,4,.55); z-index:9996; display:flex; align-items:center; justify-content:center; padding:18px; }
+      .dm-modal { background:#FFF8E8; border:1.5px solid #9C3030; border-radius:12px; padding:14px; max-width:360px; max-height:88vh; overflow:auto; box-shadow:0 10px 28px rgba(60,12,12,.4); }
+      .dm-modal h4 { margin:0 0 8px; font-family:'Noto Serif SC',serif; color:var(--zhusha-d); font-size:15px; display:flex; gap:6px; align-items:center; }
+      .dm-modal .pho { width:100%; max-height:280px; object-fit:cover; border-radius:6px; margin-bottom:8px; }
+      .dm-modal .row { font-size:12px; line-height:1.7; margin-bottom:4px; }
+      .dm-modal .row b { color:var(--zhusha-d); font-family:'Noto Serif SC',serif; }
+      .dm-modal .close { width:100%; margin-top:8px; padding:8px; background:var(--zhusha); color:#fff; border:0; border-radius:6px; cursor:pointer; font-size:12px; }
+      .dm-input-row { display:flex; gap:6px; }
+      .dm-input-row input { flex:1; padding:9px 10px; font-size:13px; border:1.5px solid #C9A22755; border-radius:6px; font-family:inherit; background:#fff; }
+      .dm-input-row input:focus { outline:none; border-color:#9C3030; }
+      .dm-input-row button { background:#9C3030; color:#FFE08A; border:0; padding:9px 14px; border-radius:6px; font-size:12.5px; cursor:pointer; font-family:inherit; }
+    </style>
+  `;
+}
+
+function _bannerHTML(){
+  const exams = (window.JINDAN_EXAMS || []);
+  const pills = exams.map(_examPillHTML).join('');
+  return `
+    <div class="dm-banner">
+      <div class="dm-banner-medal">${_medal('leejema', 60)}</div>
+      <div style="flex:1">
+        <div class="dm-banner-title">東武之房</div>
+        <div class="dm-banner-sub">診斷學 · 진단학 · 李濟馬 主</div>
+        ${pills ? `<div class="dm-exam-row">${pills}</div>` : ''}
+      </div>
+      <button class="dm-back" type="button" id="dm-to-hub">← 醫書宮</button>
+    </div>
+  `;
+}
+function _attachBanner(){
+  const b = $('#dm-to-hub');
+  if(b) b.addEventListener('click', () => {
+    if(typeof window.setTab === 'function') window.setTab('hub');
+  });
+}
+
+let SES = null;
+function _newSession(mode, catId){
+  const pool = _tonguesIn(catId);
+  const order = pool.slice();
+  for(let i = order.length-1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i+1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  SES = { mode, catId, pool, order, idx:0, correct:0, wrong:0, wrongIds:[], answered:false, startedAt:Date.now() };
+}
+
+function renderDongmuHome(){
+  const view = document.getElementById('view');
+  if(!view) return;
+  view.innerHTML = _baseStyles() + _bannerHTML() + `
+    <div class="dm-modes">
+      <button class="dm-mode-btn duiwei" type="button" data-mode="duiwei" style="grid-column:1 / -1">
+        <div class="dm-mode-han">對位 · 設色×設苔 매트릭스</div>
+        <div class="dm-mode-ko">색·태 좌표 끌어다 놓는 학습세트</div>
+      </button>
+      <button class="dm-mode-btn" type="button" data-mode="gallery">
+        <div class="dm-mode-han">圖鑑</div>
+        <div class="dm-mode-ko">사진첩 · 라벨 토글</div>
+      </button>
+      <button class="dm-mode-btn" type="button" data-mode="mcq">
+        <div class="dm-mode-han">問答</div>
+        <div class="dm-mode-ko">4지선다</div>
+      </button>
+      <button class="dm-mode-btn" type="button" data-mode="subj">
+        <div class="dm-mode-han">主觀</div>
+        <div class="dm-mode-ko">주관식 입력</div>
+      </button>
+      <button class="dm-mode-btn" type="button" data-mode="drill">
+        <div class="dm-mode-han">速習</div>
+        <div class="dm-mode-ko">드릴·자동 진행</div>
+      </button>
+      <button class="dm-mode-btn" type="button" data-mode="stats">
+        <div class="dm-mode-han">析究</div>
+        <div class="dm-mode-ko">통계·분석</div>
+      </button>
+    </div>
+    <div style="background:#FAF1E0;border:1px solid #C9A22744;border-radius:9px;padding:11px 12px;font-size:11.5px;color:var(--mo);line-height:1.7">
+      <div style="font-family:'Noto Serif SC',serif;font-size:13px;color:var(--zhusha-d);margin-bottom:5px"><b>學習 안내</b></div>
+      <div><b style="color:#9C3030">舌質 (설질)</b> · 24장 — 색·형·태 (苔 글자 없는 라벨)</div>
+      <div><b style="color:#2A7060">舌苔 (설태)</b> · 20장 — 苔色·苔質</div>
+      <div><b style="color:#C9A227">兼 (복합)</b> · 4장 — 舌+苔 동시 명시 (양쪽 set 에 모두 포함)</div>
+      <div style="margin-top:6px;color:var(--mo-l);font-size:10.5px">시험 일정은 醫書宮 상단 D-N 패널에 통합 표시.</div>
+    </div>
+  `;
+  _attachBanner();
+  $$('.dm-mode-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      const m = b.dataset.mode;
+      if(m === 'gallery')      openGallery();
+      else if(m === 'mcq')     openMcq();
+      else if(m === 'subj')    openSubj();
+      else if(m === 'drill')   openDrill();
+      else if(m === 'stats')   openStats();
+      else if(m === 'duiwei'){
+        if(window.V11Matrix && window.V11Matrix.open) window.V11Matrix.open();
+        else toast('對位 모듈 미로드','warn');
+      }
+    });
+  });
+}
+window.renderDongmuHome = renderDongmuHome;
+
+let GAL_STATE = { catId:'all', showLabels:true };
+function openGallery(){ _renderGallery(); }
+function _renderGallery(){
+  const view = document.getElementById('view');
+  if(!view) return;
+  const T = _tonguesIn(GAL_STATE.catId);
+  const cards = T.map(t => {
+    const catBadge = `<span class="dm-gal-cat ${esc(t.category||'jilji')}">${esc(CATEGORY_BY_ID[t.category]?.han || '?')}</span>`;
+    return `
+      <div class="dm-gal-card ${GAL_STATE.showLabels?'':'hide-label'}" data-tid="${t.id}">
+        <img src="${esc(t.img)}" alt="${esc(t.han)}" loading="lazy">
+        <span class="dm-gal-num">${('00'+t.id).slice(-2)}</span>
+        ${catBadge}
+        <div class="dm-gal-label"><b>${esc(t.han)}</b><br>${esc(t.pattern_han||'-')}</div>
+      </div>
+    `;
+  }).join('');
+  view.innerHTML = _baseStyles() + `
+    <div class="dm-sub-header">
+      <div><div class="ttl">圖鑑 · 사진첩</div><div class="sub">${T.length}장 · 라벨 토글로 자가 검증</div></div>
+      <button class="back" type="button" id="dm-sub-back">← 동무의 방</button>
+    </div>
+    ${_catTabsHTML(GAL_STATE.catId)}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:7px 11px;background:#FAF1E0;border:1px solid #C9A22744;border-radius:8px">
+      <span style="font-size:11.5px;color:var(--mo)">사진 탭 → 상세 보기</span>
+      <label style="font-size:11.5px;color:var(--mo);cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px">
+        <input type="checkbox" id="dm-gal-toggle" ${GAL_STATE.showLabels?'checked':''}> 라벨 표시
+      </label>
+    </div>
+    <div class="dm-gal-grid">${cards}</div>
+  `;
+  $('#dm-sub-back').addEventListener('click', renderDongmuHome);
+  $$('.dm-cat-tab').forEach(b => b.addEventListener('click', () => { GAL_STATE.catId = b.dataset.cat; _renderGallery(); }));
+  $('#dm-gal-toggle').addEventListener('change', e => { GAL_STATE.showLabels = e.target.checked; _renderGallery(); });
+  $$('.dm-gal-card').forEach(c => c.addEventListener('click', () => _openDetailModal(parseInt(c.dataset.tid, 10))));
+}
+
+function _catTabsHTML(activeId){
+  return `<div class="dm-cat-tabs">
+    ${CATEGORIES.map(c => {
+      const n = _tonguesIn(c.id).length;
+      return `<button class="dm-cat-tab${c.id===activeId?' active':''}" data-cat="${c.id}">
+        <span class="han">${esc(c.han)}</span>
+        <span>${esc(c.ko)}</span>
+        <span class="ct">${n}장</span>
+      </button>`;
+    }).join('')}
+  </div>`;
+}
+
+function _openDetailModal(tid){
+  const t = (window.TONGUE_BY_ID || {})[tid];
+  if(!t) return;
+  const cat = CATEGORY_BY_ID[t.category] || CATEGORY_BY_ID.jilji;
+  const bg = document.createElement('div');
+  bg.className = 'dm-modal-bg';
+  bg.innerHTML = `
+    <div class="dm-modal">
+      <h4>
+        <span>${('00'+t.id).slice(-2)}.</span>
+        <span style="font-family:'ZCOOL XiaoWei',serif">${esc(t.han)}</span>
+        <span class="dm-gal-cat ${esc(t.category)}" style="margin-left:auto;font-size:10px">${esc(cat.han)}</span>
+      </h4>
+      <img class="pho" src="${esc(t.img)}" alt="">
+      ${t.label_full ? `<div class="row"><b>${esc(t.label_full)}</b></div>` : ''}
+      ${t.ko ? `<div class="row" style="color:var(--mo-l)">${esc(t.ko)}</div>` : ''}
+      ${(t.body_features||[]).length ? `<div class="row"><b>形態</b> · ${(t.body_features||[]).map(esc).join(' · ')}</div>` : ''}
+      ${(t.quality_features||[]).length ? `<div class="row"><b>色苔</b> · ${(t.quality_features||[]).map(esc).join(' · ')}</div>` : ''}
+      ${t.pattern_han ? `<div class="row">辨證 · <b style="color:var(--feicui)">${esc(t.pattern_han)}</b> · ${esc(t.pattern||'')}</div>` : ''}
+      ${t.notes ? `<div class="row" style="background:#FFF0C0;padding:6px 8px;border-radius:5px;margin-top:6px">${esc(t.notes)}</div>` : ''}
+      ${t.page ? `<div class="row" style="color:var(--gutong);font-size:10.5px">교재 P.${esc(t.page)}</div>` : ''}
+      <button class="close" type="button">닫기</button>
+    </div>
+  `;
+  bg.addEventListener('click', e => { if(e.target === bg || e.target.classList.contains('close')) bg.remove(); });
+  document.body.appendChild(bg);
+}
+
+function openMcq(){   _renderQuizPickRange('mcq',   '問答 · 객관식 4지선다', '범위 탭 → 시작.'); }
+function openSubj(){  _renderQuizPickRange('subj',  '主觀 · 주관식 입력',   '한자/한글 직접 입력.'); }
+function openDrill(){ _renderQuizPickRange('drill', '速習 · 드릴',          '4지선다 자동 진행.'); }
+function _renderQuizPickRange(mode, title, sub){
+  const view = document.getElementById('view');
+  if(!view) return;
+  view.innerHTML = _baseStyles() + `
+    <div class="dm-sub-header">
+      <div><div class="ttl">${esc(title)}</div><div class="sub">${esc(sub)}</div></div>
+      <button class="back" type="button" id="dm-sub-back">← 동무의 방</button>
+    </div>
+    <div style="font-size:12px;color:var(--mo);margin-bottom:8px">범위 선택 (탭하면 즉시 시작):</div>
+    ${_catTabsHTML('')}
+  `;
+  $('#dm-sub-back').addEventListener('click', renderDongmuHome);
+  $$('.dm-cat-tab').forEach(b => b.addEventListener('click', () => { _newSession(mode, b.dataset.cat); _renderQuestion(); }));
+}
+
+function _buildMcqQ(t){
+  const axes = [];
+  if(t.pattern_han)                  axes.push('pattern');
+  if(t.han)                          axes.push('han');
+  if((t.body_features||[]).length)   axes.push('body');
+  if((t.quality_features||[]).length) axes.push('quality');
+  const axis = axes[Math.floor(Math.random() * axes.length)] || 'han';
+  let q, correct;
+  const pool = window.TONGUES || [];
+  if(axis === 'pattern'){ q = '이 사진의 <span class="han">辨證</span>은?'; correct = t.pattern_han || '?'; }
+  else if(axis === 'han'){ q = '이 사진의 <span class="han">舌象</span> 한자 라벨은?'; correct = t.han || '?'; }
+  else if(axis === 'body'){ q = '이 사진의 <span class="han">形態</span> 특징은?'; correct = (t.body_features||[])[0] || '?'; }
+  else { q = '이 사진의 <span class="han">色苔</span>는?'; correct = (t.quality_features||[])[0] || '?'; }
+  const distrSet = new Set();
+  pool.forEach(o => {
+    if(o.id === t.id) return;
+    let v;
+    if(axis === 'pattern')   v = o.pattern_han;
+    else if(axis === 'han')  v = o.han;
+    else if(axis === 'body') v = (o.body_features||[])[0];
+    else                     v = (o.quality_features||[])[0];
+    if(v && v !== correct) distrSet.add(v);
+  });
+  const distr = Array.from(distrSet);
+  for(let i = distr.length-1; i > 0; i--){ const j = Math.floor(Math.random()*(i+1)); [distr[i], distr[j]] = [distr[j], distr[i]]; }
+  const opts = [correct, ...distr.slice(0, 3)];
+  for(let i = opts.length-1; i > 0; i--){ const j = Math.floor(Math.random()*(i+1)); [opts[i], opts[j]] = [opts[j], opts[i]]; }
+  return { q, axis, correct, opts };
 }
 
 function _renderQuestion(){
   const view = document.getElementById('view');
-  if(!view || !_session) return;
-  if(_session.idx >= _session.cards.length){
-    _renderResults();
-    return;
-  }
-  const t = _session.cards[_session.idx];
-  const q = _generateQuestion(t, _session.modeRange);
-  _session.currentQ = q;
-  _session.currentT = t;
-
-  const progress = `${_session.idx+1} / ${_session.cards.length}`;
-  const acc = (_session.correct + _session.wrong)
-    ? `${Math.round(_session.correct/(_session.correct+_session.wrong)*100)}%`
-    : '0%';
-  const modeKo = _session.modeStudy === 'mcq' ? '객관식'
-    : _session.modeStudy === 'subjective' ? '주관식' : '드릴';
-  const rangeKo = _session.modeRange === 'body' ? '설체'
-    : _session.modeRange === 'quality' ? '설질' : '통합';
-
-  view.innerHTML = `
-    <style>
-      .jd-bar { display:flex; gap:6px; align-items:center; margin-bottom:10px; padding:6px 10px; background:#FAF1E0; border-radius:8px; font-size:11.5px; }
-      .jd-bar .lab { color:var(--zhusha-d); font-weight:600; }
-      .jd-bar .sep { color:var(--gutong); }
-      .jd-photo-wrap { background:#fff; border:1px solid #C9A22744; border-radius:10px; padding:10px; margin-bottom:10px; text-align:center; }
-      .jd-photo { max-width:100%; max-height:300px; border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,.15); }
-      .jd-question { font-size:14px; color:var(--zhusha-d); font-weight:600; text-align:center; margin:8px 0; }
-      .jd-options { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:10px; }
-      @media (max-width:480px){ .jd-options{ grid-template-columns:1fr; } }
-      .jd-opt { background:#fff; border:1px solid #C9A22755; padding:10px 12px; border-radius:8px; font-size:13px; cursor:pointer; text-align:center; font-family:'Noto Serif SC',serif; }
-      .jd-opt:hover:not(:disabled) { background:#FFF0D0; border-color:#C9A227; }
-      .jd-opt.correct { background:#2A7060; color:#fff; border-color:#2A7060; }
-      .jd-opt.wrong { background:#9C3030; color:#fff; border-color:#9C3030; }
-      .jd-opt:disabled { cursor:default; opacity:.7; }
-      .jd-input { width:100%; padding:10px; font-size:14px; border:1px solid #C9A22755; border-radius:8px; font-family:'Noto Serif SC',serif; margin-bottom:6px; box-sizing:border-box; }
-      .jd-submit { width:100%; background:var(--zhusha); color:#fff; border:0; padding:10px; font-size:13px; border-radius:8px; cursor:pointer; font-weight:600; }
-      .jd-explain { background:#FFF8E0; border-left:3px solid var(--huang); padding:8px 10px; border-radius:6px; font-size:11.5px; line-height:1.65; margin:10px 0; }
-      .jd-explain .lab { font-weight:700; color:var(--zhusha-d); }
-      .jd-explain .han { font-family:'Noto Serif SC',serif; color:#5C2C0C; }
-      .jd-next { display:none; width:100%; background:var(--feicui); color:#fff; border:0; padding:11px; font-size:13px; border-radius:8px; cursor:pointer; font-weight:600; margin-top:8px; }
-      .jd-quit { background:transparent; border:1px solid var(--gutong); color:var(--gutong); padding:6px 10px; font-size:11px; border-radius:6px; cursor:pointer; }
-    </style>
-
-    <div class="jd-bar">
-      <span class="lab">${esc(modeKo)} · ${esc(rangeKo)}</span>
-      <span class="sep">|</span>
-      <span>${esc(progress)}</span>
-      <span class="sep">|</span>
-      <span>정답률 <b style="color:var(--feicui)">${esc(acc)}</b></span>
-      <span style="margin-left:auto"><button class="jd-quit" type="button" id="jd-quit">← 동무의 방</button></span>
+  if(!view || !SES) return;
+  if(SES.idx >= SES.order.length) return _renderResult();
+  const t = SES.order[SES.idx];
+  const cat = CATEGORY_BY_ID[SES.catId] || CATEGORY_BY_ID.all;
+  const progress = SES.idx / SES.order.length;
+  if(SES.mode === 'subj') return _renderSubjQ(t, cat, progress);
+  const q = _buildMcqQ(t);
+  SES._currentQ = q;
+  view.innerHTML = _baseStyles() + `
+    <div class="dm-sub-header">
+      <div><div class="ttl">${SES.mode==='drill'?'速習':'問答'} · <span class="han">${esc(cat.han)}</span></div><div class="sub">${SES.idx+1} / ${SES.order.length}</div></div>
+      <button class="back" type="button" id="dm-sub-back">← 종료</button>
     </div>
-
-    <div class="jd-photo-wrap">
-      <img class="jd-photo" src="${esc(t.img)}" alt="설진">
+    <div class="dm-progress">
+      <span class="stat">${SES.correct} / ${SES.idx}</span>
+      <div class="bar"><div class="fill" style="width:${(progress*100).toFixed(1)}%"></div></div>
+      <span>오답 <b style="color:#9C3030">${SES.wrong}</b></span>
     </div>
-
-    <div class="jd-question">${esc(q.question)}</div>
-
-    ${_session.modeStudy === 'subjective'
-      ? `<input class="jd-input" type="text" id="jd-input" placeholder="한자 또는 한글 (예: 氣虛 또는 기허)" autocomplete="off">
-         <button class="jd-submit" type="button" id="jd-submit">제출</button>`
-      : `<div class="jd-options">${q.options.map((o, i) => `<button class="jd-opt" type="button" data-i="${i}" data-val="${esc(o)}">${esc(o)}</button>`).join('')}</div>`
-    }
-
-    <div class="jd-explain" id="jd-explain" style="display:none">
-      <div class="lab" id="jd-explain-head"></div>
-      <div style="margin-top:4px">
-        <span class="han">${esc(t.label_full)}</span> — ${esc(t.ko)}<br>
-        <span style="color:var(--mo-l)">${esc(t.notes || '')}</span>
-        ${t.page ? `<br><span style="color:var(--gutong);font-size:10.5px">교재 P.${esc(t.page)}</span>` : ''}
+    <div class="dm-card-q">
+      <img class="dm-img" src="${esc(t.img)}" alt="">
+      <div class="dm-q-text">${q.q}</div>
+      <div class="dm-opts" id="dm-opts">
+        ${q.opts.map((o, i) => `<button class="dm-opt-btn" data-opt="${esc(o)}" data-idx="${i}"><span class="han">${esc(o)}</span></button>`).join('')}
       </div>
-    </div>
-
-    <button class="jd-next" type="button" id="jd-next">다음 →</button>
-  `;
-
-  $('#jd-quit').addEventListener('click', () => {
-    _session = null;
-    if(window.renderDongmuHome) window.renderDongmuHome();
-    else if(window.setTab) window.setTab('dongmu');
-  });
-
-  if(_session.modeStudy === 'subjective'){
-    const inp = $('#jd-input');
-    const btn = $('#jd-submit');
-    inp.focus();
-    const submit = () => _checkSubjective(inp.value);
-    btn.addEventListener('click', submit);
-    inp.addEventListener('keydown', e => { if(e.key === 'Enter') submit(); });
-  } else {
-    $$('.jd-opt').forEach(b => {
-      b.addEventListener('click', () => _checkMCQ(b.dataset.val, b));
-    });
-  }
-
-  const next = $('#jd-next');
-  if(next) next.addEventListener('click', () => {
-    _session.idx++;
-    _renderQuestion();
-  });
-}
-
-function _showExplanation(isCorrect, userAns){
-  const exp = $('#jd-explain');
-  const head = $('#jd-explain-head');
-  if(!exp || !head) return;
-  if(isCorrect){
-    head.innerHTML = `<span style="color:var(--feicui)">✓ 정답</span>`;
-  } else {
-    head.innerHTML = `<span style="color:var(--zhusha-d)">✗ 오답</span> · 정답: <b>${esc(_session.currentQ.correct)}</b>${userAns?` · 입력: ${esc(userAns)}`:''}`;
-  }
-  exp.style.display = 'block';
-  const next = $('#jd-next');
-  if(next) next.style.display = 'block';
-}
-
-function _checkMCQ(val, btn){
-  const correct = val === _session.currentQ.correct;
-  $$('.jd-opt').forEach(b => {
-    b.disabled = true;
-    if(b.dataset.val === _session.currentQ.correct) b.classList.add('correct');
-    else if(b === btn) b.classList.add('wrong');
-  });
-  if(correct){ _session.correct++; }
-  else { _session.wrong++; }
-  _session.history.push({tongueId: _session.currentT.id, correct, type: _session.currentQ.type});
-  _showExplanation(correct);
-  // 드릴 모드는 자동 다음 (1.4초)
-  if(_session.modeStudy === 'drill'){
-    setTimeout(() => { _session.idx++; _renderQuestion(); }, correct ? 800 : 1800);
-  }
-}
-
-function _checkSubjective(val){
-  const v = (val || '').trim();
-  if(!v){ toast('답 입력','warn'); return; }
-  const correct = _session.currentQ.correct;
-  // 채점: 한자 정확 일치 OR 한글 매칭 OR 키워드 일치
-  const norm = s => String(s).replace(/\s+/g,'').toLowerCase();
-  const vn = norm(v);
-  const cn = norm(correct);
-  const t = _session.currentT;
-  let isCorrect = false;
-  if(vn === cn) isCorrect = true;
-  // 한글 정답 (label / ko / pattern) 매칭
-  if(!isCorrect){
-    const koAns = norm(t.pattern || '');
-    if(koAns && vn.includes(koAns)) isCorrect = true;
-  }
-  // 한자 fragment 일치 (예: '기허' 답 → 정답 '氣虛' 의 한글 '기허')
-  if(!isCorrect){
-    const mapping = {'기허':'氣虛','음허':'陰虛','양허':'陽虛','기혈양허':'氣血兩虛',
-      '심화성':'心火盛','심간화왕':'心肝火旺','습증':'濕證','습열':'濕熱','담습':'痰濕',
-      '혈어':'血瘀','열입영혈':'熱入營血','열성':'熱盛','실증':'實證','음허화왕':'陰虛火旺',
-      '폐위음허':'肺胃陰虛','위음허':'胃陰虛'};
-    if(mapping[vn] === correct) isCorrect = true;
-  }
-  if(isCorrect){ _session.correct++; }
-  else { _session.wrong++; }
-  _session.history.push({tongueId: t.id, correct: isCorrect, type: _session.currentQ.type});
-  // 입력란 disable
-  const inp = $('#jd-input'); if(inp) inp.disabled = true;
-  const btn = $('#jd-submit'); if(btn) btn.disabled = true;
-  _showExplanation(isCorrect, v);
-}
-
-function _renderResults(){
-  const view = document.getElementById('view');
-  if(!view || !_session) return;
-  const total = _session.correct + _session.wrong;
-  const acc = total ? Math.round(_session.correct/total*100) : 0;
-  const dur = Math.round((Date.now() - _session.startedAt) / 1000);
-  const min = Math.floor(dur / 60), sec = dur % 60;
-
-  // 가장 자주 틀린 사진
-  const wrongHistory = _session.history.filter(h => !h.correct);
-  const wrongIds = wrongHistory.map(h => h.tongueId);
-  const wrongTongues = [...new Set(wrongIds)].map(id => window.TONGUE_BY_ID && window.TONGUE_BY_ID[id]).filter(Boolean);
-
-  view.innerHTML = `
-    <style>
-      .jd-result-card { background:linear-gradient(135deg,#9C3030,#6E1818); color:#FFE08A; padding:18px; border-radius:12px; margin-bottom:12px; text-align:center; box-shadow:0 6px 16px rgba(60,12,12,.3); }
-      .jd-result-acc { font-family:'ZCOOL XiaoWei',serif; font-size:52px; line-height:1; margin:8px 0; }
-      .jd-result-stats { display:flex; justify-content:center; gap:14px; font-size:12px; opacity:.92; margin-top:6px; }
-      .jd-wrong-list { background:#fff; border:1px solid #C9A22755; border-radius:10px; padding:10px; }
-      .jd-wrong-list h4 { margin:0 0 8px; font-size:13px; color:var(--zhusha-d); }
-      .jd-wrong-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
-      @media (max-width:480px){ .jd-wrong-grid { grid-template-columns:repeat(3,1fr); } }
-      .jd-wrong-cell { background:#FFF0D0; border-radius:6px; padding:4px; text-align:center; font-size:9.5px; }
-      .jd-wrong-cell img { width:100%; height:80px; object-fit:cover; border-radius:4px; }
-    </style>
-
-    <div class="jd-result-card">
-      <div style="font-size:14px;opacity:.88">學業 結算</div>
-      <div class="jd-result-acc">${acc}<span style="font-size:30px">%</span></div>
-      <div style="font-size:13px">${_session.correct} / ${total} 정답</div>
-      <div class="jd-result-stats">
-        <span>틀린 문항 ${_session.wrong}</span>
-        <span>·</span>
-        <span>${min}분 ${sec}초</span>
-      </div>
-    </div>
-
-    ${wrongTongues.length ? `
-      <div class="jd-wrong-list">
-        <h4>틀린 사진 (${wrongTongues.length}장) — 복습 권장</h4>
-        <div class="jd-wrong-grid">
-          ${wrongTongues.map(t => `
-            <div class="jd-wrong-cell">
-              <img src="${esc(t.img)}" alt="${esc(t.han)}">
-              <div style="margin-top:3px"><b>${esc(t.han)}</b></div>
-              <div style="color:var(--mo-l)">${esc(t.pattern_han || '')}</div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    ` : `<div style="text-align:center;padding:14px;color:var(--feicui);font-size:14px">滿點! 完璧 — 한 장도 안 틀렸습니다 ✨</div>`}
-
-    <div style="display:flex;gap:6px;margin-top:12px">
-      <button class="btn" type="button" id="jd-result-retry" style="flex:1">다시 풀기</button>
-      <button class="btn btn-o" type="button" id="jd-result-back" style="flex:1">동무의 방</button>
+      <div id="dm-feedback"></div>
     </div>
   `;
-
-  $('#jd-result-retry').addEventListener('click', () => {
-    start(_session.modeStudy, _session.modeRange);
-  });
-  $('#jd-result-back').addEventListener('click', () => {
-    _session = null;
-    if(window.renderDongmuHome) window.renderDongmuHome();
-    else if(window.setTab) window.setTab('dongmu');
-  });
+  $('#dm-sub-back').addEventListener('click', () => { SES = null; renderDongmuHome(); });
+  $$('.dm-opt-btn').forEach(b => b.addEventListener('click', () => _handleAnswer(b.dataset.opt, t, q)));
 }
 
-// ─── 3. 사진첩 (gallery) ────────────────────────────────────────────────
-function openGallery(modeRange){
-  const view = document.getElementById('view');
-  if(!view) return;
-  const pool = (typeof window.tonguesForMode === 'function')
-    ? window.tonguesForMode(modeRange || 'both') : (window.TONGUES || []);
-  let revealed = false;
-  function render(){
-    view.innerHTML = `
-      <style>
-        .jg-bar { display:flex; gap:6px; align-items:center; margin-bottom:10px; }
-        .jg-bar .ttl { font-family:var(--font-display); font-size:16px; color:var(--zhusha-d); }
-        .jg-toggle { background:#FAF1E0; border:1px solid #C9A22755; padding:4px 10px; border-radius:6px; font-size:11px; cursor:pointer; margin-left:auto; }
-        .jg-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
-        @media (min-width:560px){ .jg-grid{ grid-template-columns:repeat(4,1fr); } }
-        .jg-card { background:#fff; border:1px solid #C9A22744; border-radius:8px; overflow:hidden; }
-        .jg-card img { width:100%; height:110px; object-fit:cover; display:block; }
-        .jg-label { padding:5px 6px; font-size:10px; line-height:1.4; }
-        .jg-label .num { color:var(--gutong); }
-        .jg-label .han { font-family:'Noto Serif SC',serif; color:var(--zhusha-d); font-weight:600; font-size:11px; }
-        .jg-label .pat { color:var(--feicui); font-size:9.5px; margin-top:1px; }
-      </style>
-
-      <div class="jg-bar">
-        <span class="ttl">舌診 사진첩 (${pool.length}장)</span>
-        <button class="jg-toggle" type="button" id="jg-toggle">${revealed ? '라벨 숨기기' : '라벨 보기'}</button>
-        <button class="jg-toggle" type="button" id="jg-back">← 동무의 방</button>
-      </div>
-
-      <div class="jg-grid">
-        ${pool.map(t => `
-          <div class="jg-card">
-            <img src="${esc(t.img)}" alt="설진 ${t.id}">
-            <div class="jg-label">
-              <div class="num">${('00'+t.id).slice(-2)}</div>
-              ${revealed ? `<div class="han">${esc(t.han)}</div><div class="pat">${esc(t.pattern_han || t.pattern || '')}</div>` : `<div style="color:var(--gutong)">─ ?</div>`}
-            </div>
-          </div>
-        `).join('')}
-      </div>
+function _handleAnswer(chosen, t, q){
+  if(SES.answered) return;
+  SES.answered = true;
+  const ok = chosen === q.correct;
+  if(ok){ SES.correct++; } else { SES.wrong++; SES.wrongIds.push(t.id); }
+  $$('.dm-opt-btn').forEach(b => {
+    b.classList.add('disabled');
+    if(b.dataset.opt === q.correct) b.classList.add('correct');
+    else if(b.dataset.opt === chosen && !ok) b.classList.add('wrong');
+  });
+  const fb = $('#dm-feedback');
+  if(fb){
+    fb.className = 'dm-feedback ' + (ok ? 'ok' : 'no');
+    fb.innerHTML = `
+      <div><b>${ok ? '正答' : '誤答'}</b> · <span class="han">${esc(t.han)}</span> · ${esc(t.label_full || '')}</div>
+      ${t.pattern_han ? `<div>辨證: <span class="han">${esc(t.pattern_han)}</span> · ${esc(t.pattern||'')}</div>` : ''}
+      ${t.notes ? `<div style="margin-top:4px">${esc(t.notes)}</div>` : ''}
+      ${t.page ? `<div style="margin-top:3px;font-size:10.5px;color:var(--gutong)">교재 P.${esc(t.page)}</div>` : ''}
+      ${SES.mode==='drill' ? '' : `<div style="margin-top:7px;text-align:right"><button class="btn btn-sm" type="button" id="dm-next">다음 →</button></div>`}
     `;
-    $('#jg-toggle').addEventListener('click', () => { revealed = !revealed; render(); });
-    $('#jg-back').addEventListener('click', () => {
-      if(window.renderDongmuHome) window.renderDongmuHome();
-      else if(window.setTab) window.setTab('dongmu');
-    });
   }
-  render();
+  _saveStat(t.id, ok);
+  if(SES.mode === 'drill'){
+    setTimeout(() => { SES.answered = false; SES.idx++; _renderQuestion(); }, ok ? 800 : 1800);
+  } else {
+    setTimeout(() => {
+      const nx = $('#dm-next');
+      if(nx) nx.addEventListener('click', () => { SES.answered = false; SES.idx++; _renderQuestion(); });
+    }, 30);
+  }
 }
 
-// ─── 4. 동무의 방 — 확장된 home (D-N + 학습 모드 버튼) ──────────────────
-function expandDongmuHome(){
+function _renderSubjQ(t, cat, progress){
+  const view = document.getElementById('view');
+  view.innerHTML = _baseStyles() + `
+    <div class="dm-sub-header">
+      <div><div class="ttl">主觀 · <span class="han">${esc(cat.han)}</span></div><div class="sub">${SES.idx+1} / ${SES.order.length}</div></div>
+      <button class="back" type="button" id="dm-sub-back">← 종료</button>
+    </div>
+    <div class="dm-progress">
+      <span class="stat">${SES.correct} / ${SES.idx}</span>
+      <div class="bar"><div class="fill" style="width:${(progress*100).toFixed(1)}%"></div></div>
+      <span>오답 <b style="color:#9C3030">${SES.wrong}</b></span>
+    </div>
+    <div class="dm-card-q">
+      <img class="dm-img" src="${esc(t.img)}" alt="">
+      <div class="dm-q-text">이 사진의 <span class="han">舌象 라벨</span> 또는 <span class="han">辨證</span>을 입력 (한자/한글):</div>
+      <div class="dm-input-row">
+        <input type="text" id="dm-subj-input" placeholder="예: 紅舌  /  열증  /  陰虛">
+        <button type="button" id="dm-subj-submit">확인</button>
+      </div>
+      <div id="dm-feedback"></div>
+    </div>
+  `;
+  $('#dm-sub-back').addEventListener('click', () => { SES = null; renderDongmuHome(); });
+  const input = $('#dm-subj-input'); const submit = $('#dm-subj-submit');
+  input.focus();
+  const fire = () => _handleSubjAnswer(input.value, t);
+  submit.addEventListener('click', fire);
+  input.addEventListener('keydown', e => { if(e.key === 'Enter') fire(); });
+}
+function _handleSubjAnswer(raw, t){
+  if(SES.answered) return;
+  const v = String(raw||'').trim().replace(/\s+/g,'').toLowerCase();
+  if(!v) return;
+  const cand = [];
+  [t.han, t.label_full, t.pattern_han, t.pattern, t.ko].forEach(x => { if(x) cand.push(x); });
+  (t.body_features||[]).forEach(x => cand.push(x));
+  (t.quality_features||[]).forEach(x => cand.push(x));
+  const norm = s => String(s||'').replace(/\s+/g,'').toLowerCase();
+  const ok = cand.some(c => {
+    const nc = norm(c);
+    if(!nc || nc.length < 2) return false;
+    return nc.includes(v) || v.includes(nc);
+  });
+  SES.answered = true;
+  if(ok){ SES.correct++; } else { SES.wrong++; SES.wrongIds.push(t.id); }
+  const fb = $('#dm-feedback');
+  fb.className = 'dm-feedback ' + (ok ? 'ok' : 'no');
+  fb.innerHTML = `
+    <div><b>${ok?'正答':'誤答'}</b> · 입력: <span class="han">${esc(raw)}</span></div>
+    <div>정답: <span class="han">${esc(t.han)}</span> · ${esc(t.label_full||'')}</div>
+    ${t.pattern_han ? `<div>辨證: <span class="han">${esc(t.pattern_han)}</span> · ${esc(t.pattern||'')}</div>` : ''}
+    ${t.notes ? `<div style="margin-top:4px">${esc(t.notes)}</div>` : ''}
+    <div style="margin-top:7px;text-align:right"><button class="btn btn-sm" type="button" id="dm-next">다음 →</button></div>
+  `;
+  $('#dm-subj-input').disabled = true;
+  $('#dm-subj-submit').disabled = true;
+  _saveStat(t.id, ok);
+  setTimeout(() => {
+    const nx = $('#dm-next');
+    if(nx) nx.addEventListener('click', () => { SES.answered = false; SES.idx++; _renderQuestion(); });
+  }, 30);
+}
+
+function _renderResult(){
+  const view = document.getElementById('view');
+  if(!view || !SES) return;
+  const total = SES.correct + SES.wrong;
+  const pct = total > 0 ? Math.round(SES.correct / total * 100) : 0;
+  const dur = Math.round((Date.now() - SES.startedAt) / 1000);
+  const m = Math.floor(dur/60), s = dur%60;
+  const cat = CATEGORY_BY_ID[SES.catId] || CATEGORY_BY_ID.all;
+  const wrongCards = SES.wrongIds.map(id => {
+    const t = (window.TONGUE_BY_ID || {})[id];
+    if(!t) return '';
+    return `<div class="dm-gal-card" data-tid="${t.id}"><img src="${esc(t.img)}" alt="" loading="lazy"><span class="dm-gal-num">${('00'+t.id).slice(-2)}</span><div class="dm-gal-label"><b>${esc(t.han)}</b><br>${esc(t.pattern_han||'-')}</div></div>`;
+  }).join('');
+  view.innerHTML = _baseStyles() + `
+    <div class="dm-sub-header">
+      <div><div class="ttl">滿陣 · 결과</div><div class="sub">${SES.mode==='subj'?'주관식':SES.mode==='drill'?'속습':'객관식'} · <span class="han">${esc(cat.han)}</span></div></div>
+      <button class="back" type="button" id="dm-sub-back">← 동무의 방</button>
+    </div>
+    <div class="dm-result"><div class="pct">${pct}%</div><div class="meta">${SES.correct} / ${total} · 소요 ${m}분 ${s}초</div></div>
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <button class="btn" style="flex:1" type="button" id="dm-retry">↻ 다시 풀기</button>
+      <button class="btn btn-o" style="flex:1" type="button" id="dm-home">동무의 방</button>
+    </div>
+    ${SES.wrongIds.length > 0 ? `
+      <div style="font-family:'Noto Serif SC',serif;color:var(--zhusha-d);font-size:13px;margin:14px 0 6px"><b>誤答 復習</b> · ${SES.wrongIds.length}장</div>
+      <div class="dm-gal-grid">${wrongCards}</div>
+    ` : '<div style="text-align:center;color:#2A7060;font-family:Noto Serif SC,serif;font-size:14px;margin-top:10px">無誤答 · 완벽한 회차입니다.</div>'}
+  `;
+  $('#dm-sub-back').addEventListener('click', () => { SES = null; renderDongmuHome(); });
+  $('#dm-retry').addEventListener('click', () => { const mode = SES.mode, catId = SES.catId; _newSession(mode, catId); _renderQuestion(); });
+  $('#dm-home').addEventListener('click', () => { SES = null; renderDongmuHome(); });
+  $$('.dm-gal-card').forEach(c => c.addEventListener('click', () => _openDetailModal(parseInt(c.dataset.tid, 10))));
+}
+
+const STATS_KEY = 'bangje.jindan.stats.v1';
+function _loadStats(){
+  try{ const raw = localStorage.getItem(STATS_KEY); if(raw) return JSON.parse(raw); }catch(_){}
+  return { perTongue:{}, totals:{correct:0, wrong:0, sessions:0} };
+}
+function _saveStats(s){ try{ localStorage.setItem(STATS_KEY, JSON.stringify(s)); }catch(_){} }
+function _saveStat(tid, ok){
+  const s = _loadStats();
+  if(!s.perTongue[tid]) s.perTongue[tid] = { c:0, w:0 };
+  if(ok){ s.perTongue[tid].c++; s.totals.correct++; }
+  else  { s.perTongue[tid].w++; s.totals.wrong++; }
+  _saveStats(s);
+}
+
+function openStats(){
   const view = document.getElementById('view');
   if(!view) return;
-
-  const exams = window.JINDAN_EXAMS || [];
-  function dleft(iso){
-    const d = (new Date(iso)).getTime();
-    if(!isFinite(d)) return null;
-    return Math.ceil((d - Date.now()) / 86400000);
-  }
-
-  // 사진첩 카운트
-  const total = (window.TONGUES || []).length;
-  const bodyN = (window.tonguesForMode ? window.tonguesForMode('body').length : 0);
-  const qualN = (window.tonguesForMode ? window.tonguesForMode('quality').length : 0);
-
-  view.innerHTML = `
-    <style>
-      .dm-banner { background:linear-gradient(135deg,#9C3030,#6E1818); color:#FFE08A;
-                    padding:14px; border-radius:10px; margin-bottom:10px;
-                    display:flex; align-items:center; gap:14px; box-shadow:0 4px 12px rgba(60,12,12,.3); }
-      .dm-banner-medal { width:64px; height:64px; border-radius:50%; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,.3); flex-shrink:0; }
-      .dm-banner-medal .cmedal, .dm-banner-medal img { width:100%; height:100%; }
-      .dm-banner-title { font-family:'ZCOOL XiaoWei',serif; font-size:22px; letter-spacing:.06em; }
-      .dm-banner-sub { font-size:11.5px; opacity:.88; margin-top:2px; }
-      .dm-back { background:transparent; border:1px solid #FFE08A; color:#FFE08A; padding:4px 10px; border-radius:6px; font-size:11px; cursor:pointer; margin-left:auto; }
-      .dm-exam-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
-      @media (max-width:480px){ .dm-exam-row { grid-template-columns:1fr; } }
-      .dm-exam-card { background:#FFF8E0; border:2px solid; border-radius:10px; padding:10px 12px; text-align:center; }
-      .dm-exam-han { font-family:'ZCOOL XiaoWei',serif; font-size:18px; letter-spacing:.05em; }
-      .dm-exam-dday { font-family:var(--font-display); font-size:32px; line-height:1; margin:6px 0; }
-      .dm-exam-meta { font-size:10.5px; color:var(--gutong); }
-      .dm-section { background:#FAF1E0; border:1px solid #9C303033; border-radius:10px; padding:12px; margin-bottom:10px; }
-      .dm-stitle { font-family:var(--font-display); font-size:14px; color:var(--zhusha-d); margin-bottom:6px; display:flex; align-items:center; gap:6px; }
-      .dm-stitle .han { font-family:'ZCOOL XiaoWei',serif; font-size:18px; }
-      .dm-modes { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:8px; }
-      .dm-mode-btn { background:#fff; border:1px solid #9C303055; padding:10px 6px; border-radius:8px; text-align:center; cursor:pointer; font-size:12px; }
-      .dm-mode-btn:hover { background:#FFF0D0; border-color:#9C3030; }
-      .dm-mode-han { font-family:'Noto Serif SC',serif; font-size:14px; color:var(--zhusha-d); font-weight:700; }
-      .dm-mode-ko { font-size:10.5px; color:var(--mo-l); margin-top:2px; }
-      .dm-mode-btn.duiwei { background:linear-gradient(135deg,#FFF8E8,#FFE0B0); border-color:#C9A227; }
-      .dm-mode-btn.duiwei .dm-mode-han { color:#7C1818; }
-      .dm-range-tabs { display:flex; gap:4px; margin-bottom:8px; background:#fff; padding:4px; border-radius:8px; border:1px solid #C9A22744; }
-      .dm-range-tab { flex:1; padding:7px 4px; text-align:center; font-size:11.5px; cursor:pointer; border-radius:5px; border:0; background:transparent; color:var(--mo); font-weight:600; }
-      .dm-range-tab.active { background:#9C3030; color:#FFE08A; }
-      .dm-range-tab .han { font-family:'Noto Serif SC',serif; font-size:13px; }
-      .dm-tip { font-size:10.5px; color:var(--gutong); margin-top:4px; line-height:1.6; }
-    </style>
-
-    <div class="dm-banner">
-      <div class="dm-banner-medal">${_medal('leejema', 64)}</div>
-      <div style="flex:1">
-        <div class="dm-banner-title">東武之房</div>
-        <div class="dm-banner-sub"><span class="han">診斷學</span> · 진단학 · 李濟馬 主</div>
-      </div>
-      <button class="dm-back" type="button" id="dm-to-hub">← 醫書宮</button>
+  const s = _loadStats();
+  const total = s.totals.correct + s.totals.wrong;
+  const pct = total > 0 ? Math.round(s.totals.correct / total * 100) : 0;
+  const byCat = { jilji:{c:0,w:0,n:0,seen:0}, seoltai:{c:0,w:0,n:0,seen:0}, both:{c:0,w:0,n:0,seen:0} };
+  const T = window.TONGUES || [];
+  T.forEach(t => {
+    const cat = t.category || 'jilji';
+    byCat[cat].n++;
+    const st = s.perTongue[t.id];
+    if(st){ byCat[cat].c += st.c; byCat[cat].w += st.w; if(st.c + st.w > 0) byCat[cat].seen++; }
+  });
+  const weak = T.map(t => {
+    const st = s.perTongue[t.id] || {c:0,w:0};
+    const tot = st.c + st.w;
+    const wpct = tot > 0 ? st.w / tot : 0;
+    return { t, tot, wpct, w:st.w };
+  }).filter(x => x.w > 0).sort((a,b) => b.w - a.w || b.wpct - a.wpct).slice(0, 6);
+  view.innerHTML = _baseStyles() + `
+    <div class="dm-sub-header">
+      <div><div class="ttl">析究 · 통계·분석</div><div class="sub">로컬 저장 · 사진별 정답률</div></div>
+      <button class="back" type="button" id="dm-sub-back">← 동무의 방</button>
     </div>
-
-    <div class="dm-exam-row">
-      ${exams.map(e => {
-        const d = dleft(e.date);
-        const ddText = d > 0 ? `D-${d}` : (d === 0 ? 'D-Day' : `D+${-d}`);
-        const urgent = d !== null && d >= 0 && d <= 3;
-        return `
-          <div class="dm-exam-card" style="border-color:${e.accent}">
-            <div class="dm-exam-han" style="color:${e.accent}">${esc(e.han)}試驗</div>
-            <div class="dm-exam-dday" style="color:${urgent ? '#9C3030' : e.accent}">${ddText}</div>
-            <div class="dm-exam-meta">${esc(e.label)} · ${esc(e.range)}</div>
-          </div>
-        `;
+    <div class="dm-result"><div class="pct">${pct}%</div><div class="meta">전체 정답률 · ${s.totals.correct} 正 / ${s.totals.wrong} 誤 (총 ${total}회)</div></div>
+    <div class="dm-stat-row">
+      <div class="dm-stat-card"><div class="v">${byCat.jilji.seen}/${byCat.jilji.n}</div><div class="l"><span class="han" style="color:#9C3030">舌質</span> 본 사진</div></div>
+      <div class="dm-stat-card"><div class="v">${byCat.seoltai.seen}/${byCat.seoltai.n}</div><div class="l"><span class="han" style="color:#2A7060">舌苔</span> 본 사진</div></div>
+      <div class="dm-stat-card"><div class="v">${byCat.both.seen}/${byCat.both.n}</div><div class="l"><span class="han" style="color:#C9A227">兼</span> 본 사진</div></div>
+    </div>
+    <div class="dm-card-q">
+      <div style="font-family:'Noto Serif SC',serif;color:var(--zhusha-d);font-size:13px;margin-bottom:6px"><b>分類別 正答率</b></div>
+      ${Object.keys(byCat).map(k => {
+        const x = byCat[k]; const tot = x.c + x.w;
+        const p = tot > 0 ? Math.round(x.c / tot * 100) : 0;
+        const c = CATEGORY_BY_ID[k] || {};
+        return `<div class="dm-bar-row">
+          <div class="name">${esc(c.han||k)}</div>
+          <div class="barOuter"><div class="barFill" style="width:${p}%"></div></div>
+          <div class="num">${p}% (${x.c}/${tot})</div>
+        </div>`;
       }).join('')}
     </div>
-
-    <div class="dm-section">
-      <div class="dm-stitle"><span class="han">舌診</span> 설진 학습 — ${total}장 사진</div>
-      <div class="dm-tip">아래 범위 선택 후 학습 모드를 선택. <b style="color:#9C3030">5/19 設體</b> 시험은 形態(齒痕·裂紋·鏡面 등) 위주, <b style="color:#2A7060">5/26 設質</b> 시험은 色·苔 위주.</div>
-
-      <div class="dm-range-tabs" id="dm-range-tabs">
-        <button class="dm-range-tab active" type="button" data-range="body"><span class="han">舌體</span> 설체 (${bodyN}장)</button>
-        <button class="dm-range-tab" type="button" data-range="quality"><span class="han">舌質</span> 설질 (${qualN}장)</button>
-        <button class="dm-range-tab" type="button" data-range="both">통합 (${total}장)</button>
-      </div>
-
-      <div class="dm-modes">
-        <button class="dm-mode-btn duiwei" type="button" data-mode="duiwei" style="grid-column:1 / -1">
-          <div class="dm-mode-han">對位 · 設色×設苔 매트릭스</div>
-          <div class="dm-mode-ko">색·태를 좌표로 끌어다 놓는 학습세트 (5/26 對備)</div>
-        </button>
-        <button class="dm-mode-btn" type="button" data-mode="mcq">
-          <div class="dm-mode-han">客觀</div>
-          <div class="dm-mode-ko">객관식 4지선다</div>
-        </button>
-        <button class="dm-mode-btn" type="button" data-mode="subjective">
-          <div class="dm-mode-han">主觀</div>
-          <div class="dm-mode-ko">주관식 직접 입력</div>
-        </button>
-        <button class="dm-mode-btn" type="button" data-mode="drill">
-          <div class="dm-mode-han">速習</div>
-          <div class="dm-mode-ko">드릴 (자동 진행)</div>
-        </button>
-        <button class="dm-mode-btn" type="button" data-mode="gallery" style="grid-column:1 / -1">
-          <div class="dm-mode-han">圖鑑</div>
-          <div class="dm-mode-ko">사진첩 (라벨 토글)</div>
-        </button>
-      </div>
-    </div>
+    ${weak.length > 0 ? `
+      <div style="font-family:'Noto Serif SC',serif;color:var(--zhusha-d);font-size:13px;margin:14px 0 6px"><b>取弱 · 자주 틀리는 사진</b></div>
+      <div class="dm-gal-grid">${weak.map(x => `
+        <div class="dm-gal-card" data-tid="${x.t.id}">
+          <img src="${esc(x.t.img)}" alt="" loading="lazy">
+          <span class="dm-gal-num">${('00'+x.t.id).slice(-2)}</span>
+          <span class="dm-gal-cat ${esc(x.t.category)}">${esc((CATEGORY_BY_ID[x.t.category]||{}).han||'?')}</span>
+          <div class="dm-gal-label"><b>${esc(x.t.han)}</b><br>오답 ${x.w}회</div>
+        </div>
+      `).join('')}</div>
+    ` : '<div style="text-align:center;color:var(--mo-l);font-size:11.5px;margin:14px 0">아직 학습 기록이 없습니다. 객관식·주관식·드릴을 풀면 사진별 정답률이 누적됩니다.</div>'}
+    ${total > 0 ? `<div style="margin-top:14px;text-align:center"><button class="btn btn-sm btn-o" type="button" id="dm-stat-reset">통계 초기화</button></div>` : ''}
   `;
-
-  let currentRange = 'body';  // 시험 임박 (5/19) 이라 설체 default
-  $$('#dm-range-tabs .dm-range-tab').forEach(b => {
-    b.addEventListener('click', () => {
-      currentRange = b.dataset.range;
-      $$('#dm-range-tabs .dm-range-tab').forEach(x => x.classList.toggle('active', x === b));
-    });
+  $('#dm-sub-back').addEventListener('click', renderDongmuHome);
+  const rb = $('#dm-stat-reset');
+  if(rb) rb.addEventListener('click', () => {
+    if(confirm('진단학 학습 통계를 모두 초기화할까요?')){
+      try{ localStorage.removeItem(STATS_KEY); }catch(_){}
+      toast('통계 초기화 완료','gold'); openStats();
+    }
   });
-  $$('.dm-mode-btn').forEach(b => {
-    b.addEventListener('click', () => {
-      const m = b.dataset.mode;
-      if(m === 'gallery'){
-        openGallery(currentRange);
-      } else if(m === 'duiwei'){
-        // v11.4: 對位 — 설색×설태 매트릭스 (별도 모듈)
-        if(window.V11Matrix && typeof window.V11Matrix.open === 'function'){
-          window.V11Matrix.open();
-        } else {
-          toast('對位 모듈 미로드','warn');
-        }
-      } else {
-        start(m, currentRange);
-      }
-    });
-  });
-
-  $('#dm-to-hub').addEventListener('click', () => {
-    if(window.setTab) window.setTab('hub');
-  });
-}
-
-// ─── 메달리온 helper (app.js 의 함수 활용) ─────────────────────────────
-function _medal(id, size){
-  if(typeof window._charPhotoMedallion === 'function') return window._charPhotoMedallion(id, size);
-  if(typeof window._charMedallion === 'function') return window._charMedallion(id, size);
-  return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:#E8C8A0"></div>`;
-}
-
-// 기존 renderDongmuHome 을 새 expandDongmuHome 으로 교체
-if(typeof window !== 'undefined'){
-  window.renderDongmuHome = expandDongmuHome;
+  $$('.dm-gal-card').forEach(c => c.addEventListener('click', () => _openDetailModal(parseInt(c.dataset.tid, 10))));
 }
 
 window.V11Jindan = {
-  start, openGallery, expand: expandDongmuHome,
+  openHome: renderDongmuHome,
+  openGallery, openMcq, openSubj, openDrill, openStats,
+  openMatrix: () => (window.V11Matrix && window.V11Matrix.open && window.V11Matrix.open()),
+  CATEGORIES,
 };
 
 })();

@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v11.4';                  // ★ ROUTES window 노출 (hub/dongmu 라우팅 픽스) + 對位 매트릭스 (2026-05)
+const APP_VERSION = 'v11.5';                  // ★ 醫書宮 통합 hub + 진단학 풀 구축 (圖鑑/問答/主觀/速習/析究/對位) + 방제학 home 중복 제거 (2026-05)
 const APP_BUILD   = '2026.05.18.v10.0.8';     // v10.0.8 scope correction
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
@@ -1504,8 +1504,7 @@ function renderHome(){
       </div>
     </div>
 
-    <!-- v9.6: 매일의 黃帝內經 명언 (명예의 전당에서 이전) -->
-    ${_neijingCardHTML()}
+    <!-- v11.5: 黃帝內經 명언은 醫書宮 으로 이전 → 방제학 home 에서 제거 -->
 
     <!-- 캐릭터 인사 (큰 메달리온 + 등급 진행) -->
     <div class="card imperial fade-in" id="hello-card">
@@ -1564,11 +1563,8 @@ function renderHome(){
         <span class="han">析究</span><span class="ttl">통계·분석</span>
         <span class="desc">기출·약재 시각화 · 全 학습자 오답</span>
       </button>
-      <button class="tile gold wide" type="button" onclick="setTab('hall')">
-        <span class="han">譽 · 對決</span><span class="ttl">명예의 전당 · 멀티 對決</span>
-        <span class="desc">9 等級 (賓醫→眞人) · 51 의가 · 氣博 베팅 배틀</span>
-      </button>
     </div>
+    <!-- v11.5: 譽·對決 (명전) 은 醫書宮 의 도구 4종 으로 이전 → 방제학 home 에서 제거 -->
 
     <!-- 온라인 학습자 -->
     <div class="card fade-in" id="presence-card">
@@ -1581,21 +1577,7 @@ function renderHome(){
       </div>
     </div>
 
-    <!-- 건의사항 -->
-    <div class="card fade-in">
-      <div class="card-title"><span class="han">建議</span> 건의사항·피드백</div>
-      <div style="font-size:11.5px;color:var(--mo-l);margin-bottom:6px">버그·개선 의견·요청 등 자유롭게.</div>
-      <div class="feedback-form">
-        <textarea id="fb-msg" placeholder="자유롭게 적어주세요…" maxlength="500"></textarea>
-        <div style="display:flex;gap:6px;justify-content:flex-end">
-          <button class="btn btn-sm btn-o" type="button" id="fb-refresh">새로고침</button>
-          <button class="btn btn-sm" type="button" id="fb-send">보내기</button>
-        </div>
-      </div>
-      <div class="feedback-list" id="fb-list">
-        <div style="font-size:11.5px;color:var(--gutong);text-align:center;padding:8px">불러오는 중…</div>
-      </div>
-    </div>
+    <!-- v11.5: 건의사항은 醫書宮 으로 이전 → 방제학 home 에서 제거 -->
 
     <!-- 학습 진행 통계 -->
     <div class="card fade-in">
@@ -1677,13 +1659,13 @@ function renderHome(){
   $('#char-pick-btn').addEventListener('click', openCharacterPicker);
   $('#char-pick-medal').addEventListener('click', openCharacterPicker);
 
-  // 피드백 send / refresh
-  $('#fb-send').addEventListener('click', sendFeedback);
-  $('#fb-refresh').addEventListener('click', loadFeedback);
+  // v11.5: 피드백은 醫書宮 으로 이전 → 방제학 home 에서는 null-safe
+  const _fbSend = $('#fb-send');     if(_fbSend) _fbSend.addEventListener('click', sendFeedback);
+  const _fbRefr = $('#fb-refresh');  if(_fbRefr) _fbRefr.addEventListener('click', loadFeedback);
 
-  // presence + 피드백 비동기 로드
+  // presence 비동기 로드 (피드백은 hub에서 로드)
   loadPresenceList();
-  loadFeedback();
+  if($('#fb-list')) loadFeedback();
 }
 
 // ─ presence ─

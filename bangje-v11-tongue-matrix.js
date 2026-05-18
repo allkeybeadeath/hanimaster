@@ -583,6 +583,24 @@ function _showCompletionBanner(){
     ? Math.round(_state.correctCount / _state.attemptCount * 100)
     : 100;
   
+  // v11.5: 통계 후크 — 매트릭스 완료 시 DongmuStats 에 기록.
+  //   total = 시도 횟수, correct = 정답 안착 수. wrongDetails 는 ENTRIES 별로
+  //   시도 카운트 기반으로 합성 (오답을 정확히 추적하지 않으므로 단순 표현).
+  try{
+    if(window.DongmuStats && window.DongmuStats.record){
+      const wrongDetails = [];
+      Object.entries(_state.attempts).forEach(([tid, attempts]) => {
+        // attempts 횟수만큼 오답 push (변증별 weakness 집계용)
+        for(let i = 0; i < attempts; i++) wrongDetails.push({tongueId: parseInt(tid,10), correct: false});
+      });
+      // 정답 안착도 push
+      Object.keys(_state.placed).forEach(tid => {
+        wrongDetails.push({tongueId: parseInt(tid,10), correct: true});
+      });
+      window.DongmuStats.record('duiwei', 'all', _state.attemptCount, _state.correctCount, wrongDetails, dur);
+    }
+  }catch(e){ console.warn('matrix stats fail', e); }
+  
   const overlay = document.createElement('div');
   overlay.className = 'mx-done-overlay';
   const card = document.createElement('div');

@@ -1,203 +1,22 @@
-/* bangje-v11-clinic-hub.js — v11.0
+/* bangje-v11-clinic-hub.js — 醫書宮 (의서궁) v2.0 (v11.5)
  * ============================================================================
- * 醫書宮 (의서궁) 입구 — 8과목 hub
+ *  과목 hub 의 통합 대청. 다음을 한 화면에:
+ *    1. 시험 D-N 패널 (모든 과목·시험)
+ *    2. 인사말 + 프로필 (이름·진영·캐릭터 변경)
+ *    3. 도구 4종 (印·譽·方米·對決)
+ *    4. 8房 그리드
+ *    5. 同學 (현재 학습자 · presence)
+ *    6. 명예의 전당 미리보기
+ *    7. 黃帝內經 명언
+ *    8. 建議 (건의사항)
+ *    9. 업데이트 내역
  *
- *   기존 방제학 PWA 를 다과목 학습 platform 으로 확장. 각 과목은 독립된 "방"
- *   이며, 표지 인물(마스코트)·시험 D-N·status 를 가진다. 공유 인프라(氣·등급·
- *   캐릭터·메달리온·인장 등) 는 모든 방에서 동일하게 작동.
- *
- *   • SUBJECTS              — 8 과목 메타데이터
- *   • renderClinicHub()     — 의서궁 입구 (ROUTES.hub)
- *   • renderDongmuHome()    — 진단학 skeleton (ROUTES.dongmu)
- *   • _openPlaceholder()    — placeholder 방 모달 (준비 중 안내)
- *   • _injectGungChip()     — 헤더에 宮 chip 자동 inject (MutationObserver)
- *   • 부트스트랩: ROUTES 등록, 첫 진입 시 init 호출
- *
- *   load 순서: 다른 모든 v9x/v10x 모듈 로드 후 (app.js · v98-bootstrap 의존).
+ *  외부 API: window.V11ClinicHub = { open, openDongmu, SUBJECTS, CHANGELOG_ENTRIES }
  * ============================================================================ */
 
 (function(){
 'use strict';
 
-// ─── 0. SUBJECTS 메타 ──────────────────────────────────────────────────
-// status:
-//   'active'      — 완전 기능 (방제학 v10.0.8 기존 UI 그대로)
-//   'skeleton'    — 자체 home renderer 있음 (UI shell, 데이터는 부분/없음)
-//   'placeholder' — "준비 중" 모달만
-const SUBJECTS = [
-  {
-    id: 'shennong',
-    room_han: '神農之房', room_ko: '신농의 방',
-    subject_han: '方劑學', subject_ko: '방제학',
-    mascot_id: 'shennong',
-    status: 'active',
-    route: 'home',                                          // 기존 renderHome
-    examDate: '2026-05-20T00:00:00+09:00',
-    examTitle: '2차 수시',
-    desc: '處方·本草·君臣佐使·派生·加減',
-    accent: '#C9A227',  // 帝王黃
-  },
-  {
-    id: 'dongmu',
-    room_han: '東武之房', room_ko: '동무의 방',
-    subject_han: '診斷學', subject_ko: '진단학',
-    mascot_id: 'leejema',
-    status: 'skeleton',
-    route: 'dongmu',
-    examDate: null, examTitle: null,
-    desc: '四象·辨證·望聞問切',
-    accent: '#9C3030',  // 朝鮮赤
-  },
-  {
-    id: 'zhongjing',
-    room_han: '仲景之房', room_ko: '중경의 방',
-    subject_han: '傷寒論', subject_ko: '상한론',
-    mascot_id: 'zhongjing',
-    status: 'placeholder',
-    examDate: null,
-    desc: '六經辨證·桂枝·麻黃·柴胡 系',
-    accent: '#7A3D27',  // 古銅
-  },
-  {
-    id: 'qibo',
-    room_han: '岐伯之房', room_ko: '기백의 방',
-    subject_han: '韓方病理學', subject_ko: '한방병리학',
-    mascot_id: 'qibo',
-    status: 'placeholder',
-    examDate: null,
-    desc: '陰陽五行·病機·邪正',
-    accent: '#C9A227',
-  },
-  {
-    id: 'huangdi',
-    room_han: '黃帝之房', room_ko: '황제의 방',
-    subject_han: '豫防醫學', subject_ko: '예방의학',
-    mascot_id: 'huangdi',
-    status: 'placeholder',
-    examDate: null,
-    desc: '上工治未病·養生·攝生',
-    accent: '#C9A227',
-  },
-  {
-    id: 'huatuo',
-    room_han: '華佗之房', room_ko: '화타의 방',
-    subject_han: '洋方病理學', subject_ko: '양방병리학',
-    mascot_id: 'huatuo',
-    status: 'placeholder',
-    examDate: null,
-    desc: '細胞·組織·病變 機轉',
-    accent: '#B22222',  // 朱砂
-  },
-  {
-    id: 'lindaoren',
-    room_han: '道人之房', room_ko: '도인의 방',
-    subject_han: '影像診斷學', subject_ko: '영상진단학',
-    mascot_id: 'lindaoren',
-    status: 'placeholder',
-    examDate: null,
-    desc: '骨格·X線·CT·MRI 讀影',
-    accent: '#6A4C8C',  // 紫氣
-  },
-  {
-    id: 'saamdoin',
-    room_han: '舍巖之房', room_ko: '사암의 방',
-    subject_han: '經穴學', subject_ko: '경혈학',
-    mascot_id: 'saamdoin',
-    status: 'placeholder',
-    examDate: null,
-    desc: '十二經·任督·361穴',
-    accent: '#2A7060',  // 翡翠
-  },
-];
-
-const SUBJECT_BY_ID = {};
-SUBJECTS.forEach(s => { SUBJECT_BY_ID[s.id] = s; });
-
-// ─── 0.5 업뎃 내역 ──────────────────────────────────────────────────────
-// 새 버전 release 시 맨 위에 추가. id 는 unique 식별자 (S.seenChangelogs 에 저장).
-const CHANGELOG_ENTRIES = [
-  { id:'v11.3', label:'v11.3', date:'2026-05-18', title:'강제 hub 첫진입 + bottom nav 숨김',
-    body:`<ul>
-      <li><b>매 진입 시 무조건 醫書宮부터</b> — app.js 안 받아도 v11.3 모듈이 sessionStorage 로 신규 세션 감지 후 강제 hub 표시</li>
-      <li>hub 화면에서 <b>하단 방제학 메뉴 (家·方·藥·卡·問·析·譽) 완전 숨김</b> — 과목 선택 후에만 노출</li>
-      <li>방어적 setTab wrap — 어느 코드가 다른 탭으로 가려해도 bottom nav 자동 토글</li>
-      <li>SW 더 공격적 갱신 — data-*.js 도 network-first, sw.js 자체도 network-first</li>
-    </ul>`},
-  { id:'v11.2', label:'v11.2', date:'2026-05-18', title:'醫書宮 1st-screen · 도구 4종 · 업뎃 상시 표시',
-    body:`<ul>
-      <li><b>醫書宮을 항상 첫 화면</b>으로 — 매 진입 hub에서 시작, 방 선택 후 입실</li>
-      <li>hub에 <b>4 도구</b> 상시 배치: 프로필·업적 / 명예의 전당 / 방미큐브 / 멀티 入場</li>
-      <li><b>업뎃 내역 상시 표시</b> — 모든 버전이 hub에 보임. 펼침/접기 가능, 새 항목은 NEW 뱃지</li>
-      <li>특수 hash 딥링크 지원: <code>#home</code> <code>#hall</code> <code>#cube</code> <code>#dongmu</code> 등</li>
-    </ul>`},
-  { id:'v11.1a', label:'v11.1a', date:'2026-05-18', title:'설진 사진 폴더 평탄화 — 모바일 호스팅 호환',
-    body:`<ul>
-      <li><code>tongues/t01.jpg</code> ~ <code>tongues/t48.jpg</code> → 루트의 <code>t01.jpg</code> ~ <code>t48.jpg</code> (48장)</li>
-      <li>data-jindan-tongue.js 의 img path 도 <code>tongues/</code> 제거</li>
-      <li>폴더 미지원 호스팅 (GitHub Pages 단일 업로드 등) 호환</li>
-    </ul>`},
-  { id:'v11.1', label:'v11.1', date:'2026-05-18', title:'진단학 설진 학습 — 48장 사진 + 4 모드',
-    body:`<ul>
-      <li><b>48장 설진 사진</b> (圖-1~圖-8) 추출 + 라벨링 (色·形·苔·變證)</li>
-      <li><b>4 학습 모드</b>: 客觀(4지선다) · 主觀(직접입력, 한자↔한글) · 速習(드릴) · 圖鑑(사진첩)</li>
-      <li><b>3 범위 탭</b>: 設體(20장, 5/19) / 設質(39장, 5/26) / 통합(48장)</li>
-      <li>5/19 設體 시험 · 5/26 設質 시험 <b>자동 D-N</b> 표시</li>
-      <li>결과 화면: 정답률 · 소요시간 · <b>틀린 사진 grid</b> 한눈에 복습</li>
-    </ul>`},
-  { id:'v11.0', label:'v11.0', date:'2026-05-18', title:'醫書宮 — 다과목 hub 구축, 8房 + 2 캐릭터',
-    body:`<ul>
-      <li>방제학 PWA → <b>醫書宮 다과목 platform</b> 확장. 8방 구조 (방제·진단·상한·한방병리·예방·양방병리·영상·경혈)</li>
-      <li>신규 캐릭터 2인: <b>舍巖道人</b> (경혈학 主) · <b>藺道人</b> (영상진단학 主)</li>
-      <li>東武之房 (진단학) skeleton 구축 — 사상체질 + 四診/辨證 placeholder</li>
-      <li>PHYSICIANS 51 → 53인, 朝鮮 (2)→(3), 隋唐 (3)→(4)</li>
-    </ul>`},
-  { id:'v10.0.8', label:'v10.0.8', date:'2026-05-17', title:'시험범위 — 6장 溫裏劑 제외 (2차 수시)',
-    body:`<ul>
-      <li>5/20 2차 수시 범위: <b>1~5장 + 7장 + 8장</b> (6장 溫裏劑 제외)</li>
-      <li>6장 처방 7개 + 6장 기출 26문 데이터 완전 삭제</li>
-      <li>FORMULAS 102개 (이전 109개에서 6장 제외)</li>
-    </ul>`},
-  { id:'v10.0.7', label:'v10.0.7', date:'2026-05-16', title:'氣 시스템 미세 조정',
-    body:`<ul><li>등급 사다리·氣 획득률 조정</li></ul>`},
-  { id:'v10.0.6', label:'v10.0.6', date:'2026-05-15', title:'기출 문제 보강',
-    body:`<ul><li>past_xxx 추가 문항</li></ul>`},
-  { id:'v10.0.5', label:'v10.0.5', date:'2026-05-14', title:'캐릭터·인장 시스템 정비',
-    body:`<ul><li>메달리온 표시·캐릭터 picker 개선</li></ul>`},
-  { id:'v10.0.4', label:'v10.0.4', date:'2026-05-13', title:'드릴·SRS 시스템 안정화',
-    body:`<ul><li>SRS 큐 알고리즘 개선</li></ul>`},
-  { id:'v10.0.3', label:'v10.0.3', date:'2026-05-12', title:'캐릭터 사진 폴더 평탄화',
-    body:`<ul><li>images/characters/ → 루트 (호스팅 호환성)</li></ul>`},
-  { id:'v10.0.2', label:'v10.0.2', date:'2026-05-11', title:'多 버전 동시 운영 지원',
-    body:`<ul><li>SW 캐시 키 정비</li></ul>`},
-  { id:'v10.0.1', label:'v10.0.1', date:'2026-05-10', title:'10.0 hotfix',
-    body:`<ul><li>방미큐브·인체시각화 미세 버그 fix</li></ul>`},
-  { id:'v10.0', label:'v10.0', date:'2026-05-09', title:'人體 經絡 시각화 + 시진시계 추가',
-    body:`<ul><li>v99-meridian-body · v99-sichen-clock · v99-cubesort · v99-herbtap</li></ul>`},
-  { id:'v9.9', label:'v9.9', date:'2026-05-05', title:'잔여 버그 정리 + 안정성',
-    body:`<ul><li>v9 시리즈 마지막 안정화</li></ul>`},
-  { id:'v9.8', label:'v9.8', date:'2026-05-01', title:'고도 학습 도구 — SRS·드릴·캔버스·가중치',
-    body:`<ul><li>v98-srs · v98-drill · v98-canvas · v98-diff · v98-weighted · v98-hanyin · v98-herbpop · v98-dictplus · v98-resonance · v98-leeline · v98-cube-rules · v98-modal-alert · v98-home · v98-bootstrap</li></ul>`},
-  { id:'v9.7', label:'v9.7', date:'2026-04-25', title:'業績·시그니처·印章 프로필',
-    body:`<ul><li>data-achievements · data-signatures · v97-achievements · v97-signatures · v97-profile · v97-formuladict</li></ul>`},
-  { id:'v9.6', label:'v9.6', date:'2026-04-20', title:'멀티 對決 시스템 안정화',
-    body:`<ul><li>v96 part1~5 multi battle infrastructure</li></ul>`},
-  { id:'v9.5', label:'v9.5', date:'2026-04-15', title:'캐릭터 시그니처 효과',
-    body:`<ul><li>캐릭터별 특수 효과</li></ul>`},
-  { id:'v9', label:'v9.0', date:'2026-04-01', title:'중반기 대규모 개편',
-    body:`<ul><li>등급 사다리·氣 시스템 정비</li></ul>`},
-  { id:'v8', label:'v8.0', date:'2026-03-15', title:'관리자 패널 + hidden 진입',
-    body:`<ul><li>#admin hash, rank-chip 5연타 진입</li></ul>`},
-  { id:'v7', label:'v7.0', date:'2026-03-01', title:'5지선다 + 카드 對決 시스템',
-    body:`<ul><li>멀티 모드 본격 도입</li></ul>`},
-  { id:'v6', label:'v6.0', date:'2026-02-15', title:'기출·암기 체계 정비',
-    body:`<ul><li>past_xxx · hell_xxx · ex_xxx 시스템</li></ul>`},
-  { id:'v5', label:'v5.0', date:'2026-02-01', title:'처방·약재 학습 강화',
-    body:`<ul><li>처방 dict · 본초 popup</li></ul>`},
-  { id:'v4', label:'v4.0', date:'2026-01-15', title:'대청·로비·홈 구조 정착',
-    body:`<ul><li>大廳 home + 로비 시스템</li></ul>`},
-];
-
-// ─── 1. 유틸 ───────────────────────────────────────────────────────────
 function $(s, r){ return (r||document).querySelector(s); }
 function $$(s, r){ return Array.from((r||document).querySelectorAll(s)); }
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -205,69 +24,114 @@ function toast(m,k){ try{ window.toast && window.toast(m,k); }catch(_){} }
 function openModal(html){ try{ window.openModal && window.openModal(html); }catch(_){} }
 function closeModal(){ try{ window.closeModal && window.closeModal(); }catch(_){} }
 
-// 메달리온 — app.js 의 _charPhotoMedallion 사용 (없으면 fallback)
+// ─── SUBJECTS ──────────────────────────────────────────────────────────
+const SUBJECTS = [
+  { id:'shennong',  room_han:'神農之房', subject_han:'方劑學', subject_ko:'방제학',   mascot_id:'shennong',  status:'active',      route:'home',   accent:'#C9A227', desc:'處方·本草·君臣佐使' },
+  { id:'dongmu',    room_han:'東武之房', subject_han:'診斷學', subject_ko:'진단학',   mascot_id:'leejema',   status:'active',      route:'dongmu', accent:'#9C3030', desc:'設診·四象·辨證' },
+  { id:'zhongjing', room_han:'仲景之房', subject_han:'傷寒論', subject_ko:'상한론',   mascot_id:'zhongjing', status:'placeholder', route:null,     accent:'#1A4C7C', desc:'六經辨證·經方' },
+  { id:'qibo',      room_han:'岐伯之房', subject_han:'內經',   subject_ko:'내경',     mascot_id:'qibo',      status:'placeholder', route:null,     accent:'#2A7060', desc:'素問·靈樞' },
+  { id:'huangdi',   room_han:'黃帝之房', subject_han:'醫經',   subject_ko:'의경',     mascot_id:'huangdi',   status:'placeholder', route:null,     accent:'#7C5810', desc:'內經要旨' },
+  { id:'huatuo',    room_han:'華佗之房', subject_han:'外科',   subject_ko:'외과',     mascot_id:'huatuo',    status:'placeholder', route:null,     accent:'#7A3030', desc:'外治·導引' },
+  { id:'lindaoren', room_han:'道人之房', subject_han:'影像',   subject_ko:'영상진단', mascot_id:'lindaoren', status:'placeholder', route:null,     accent:'#5C4070', desc:'영상의학' },
+  { id:'saamdoin',  room_han:'舍巖之房', subject_han:'經穴',   subject_ko:'경혈학',   mascot_id:'saamdoin',  status:'placeholder', route:null,     accent:'#3A6A4A', desc:'舍巖鍼法·經絡' },
+];
+const SUBJECT_BY_ID = {}; SUBJECTS.forEach(s => SUBJECT_BY_ID[s.id] = s);
+
+// ─── CHANGELOG ─────────────────────────────────────────────────────────
+const CHANGELOG_ENTRIES = [
+  { id:'v11.5', label:'v11.5', date:'2026-05-18', title:'醫書宮 통합 hub · 진단학 풀 구축', body:
+    '醫書宮 첫 진입 시 모든 과목 시험 D-N · 프로필 변경 · 同學 · 명예의 전당 · 黃帝內經 명언 · 건의사항 · 업뎃 내역을 한 화면에. ' +
+    '진단학을 방제학과 동일한 형식으로 재구축: 圖鑑·問答·主觀·速習·析究·對位 6 모드. 48 설진 사진을 사용자 규칙 (苔 글자 기준) 으로 재분류 — 舌質 24장 · 舌苔 20장 · 兼 4장. ' +
+    '방제학 home 중복 카드 (譽·對決 / 業績·印) 제거.' },
+  { id:'v11.4', label:'v11.4', date:'2026-05-18', title:'醫書宮 진입 라우팅 정상화 · 對位 매트릭스', body:
+    'window.ROUTES 노출 + setTab 래퍼로 hub/dongmu 라우팅 픽스. 5×5 설색×설태 매트릭스 끌어다 놓기 학습 (對位).' },
+  { id:'v11.3', label:'v11.3', date:'2026-05-18', title:'강제 hub 첫 진입 + bottom nav 숨김', body:'醫書宮 시작 시 bottom nav 숨김.' },
+  { id:'v11.2', label:'v11.2', date:'2026-05-18', title:'醫書宮 첫 진입 고정 + 도구 4종 + 업뎃 패널', body:'첫 화면 항상 醫書宮. 도구 4종 (印·譽·方米·對決).' },
+  { id:'v11.1', label:'v11.1', date:'2026-05-18', title:'동무의 방 1차 — 설진 학습', body:'48장 설진 사진 + 4가지 학습 모드.' },
+  { id:'v11.0', label:'v11.0', date:'2026-05-17', title:'醫書宮 입구 — 다과목 hub', body:'神農之房 외 7방 추가 (skeleton).' },
+];
+
+// ─── Helpers ───────────────────────────────────────────────────────────
 function _medal(charId, size){
-  if(typeof window._charPhotoMedallion === 'function'){
-    return window._charPhotoMedallion(charId, size);
-  }
-  if(typeof window._charMedallion === 'function'){
-    return window._charMedallion(charId, size);
-  }
+  if(typeof window._charPhotoMedallion === 'function') return window._charPhotoMedallion(charId, size);
+  if(typeof window._charMedallion === 'function')      return window._charMedallion(charId, size);
   return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:#E8C8A0;display:flex;align-items:center;justify-content:center;font-family:'ZCOOL XiaoWei',serif;font-size:${Math.round(size*0.4)}px;color:#3A1810">人</div>`;
 }
-
-// 시험 D-N 계산
 function _daysUntil(iso){
   if(!iso) return null;
-  const d = (new Date(iso)).getTime();
+  const d = new Date(iso).getTime();
   if(!isFinite(d)) return null;
   return Math.ceil((d - Date.now()) / 86400000);
 }
 
-// ─── 2. 醫書宮 입구 — renderClinicHub() ───────────────────────────────
+// 통합 시험 목록 — 등록된 모든 과목·시험
+function _collectExams(){
+  const list = [];
+  const meta = window.EXAM_META, iso = window.EXAM_DATE_ISO;
+  if(meta && iso){
+    list.push({ subjectId:'shennong', subject_han:'方劑學', label:meta.examTitle||'시험', date:iso, han:'方劑', accent:'#C9A227', range:meta.rangeKR||'' });
+  }
+  if(window.JINDAN_EXAMS && Array.isArray(window.JINDAN_EXAMS)){
+    window.JINDAN_EXAMS.forEach(e => {
+      list.push({ subjectId:'dongmu', subject_han:'診斷學', label:e.label, date:e.date, han:e.han, accent:e.accent||'#9C3030', range:e.desc||'' });
+    });
+  }
+  list.sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  return list;
+}
+
+// ─── 1. renderClinicHub ────────────────────────────────────────────────
 function renderClinicHub(){
   const view = document.getElementById('view');
   if(!view) return;
-
   const S = window.S || {};
   const rk = (typeof window.getRank === 'function') ? window.getRank(S.qi||0) : {seal:'?', han:'', ko:'', color:'#7A3D27'};
-
-  // 8 cards HTML
+  const fac = (typeof window.getFaction === 'function') ? window.getFaction(S.faction||'taeyang') : {han:'', han2:'?', color:'#7A3D27', ko:''};
+  const charMeta = (window.PHYSICIAN_BY_ID || {})[S.character||'shennong'] || {};
+  const exams = _collectExams();
+  
+  // 시험 D-N pill 들
+  const examPills = exams.map(e => {
+    const d = _daysUntil(e.date);
+    if(d === null) return '';
+    const txt = d > 0 ? `D-${d}` : (d === 0 ? 'D-Day' : `D+${-d}`);
+    const past = d < 0;
+    const urgent = !past && d <= 3;
+    const bg = past ? 'transparent' : (urgent ? '#9C3030' : e.accent);
+    const fg = past ? '#7A5C40' : '#fff';
+    const border = past ? '1px solid #C9A22755' : '0';
+    return `<button class="hub-exam-pill" type="button" data-subject="${esc(e.subjectId)}" style="background:${bg};color:${fg};border:${border};opacity:${past?'.6':'1'}" title="${esc(e.subject_han)} · ${esc(e.range)}">
+      <span class="han">${esc(e.han)}</span>
+      <span class="lbl">${esc(e.label)}</span>
+      <b class="dn">${txt}</b>
+    </button>`;
+  }).join('');
+  
+  // 8房
   const cards = SUBJECTS.map(s => {
-    const dleft = _daysUntil(s.examDate);
-    const ddayHtml = dleft !== null
-      ? (dleft > 0
-          ? `<span class="hub-dday" style="background:${s.accent}">D-${dleft}</span>`
-          : (dleft === 0
-              ? `<span class="hub-dday" style="background:#9C3030">D-Day</span>`
-              : `<span class="hub-dday" style="background:#7A3D27">D+${-dleft}</span>`))
-      : '';
+    const dim = s.status === 'placeholder' ? ' hub-card-dim' : '';
     const statusBadge = s.status === 'active'   ? `<span class="hub-status hub-active">運營</span>`
                       : s.status === 'skeleton' ? `<span class="hub-status hub-skel">準備</span>`
                       :                           `<span class="hub-status hub-plc">未開</span>`;
-    const dim = s.status === 'placeholder' ? ' hub-card-dim' : '';
     return `
       <button class="hub-card${dim}" type="button" data-subject="${esc(s.id)}" style="--accent:${s.accent}">
-        <div class="hub-medal">${_medal(s.mascot_id, 72)}</div>
-        <div class="hub-body">
-          <div class="hub-room-han">${esc(s.room_han)}</div>
-          <div class="hub-room-ko">${esc(s.room_ko)}</div>
-          <div class="hub-subject"><span class="han">${esc(s.subject_han)}</span> · ${esc(s.subject_ko)}</div>
-          <div class="hub-desc">${esc(s.desc)}</div>
-          <div class="hub-meta">${statusBadge}${ddayHtml}</div>
-        </div>
+        <div class="hub-medal">${_medal(s.mascot_id, 60)}</div>
+        <div class="hub-room-han">${esc(s.room_han)}</div>
+        <div class="hub-subject"><span class="han">${esc(s.subject_han)}</span> · ${esc(s.subject_ko)}</div>
+        <div class="hub-desc">${esc(s.desc)}</div>
+        <div class="hub-meta">${statusBadge}</div>
       </button>
     `;
   }).join('');
-
-  // 업뎃 항상 표시 — 모든 CHANGELOG 리스트 (newest first)
+  
+  // changelog
   const seenList = (S.seenChangelogs || []);
   const newCount = CHANGELOG_ENTRIES.filter(c => !seenList.includes(c.id)).length;
   const changelogsHtml = CHANGELOG_ENTRIES.map((c, idx) => {
     const isNew = !seenList.includes(c.id);
-    const expanded = idx < 1 || isNew;  // 최신 + 미열람은 자동 펼침
+    const expanded = idx < 1 || (isNew && idx < 2);
     return `
-      <details class="hub-cl-entry" ${expanded ? 'open' : ''} data-cl-id="${esc(c.id)}">
+      <details class="hub-cl-entry" ${expanded?'open':''} data-cl-id="${esc(c.id)}">
         <summary>
           <span class="hub-cl-v">${esc(c.label)}</span>
           <span class="hub-cl-date">${esc(c.date)}</span>
@@ -278,142 +142,248 @@ function renderClinicHub(){
       </details>
     `;
   }).join('');
-
+  
+  // 황제내경
+  let neijingCard = '';
+  if(typeof window.pickDailyAphorism === 'function'){
+    try{
+      const ap = window.pickDailyAphorism();
+      if(ap){
+        const ko = (ap.ko && ap.ko !== ap.han) ? `<div class="hub-nj-ko">${esc(ap.ko)}</div>` : '';
+        neijingCard = `
+          <div class="hub-section hub-neijing">
+            <div class="hub-section-title"><span class="han">每日</span> 오늘의 黃帝內經</div>
+            <div class="hub-nj-han han">${esc(ap.han)}</div>
+            ${ko}
+            <div class="hub-nj-src">— ${esc(ap.src||'')}</div>
+          </div>`;
+      }
+    }catch(_){}
+  }
+  
   view.innerHTML = `
     <style>
-      .hub-title { font-family:'ZCOOL XiaoWei','Noto Serif KR',serif; font-size:30px; letter-spacing:.08em; color:var(--zhusha-d); text-align:center; margin:8px 0 2px; }
-      .hub-sub { text-align:center; font-size:12px; color:var(--gutong); margin-bottom:10px; letter-spacing:.04em; }
-      .hub-greet { display:flex; align-items:center; gap:10px; background:linear-gradient(135deg,#FFF8E0,#F0DCB8); border:1px solid #C9A22744; border-radius:10px; padding:9px 12px; margin-bottom:10px; }
-      .hub-greet .gqi { margin-left:auto; font-family:var(--font-display); font-size:14px; color:var(--zhusha-d); }
-      .hub-greet .gmedal { width:44px; height:44px; border-radius:50%; overflow:hidden; flex-shrink:0; }
+      .hub-title { font-family:'ZCOOL XiaoWei','Noto Serif KR',serif; font-size:28px; letter-spacing:.08em; color:var(--zhusha-d); text-align:center; margin:6px 0 1px; }
+      .hub-subtitle { text-align:center; font-size:11px; color:var(--gutong); margin-bottom:10px; letter-spacing:.05em; }
+      
+      /* 시험 D-N 패널 */
+      .hub-exam-panel { background:linear-gradient(135deg,#FFF8E0,#F5DCB8); border:1px solid #C9A227; border-radius:10px; padding:10px 11px; margin-bottom:12px; box-shadow:0 3px 7px rgba(60,30,10,.12); }
+      .hub-exam-panel-title { font-family:var(--font-display); font-size:11.5px; color:var(--zhusha-d); margin-bottom:7px; letter-spacing:.05em; display:flex; align-items:center; gap:5px; }
+      .hub-exam-panel-title .han { font-family:'Noto Serif SC',serif; font-size:14px; font-weight:700; }
+      .hub-exam-pills { display:flex; flex-wrap:wrap; gap:6px; }
+      .hub-exam-pill { display:inline-flex; align-items:center; gap:5px; padding:5px 11px; border-radius:13px; font-size:11px; cursor:pointer; font-family:inherit; transition:transform .15s ease, box-shadow .15s ease; }
+      .hub-exam-pill:hover { transform:translateY(-1px); box-shadow:0 3px 7px rgba(0,0,0,.15); }
+      .hub-exam-pill .han { font-family:'Noto Serif SC',serif; font-size:12px; font-weight:700; }
+      .hub-exam-pill .lbl { font-size:10.5px; opacity:.9; }
+      .hub-exam-pill .dn { font-family:var(--font-display); font-size:12px; }
+      .hub-exam-empty { color:var(--mo-l); font-size:11px; text-align:center; padding:6px; }
+      
+      /* 인사말 */
+      .hub-greet { display:flex; align-items:center; gap:11px; background:linear-gradient(135deg,#FFF8E0,#F0DCB8); border:1px solid #C9A22755; border-radius:10px; padding:10px 12px; margin-bottom:10px; }
+      .hub-greet .gmedal { width:54px; height:54px; border-radius:50%; overflow:hidden; flex-shrink:0; cursor:pointer; }
       .hub-greet .gmedal img, .hub-greet .gmedal .cmedal { width:100%; height:100%; }
-
-      /* 도구 row — 프로필·명전·큐브·멀티 */
+      .hub-greet .ginfo { flex:1; min-width:0; }
+      .hub-greet .gname-row { display:flex; align-items:center; gap:5px; flex-wrap:wrap; margin-bottom:4px; }
+      .hub-greet .gseal { font-family:'Noto Serif SC',serif; font-size:11px; font-weight:700; color:#fff; padding:1.5px 6px; border-radius:3px; }
+      .hub-greet .gname { font-family:'Noto Serif KR',serif; font-size:15px; color:var(--mo); font-weight:600; }
+      .hub-greet .gfac { font-family:'Noto Serif SC',serif; font-size:11px; color:#fff; padding:1px 7px; border-radius:9px; }
+      .hub-greet .grank { font-size:10.5px; color:var(--gutong); font-family:'Noto Serif SC',serif; }
+      .hub-greet .gqi { font-size:11px; color:var(--mo-l); margin-top:1px; }
+      .hub-greet .gqi b { color:var(--zhusha-d); font-family:var(--font-display); }
+      .hub-greet .gchar { font-size:10px; color:var(--gutong); margin-top:1px; }
+      .hub-greet .gchar .han { font-family:'Noto Serif SC',serif; color:var(--zhusha-d); font-weight:600; }
+      .hub-greet .gedit { background:transparent; border:1px solid #C9A22788; color:var(--mo); padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; margin-left:auto; font-family:inherit; align-self:flex-start; }
+      .hub-greet .gedit:hover { background:#FFE8B0; }
+      
+      /* 도구 4종 */
       .hub-tools { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:12px; }
-      .hub-tool-btn { background:#FFF8E0; border:1px solid #C9A22755; padding:8px 4px; border-radius:8px; text-align:center; cursor:pointer; font-family:inherit; color:var(--mo); }
+      .hub-tool-btn { background:#FFF8E0; border:1px solid #C9A22755; padding:8px 4px; border-radius:8px; text-align:center; cursor:pointer; font-family:inherit; color:var(--mo); transition:all .12s; }
       .hub-tool-btn:hover { background:#FFE8B0; border-color:#C9A227; transform:translateY(-1px); }
-      .hub-tool-btn:active { transform:translateY(0); }
-      .hub-tool-han { font-family:'ZCOOL XiaoWei','Noto Serif SC',serif; font-size:18px; color:var(--zhusha-d); font-weight:700; letter-spacing:.03em; line-height:1; }
+      .hub-tool-han { font-family:'Noto Serif SC',serif; font-size:16px; color:var(--zhusha-d); font-weight:700; line-height:1; }
       .hub-tool-ko { font-size:10px; color:var(--mo-l); margin-top:3px; line-height:1.2; }
-
-      /* 과목 그리드 */
-      .hub-grid-title { font-family:var(--font-display); font-size:13px; color:var(--zhusha-d); margin:6px 0 8px; display:flex; align-items:center; gap:6px; }
+      
+      /* 8房 그리드 */
+      .hub-grid-title { font-family:var(--font-display); font-size:12.5px; color:var(--zhusha-d); margin:8px 0 6px; display:flex; align-items:center; gap:6px; }
       .hub-grid-title:before, .hub-grid-title:after { content:''; flex:1; height:1px; background:linear-gradient(to right, transparent, #C9A22755, transparent); }
-      .hub-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-bottom:14px; }
-      @media (min-width:560px){ .hub-grid{ grid-template-columns:repeat(3,1fr); } }
-      .hub-card {
-        position:relative; background:#FAF1E0; border:1px solid var(--accent); border-left:4px solid var(--accent);
-        border-radius:10px; padding:10px 8px 8px; display:flex; flex-direction:column; align-items:center;
-        gap:5px; cursor:pointer; transition:transform .15s ease, box-shadow .15s ease;
-        font-family:inherit; text-align:center; color:var(--mo);
-      }
-      .hub-card:hover { transform:translateY(-2px); box-shadow:0 6px 14px rgba(60,30,10,.18); }
-      .hub-card:active { transform:translateY(0); }
+      .hub-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:7px; margin-bottom:12px; }
+      @media (min-width:540px) { .hub-grid { grid-template-columns:repeat(3,1fr); } }
+      .hub-card { position:relative; background:#FAF1E0; border:1px solid var(--accent); border-left:4px solid var(--accent); border-radius:9px; padding:9px 7px 8px; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; transition:transform .15s ease, box-shadow .15s ease; font-family:inherit; text-align:center; color:var(--mo); }
+      .hub-card:hover { transform:translateY(-2px); box-shadow:0 5px 12px rgba(60,30,10,.18); }
       .hub-card-dim { opacity:.62; }
-      .hub-card-dim:hover { opacity:.85; transform:none; box-shadow:none; }
-      .hub-medal { width:64px; height:64px; border-radius:50%; overflow:hidden; flex-shrink:0; box-shadow:0 2px 6px rgba(0,0,0,.15); }
+      .hub-medal { width:60px; height:60px; border-radius:50%; overflow:hidden; }
       .hub-medal img, .hub-medal .cmedal { width:100%; height:100%; }
-      .hub-body { width:100%; }
-      .hub-room-han { font-family:'ZCOOL XiaoWei','Noto Serif SC',serif; font-size:17px; color:var(--accent); letter-spacing:.04em; }
-      .hub-room-ko { font-size:11.5px; color:var(--mo); font-weight:600; margin-top:1px; }
-      .hub-subject { font-size:10px; color:var(--gutong); margin-top:3px; line-height:1.35; }
-      .hub-desc { font-size:9.5px; color:var(--mo-l); margin-top:2px; line-height:1.45; }
-      .hub-meta { display:flex; gap:3px; justify-content:center; margin-top:5px; flex-wrap:wrap; }
-      .hub-status { display:inline-block; font-size:9.5px; padding:1px 6px; border-radius:7px; color:#fff; font-weight:700; letter-spacing:.06em; }
-      .hub-active { background:#2A7060; }
-      .hub-skel { background:#C9A227; color:#2A1810; }
-      .hub-plc { background:#7A3D27; }
-      .hub-dday { display:inline-block; font-size:9.5px; padding:1px 6px; border-radius:7px; color:#fff; font-weight:700; letter-spacing:.04em; }
-
-      /* 업뎃 섹션 */
-      .hub-cl-wrap { background:#FAF1E0; border:1px solid #C9A22744; border-radius:10px; padding:8px 10px; margin-bottom:14px; }
-      .hub-cl-head { display:flex; align-items:center; gap:6px; font-family:var(--font-display); font-size:13px; color:var(--zhusha-d); margin-bottom:6px; }
-      .hub-cl-head-count { background:#9C3030; color:#FFE08A; font-size:9.5px; padding:1px 6px; border-radius:7px; font-weight:700; }
-      .hub-cl-entry { background:#fff; border:1px solid #C9A22733; border-radius:7px; margin-bottom:4px; overflow:hidden; }
-      .hub-cl-entry[open] { border-color:#C9A22788; }
-      .hub-cl-entry summary { padding:6px 9px; cursor:pointer; font-size:11.5px; display:flex; align-items:center; gap:6px; list-style:none; flex-wrap:wrap; }
+      .hub-room-han { font-family:'Noto Serif SC',serif; font-size:14px; font-weight:700; color:var(--zhusha-d); }
+      .hub-subject { font-size:10.5px; color:var(--mo); margin-top:1px; }
+      .hub-subject .han { font-family:'Noto Serif SC',serif; font-weight:700; }
+      .hub-desc { font-size:9.5px; color:var(--mo-l); margin-top:2px; line-height:1.4; }
+      .hub-meta { display:flex; gap:4px; margin-top:3px; }
+      .hub-status { font-size:9.5px; padding:1px 5px; border-radius:3px; font-family:var(--font-display); }
+      .hub-active { background:#2A7060; color:#FFE08A; }
+      .hub-skel   { background:#C9A227; color:#3A1810; }
+      .hub-plc    { background:#7A5C40; color:#FFE08A; }
+      
+      /* sections */
+      .hub-section { background:#FAF1E0; border:1px solid #C9A22744; border-radius:9px; padding:11px 12px; margin-bottom:10px; }
+      .hub-section-title { font-family:var(--font-display); font-size:12px; color:var(--zhusha-d); margin-bottom:7px; letter-spacing:.04em; display:flex; align-items:center; gap:6px; }
+      .hub-section-title .han { font-family:'Noto Serif SC',serif; font-size:14px; font-weight:700; }
+      .hub-section-title .more { margin-left:auto; font-size:10.5px; color:var(--gutong); cursor:pointer; background:transparent; border:0; font-family:inherit; }
+      .hub-section-title .more:hover { color:var(--zhusha); }
+      
+      /* presence */
+      .hub-presence-list { display:flex; flex-wrap:wrap; gap:5px; min-height:28px; }
+      .hub-presence-item { display:flex; align-items:center; gap:5px; background:#fff; border:1px solid #C9A22744; border-radius:18px; padding:3px 8px 3px 4px; font-size:11px; }
+      .hub-presence-medal { width:22px; height:22px; border-radius:50%; overflow:hidden; flex-shrink:0; }
+      .hub-presence-medal img, .hub-presence-medal .cmedal { width:100%; height:100%; }
+      .hub-presence-name { font-family:'Noto Serif KR',serif; color:var(--mo); font-weight:600; }
+      .hub-presence-act { font-size:9.5px; color:var(--mo-l); }
+      .hub-presence-empty { font-size:11px; color:var(--mo-l); padding:4px 0; }
+      
+      /* 명전 미리보기 */
+      .hub-hall-list { display:flex; flex-direction:column; gap:4px; }
+      .hub-hall-row { display:flex; align-items:center; gap:7px; padding:5px 8px; background:#fff; border:1px solid #C9A22744; border-radius:7px; font-size:11.5px; }
+      .hub-hall-rank { font-family:var(--font-display); font-size:12px; color:var(--zhusha-d); width:18px; text-align:center; }
+      .hub-hall-medal { width:24px; height:24px; border-radius:50%; overflow:hidden; flex-shrink:0; }
+      .hub-hall-medal img, .hub-hall-medal .cmedal { width:100%; height:100%; }
+      .hub-hall-name { flex:1; font-family:'Noto Serif KR',serif; color:var(--mo); }
+      .hub-hall-qi { font-family:var(--font-display); color:var(--zhusha-d); font-size:11px; }
+      .hub-hall-qi b { color:var(--zhusha); }
+      
+      /* 황제내경 */
+      .hub-neijing { background:linear-gradient(135deg,#FFFCE8,#F8E8C0); border-color:#C9A22788; }
+      .hub-nj-han { font-family:'ZCOOL XiaoWei','Noto Serif SC',serif; font-size:17px; color:var(--zhusha-d); line-height:1.5; text-align:center; margin:2px 0 4px; letter-spacing:.04em; }
+      .hub-nj-ko { font-size:11.5px; color:var(--mo); text-align:center; line-height:1.55; margin-bottom:4px; }
+      .hub-nj-src { font-size:10px; color:var(--gutong); text-align:right; font-style:italic; }
+      
+      /* 건의사항 */
+      .hub-fb-form { display:flex; flex-direction:column; gap:6px; }
+      .hub-fb-form textarea { width:100%; min-height:60px; padding:8px; font-size:12px; border:1px solid #C9A22755; border-radius:6px; font-family:inherit; resize:vertical; background:#fff; }
+      .hub-fb-form textarea:focus { outline:none; border-color:#9C3030; }
+      .hub-fb-form-row { display:flex; gap:6px; justify-content:flex-end; }
+      .hub-fb-btn { padding:6px 12px; font-size:11.5px; border-radius:6px; cursor:pointer; font-family:inherit; }
+      .hub-fb-btn.primary { background:#9C3030; color:#FFE08A; border:0; }
+      .hub-fb-btn.secondary { background:transparent; color:var(--mo); border:1px solid #C9A22788; }
+      .hub-fb-list { margin-top:9px; display:flex; flex-direction:column; gap:5px; max-height:200px; overflow-y:auto; }
+      .hub-fb-item { background:#fff; border:1px solid #C9A22744; border-radius:6px; padding:7px 10px; font-size:11.5px; line-height:1.55; }
+      .hub-fb-item .who { font-size:10px; color:var(--gutong); font-family:'Noto Serif SC',serif; }
+      .hub-fb-item .ts { font-size:9.5px; color:var(--mo-l); margin-left:6px; }
+      
+      /* changelog */
+      .hub-cl-entry { background:#fff; border:1px solid #C9A22744; border-radius:6px; padding:0; margin-bottom:5px; overflow:hidden; }
+      .hub-cl-entry summary { padding:7px 10px; cursor:pointer; list-style:none; display:flex; align-items:center; gap:6px; font-size:11.5px; user-select:none; }
       .hub-cl-entry summary::-webkit-details-marker { display:none; }
-      .hub-cl-entry summary::marker { display:none; }
-      .hub-cl-v { font-family:var(--font-display); font-size:11px; color:var(--zhusha-d); font-weight:700; }
-      .hub-cl-date { color:var(--gutong); font-size:10px; }
-      .hub-cl-new { background:#9C3030; color:#FFE08A; font-size:9px; padding:1px 5px; border-radius:5px; font-weight:700; letter-spacing:.04em; }
-      .hub-cl-title { color:var(--mo); flex:1; min-width:100%; font-size:11px; margin-top:2px; line-height:1.4; }
-      .hub-cl-body { padding:6px 12px 10px; font-size:11px; color:var(--mo-l); line-height:1.65; border-top:1px dashed #C9A22744; background:#FFFBF0; }
-      .hub-cl-body ul { padding-left:18px; margin:4px 0; }
-      .hub-cl-body li { margin:2px 0; }
-      .hub-cl-body b { color:var(--zhusha-d); }
-
-      .hub-foot { font-size:10.5px; color:var(--gutong); text-align:center; margin-top:6px; line-height:1.6; }
+      .hub-cl-entry summary::before { content:'▸'; transition:transform .15s; color:#9C3030; }
+      .hub-cl-entry[open] summary::before { transform:rotate(90deg); }
+      .hub-cl-v { font-family:var(--font-display); color:var(--zhusha-d); font-weight:700; }
+      .hub-cl-date { font-size:10px; color:var(--gutong); }
+      .hub-cl-new { font-size:9px; background:#9C3030; color:#FFE08A; padding:1px 4px; border-radius:2px; font-weight:700; }
+      .hub-cl-title { color:var(--mo); flex:1; }
+      .hub-cl-body { padding:6px 12px 11px; font-size:11px; color:var(--mo); line-height:1.65; border-top:1px solid #C9A22733; }
     </style>
-
+    
     <div class="hub-title">醫書宮</div>
-    <div class="hub-sub">의서궁 · 八房 學業</div>
-
+    <div class="hub-subtitle">의서궁 · 八房 입구</div>
+    
+    <!-- 시험 D-N 패널 -->
+    <div class="hub-exam-panel">
+      <div class="hub-exam-panel-title"><span class="han">試</span> 시험 일정 · 全 과목</div>
+      ${examPills ? `<div class="hub-exam-pills">${examPills}</div>` : '<div class="hub-exam-empty">등록된 시험 없음</div>'}
+    </div>
+    
+    <!-- 인사말 + 프로필 -->
     <div class="hub-greet">
-      <div class="gmedal">${_medal(S.character || 'shennong', 44)}</div>
-      <div style="display:flex;flex-direction:column;line-height:1.2;flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:700">${esc(S.name || '無名')} <span style="color:var(--gutong);font-weight:400">入室</span></div>
-        <div style="font-size:10.5px;color:var(--gutong)">방을 골라 學業에 든다</div>
+      <div class="gmedal" id="hub-pick-medal">${_medal(S.character || 'shennong', 54)}</div>
+      <div class="ginfo">
+        <div class="gname-row">
+          <span class="gseal" style="background:${rk.color||'#7A3D27'}">${esc(rk.seal||'?')}</span>
+          <span class="gname">${esc(S.name||'?')}</span>
+          <span class="gfac" style="background:${esc(fac.color||'#7A3D27')}">${esc(fac.han2||fac.han||'?')}</span>
+        </div>
+        <div class="grank">${esc(rk.han||'')} · ${esc(rk.ko||'')}</div>
+        <div class="gqi">누적 <b>${(S.qi||0).toLocaleString()}</b> 氣</div>
+        <div class="gchar">캐릭터 · <span class="han">${esc(charMeta.han||'?')}</span> · ${esc(charMeta.ko||'')}</div>
       </div>
-      <div class="gqi">${(S.qi||0).toLocaleString()} 氣</div>
+      <button class="gedit" type="button" id="hub-profile-edit">編 변경</button>
     </div>
-
+    
+    <!-- 도구 4종 -->
     <div class="hub-tools">
-      <button class="hub-tool-btn" type="button" id="hub-tool-profile">
-        <div class="hub-tool-han">印·業</div>
-        <div class="hub-tool-ko">프로필<br>업적</div>
-      </button>
-      <button class="hub-tool-btn" type="button" id="hub-tool-hall">
-        <div class="hub-tool-han">譽</div>
-        <div class="hub-tool-ko">명예의<br>전당</div>
-      </button>
-      <button class="hub-tool-btn" type="button" id="hub-tool-cube">
-        <div class="hub-tool-han">方米</div>
-        <div class="hub-tool-ko">방미<br>큐브</div>
-      </button>
-      <button class="hub-tool-btn" type="button" id="hub-tool-multi">
-        <div class="hub-tool-han">對決</div>
-        <div class="hub-tool-ko">멀티<br>입장</div>
-      </button>
+      <button class="hub-tool-btn" type="button" id="hub-tool-prof"><div class="hub-tool-han">印·業</div><div class="hub-tool-ko">프로필·업적</div></button>
+      <button class="hub-tool-btn" type="button" id="hub-tool-hall"><div class="hub-tool-han">譽</div><div class="hub-tool-ko">명예의 전당</div></button>
+      <button class="hub-tool-btn" type="button" id="hub-tool-cube"><div class="hub-tool-han">方米</div><div class="hub-tool-ko">방미큐브</div></button>
+      <button class="hub-tool-btn" type="button" id="hub-tool-duel"><div class="hub-tool-han">對決</div><div class="hub-tool-ko">멀티 入場</div></button>
     </div>
-
-    <div class="hub-grid-title"><span class="han">八房</span></div>
+    
+    <!-- 8房 -->
+    <div class="hub-grid-title"><span class="han">八房</span> 과목</div>
     <div class="hub-grid">${cards}</div>
-
-    <div class="hub-cl-wrap">
-      <div class="hub-cl-head">
+    
+    <!-- 同學 (presence) -->
+    <div class="hub-section">
+      <div class="hub-section-title">
+        <span class="han">同學</span> 현재 학습 중
+        <span style="font-size:11px;color:var(--feicui);font-weight:700" id="hub-pres-count">…</span>
+      </div>
+      <div class="hub-presence-list" id="hub-pres-list">
+        <span class="hub-presence-empty">불러오는 중…</span>
+      </div>
+    </div>
+    
+    <!-- 명전 미리보기 -->
+    <div class="hub-section">
+      <div class="hub-section-title">
+        <span class="han">譽</span> 명예의 전당 · Top
+        <button class="more" type="button" id="hub-hall-more">전체 →</button>
+      </div>
+      <div class="hub-hall-list" id="hub-hall-list">
+        <div class="hub-presence-empty">불러오는 중…</div>
+      </div>
+    </div>
+    
+    <!-- 황제내경 -->
+    ${neijingCard}
+    
+    <!-- 건의사항 -->
+    <div class="hub-section">
+      <div class="hub-section-title"><span class="han">建議</span> 건의사항·피드백</div>
+      <div style="font-size:10.5px;color:var(--mo-l);margin-bottom:6px">버그·개선 의견·요청 자유롭게.</div>
+      <div class="hub-fb-form">
+        <textarea id="hub-fb-msg" placeholder="자유롭게 적어주세요…" maxlength="500"></textarea>
+        <div class="hub-fb-form-row">
+          <button class="hub-fb-btn secondary" type="button" id="hub-fb-refresh">새로고침</button>
+          <button class="hub-fb-btn primary" type="button" id="hub-fb-send">보내기</button>
+        </div>
+      </div>
+      <div class="hub-fb-list" id="hub-fb-list">
+        <div class="hub-presence-empty">불러오는 중…</div>
+      </div>
+    </div>
+    
+    <!-- 업뎃 -->
+    <div class="hub-section">
+      <div class="hub-section-title">
         <span class="han">改</span> 업데이트 내역
-        ${newCount > 0 ? `<span class="hub-cl-head-count">${newCount} NEW</span>` : ''}
-        <span style="margin-left:auto;font-size:10px;color:var(--gutong);font-weight:400">총 ${CHANGELOG_ENTRIES.length}건</span>
+        ${newCount > 0 ? `<span style="font-size:10px;background:#9C3030;color:#FFE08A;padding:1px 5px;border-radius:3px;font-weight:700">NEW ${newCount}</span>` : ''}
       </div>
       ${changelogsHtml}
     </div>
-
-    <div class="hub-foot">
-      ${SUBJECTS.filter(s=>s.status==='active').length} 房 운영 · ${SUBJECTS.filter(s=>s.status==='skeleton').length} 준비 · ${SUBJECTS.filter(s=>s.status==='placeholder').length} 미개
+    
+    <!-- 버전 -->
+    <div style="text-align:center;font-size:10px;color:var(--gutong);margin-top:14px;padding-bottom:14px">
+      ${esc(window.APP_VERSION||'')} · 醫書宮 v2.0
     </div>
   `;
-
-  // 도구 클릭 핸들러
-  const goTab = (name) => { if(typeof window.setTab === 'function') window.setTab(name); };
-  $('#hub-tool-profile').addEventListener('click', () => {
-    if(window.V97Profile && typeof window.V97Profile.openGallery === 'function') window.V97Profile.openGallery();
-    else toast('프로필 모듈 미로드','warn');
-  });
-  $('#hub-tool-hall').addEventListener('click', () => goTab('hall'));
-  $('#hub-tool-cube').addEventListener('click', () => goTab('cube'));
-  $('#hub-tool-multi').addEventListener('click', () => {
-    // 멀티 입장은 명예의 전당 안에 있음 — 일단 hall 로 이동
-    goTab('hall');
-    toast('명예의 전당 하단의 對決 區로 스크롤하여 入場','gold');
-  });
-
-  // 업뎃 entry 펼침/감춤 시 seen 처리
+  
+  _wireHub();
+  _loadPresence();
+  _loadHallPreview();
+  _loadFeedback();
+  
+  // changelog 펼침 → seen 기록
   $$('.hub-cl-entry').forEach(d => {
     d.addEventListener('toggle', () => {
       if(d.open){
         const id = d.dataset.clId;
-        if(!S.seenChangelogs) S.seenChangelogs = [];
+        S.seenChangelogs = S.seenChangelogs || [];
         if(!S.seenChangelogs.includes(id)){
           S.seenChangelogs.push(id);
           if(typeof window.saveState === 'function') window.saveState();
@@ -421,163 +391,264 @@ function renderClinicHub(){
       }
     });
   });
-
-  // 과목 카드 클릭
-  $$('.hub-card').forEach(b => {
-    b.addEventListener('click', () => {
-      const sid = b.dataset.subject;
-      const s = SUBJECT_BY_ID[sid];
-      if(!s) return;
-      if(s.status === 'active'){
-        goTab(s.route || 'home');
-      } else if(s.status === 'skeleton'){
-        goTab(s.route || 'dongmu');
-      } else {
-        _openPlaceholder(s);
-      }
-    });
-  });
 }
-window.renderClinicHub = renderClinicHub;
 
-// ─── 3. placeholder 모달 ──────────────────────────────────────────────
+// ─── 2. 이벤트 와이어링 ────────────────────────────────────────────────
+function _wireHub(){
+  // 시험 pill → 해당 과목 방으로
+  $$('.hub-exam-pill').forEach(p => p.addEventListener('click', () => {
+    const sid = p.dataset.subject;
+    _enterSubject(sid);
+  }));
+  
+  // 8房 카드
+  $$('.hub-card').forEach(c => c.addEventListener('click', () => {
+    const sid = c.dataset.subject;
+    _enterSubject(sid);
+  }));
+  
+  // 프로필 메달 클릭 → 캐릭터 픽
+  const med = $('#hub-pick-medal');
+  if(med) med.addEventListener('click', () => {
+    if(typeof window.openCharacterPicker === 'function'){ window.openCharacterPicker(); return; }
+    // fallback: hash로 character 영역 안내
+    toast('캐릭터 선택은 「印·業」 또는 본 방제학에서','gold');
+  });
+  
+  // 프로필 편집
+  const edit = $('#hub-profile-edit');
+  if(edit) edit.addEventListener('click', _openProfileEdit);
+  
+  // 도구 4종
+  const prof = $('#hub-tool-prof');
+  if(prof) prof.addEventListener('click', () => {
+    if(window.V97Profile && window.V97Profile.openGallery) window.V97Profile.openGallery();
+    else toast('프로필 모듈 미로드','warn');
+  });
+  const hall = $('#hub-tool-hall');
+  if(hall) hall.addEventListener('click', () => { if(typeof window.setTab === 'function') window.setTab('hall'); });
+  const cube = $('#hub-tool-cube');
+  if(cube) cube.addEventListener('click', () => { if(typeof window.setTab === 'function') window.setTab('cube'); });
+  const duel = $('#hub-tool-duel');
+  if(duel) duel.addEventListener('click', () => {
+    if(typeof window.setTab === 'function') window.setTab('hall');
+    toast('명예의 전당 → 對決區 에서 매칭','gold');
+  });
+  
+  // 명전 전체
+  const hm = $('#hub-hall-more');
+  if(hm) hm.addEventListener('click', e => { e.stopPropagation(); if(typeof window.setTab === 'function') window.setTab('hall'); });
+  
+  // 건의
+  const send = $('#hub-fb-send');
+  if(send) send.addEventListener('click', _sendFeedback);
+  const refresh = $('#hub-fb-refresh');
+  if(refresh) refresh.addEventListener('click', _loadFeedback);
+}
+
+// 과목 방 진입 (시험 pill 또는 房 카드 클릭)
+function _enterSubject(sid){
+  const s = SUBJECT_BY_ID[sid];
+  if(!s) return;
+  if(s.status === 'placeholder') return _openPlaceholder(s);
+  if(s.route && typeof window.setTab === 'function') return window.setTab(s.route);
+}
+
 function _openPlaceholder(s){
   openModal(`
-    <div style="text-align:center;padding:8px 4px;max-width:380px">
-      <div style="display:flex;justify-content:center;margin-bottom:8px">
-        ${_medal(s.mascot_id, 80)}
+    <div style="text-align:center;padding:14px 6px">
+      <div style="width:70px;height:70px;margin:0 auto 10px;border-radius:50%;overflow:hidden">${_medal(s.mascot_id, 70)}</div>
+      <div style="font-family:'ZCOOL XiaoWei',serif;font-size:22px;color:var(--zhusha-d);letter-spacing:.05em">${esc(s.room_han)}</div>
+      <div style="font-size:12px;color:var(--mo-l);margin-top:3px"><span class="han">${esc(s.subject_han)}</span> · ${esc(s.subject_ko)}</div>
+      <div style="font-size:11.5px;color:var(--mo);margin-top:11px;line-height:1.65;padding:10px;background:#FAF1E0;border-radius:7px">
+        본 房은 <b>준비 중</b>입니다.<br>강의노트·자료 주입 후 본격 개관 예정.
       </div>
-      <h3 class="seal" style="margin:0 0 4px;color:${s.accent};font-size:22px">${esc(s.room_han)}</h3>
-      <div style="font-size:13.5px;color:var(--mo);margin-bottom:8px">${esc(s.room_ko)} — <span class="han">${esc(s.subject_han)}</span> ${esc(s.subject_ko)}</div>
-      <div style="font-size:12px;color:var(--mo-l);line-height:1.7;margin:10px 0;padding:10px;background:#FAF1E0;border-radius:8px;border-left:3px solid ${s.accent}">
-        <div style="font-weight:700;color:${s.accent};margin-bottom:4px">未開房 · 準備 中</div>
-        ${esc(s.desc)}<br>
-        本 房 은 데이터 주입 대기 중. 강의 자료 (PDF · 족보 등) 가 준비되면 본격 구축.
-      </div>
-      <div style="font-size:11px;color:var(--gutong);margin-bottom:10px">
-        그동안 다른 房 (방제학 · 진단학) 으로 進學 권장
-      </div>
-      <button class="btn" type="button" id="plc-close" style="width:100%">알겠습니다</button>
+      <button class="btn" type="button" id="plc-close" style="width:100%;margin-top:11px">알겠습니다</button>
     </div>
   `);
   const c = document.getElementById('plc-close');
   if(c) c.addEventListener('click', () => closeModal());
 }
 
-// ─── 4. 동무의 방 — renderDongmuHome() ────────────────────────────────
-// 진단학 1차 skeleton — UI shell + 콘텐츠 영역에 placeholder cards.
-function renderDongmuHome(){
-  const view = document.getElementById('view');
-  if(!view) return;
-  const s = SUBJECT_BY_ID['dongmu'];
-
-  view.innerHTML = `
-    <style>
-      .dm-banner { background:linear-gradient(135deg,#9C3030,#6E1818); color:#FFE08A;
-                   padding:16px 14px; border-radius:10px; margin-bottom:12px;
-                   display:flex; align-items:center; gap:14px; box-shadow:0 4px 12px rgba(60,12,12,.3); }
-      .dm-banner-medal { width:64px; height:64px; border-radius:50%; overflow:hidden;
-                          box-shadow:0 2px 8px rgba(0,0,0,.3); flex-shrink:0; }
-      .dm-banner-medal .cmedal, .dm-banner-medal img { width:100%; height:100%; }
-      .dm-banner-title { font-family:'ZCOOL XiaoWei',serif; font-size:24px; letter-spacing:.06em; }
-      .dm-banner-sub { font-size:11.5px; opacity:.88; margin-top:2px; letter-spacing:.04em; }
-      .dm-back { background:transparent; border:1px solid #FFE08A; color:#FFE08A; padding:4px 10px; border-radius:6px; font-size:11px; cursor:pointer; margin-left:auto; }
-      .dm-back:hover { background:#FFE08A22; }
-      .dm-section { background:#FAF1E0; border:1px solid #9C303033; border-radius:10px; padding:12px; margin-bottom:10px; }
-      .dm-stitle { font-family:var(--font-display); font-size:14px; color:var(--zhusha-d); margin-bottom:6px; display:flex; align-items:center; gap:6px; }
-      .dm-stitle .han { font-family:'ZCOOL XiaoWei',serif; font-size:18px; }
-      .dm-card-placeholder { padding:10px; background:#fff; border-radius:6px; border:1px dashed #9C303055; font-size:11.5px; color:var(--mo-l); margin-top:6px; line-height:1.6; }
-      .dm-sasangs { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:8px; }
-      .dm-sasang-card { background:#fff; border-radius:8px; padding:10px; text-align:center; border:1px solid; }
-      .dm-sasang-han { font-family:'ZCOOL XiaoWei',serif; font-size:22px; letter-spacing:.05em; }
-      .dm-sasang-ko { font-size:11px; color:var(--gutong); margin-top:2px; }
-      .dm-sasang-desc { font-size:10.5px; color:var(--mo-l); margin-top:6px; line-height:1.5; }
-    </style>
-
-    <div class="dm-banner">
-      <div class="dm-banner-medal">${_medal('leejema', 64)}</div>
-      <div style="flex:1">
-        <div class="dm-banner-title">${esc(s.room_han)}</div>
-        <div class="dm-banner-sub"><span class="han">${esc(s.subject_han)}</span> · ${esc(s.subject_ko)} · 李濟馬 主</div>
-      </div>
-      <button class="dm-back" type="button" id="dm-to-hub">← 醫書宮</button>
-    </div>
-
-    <div class="dm-section">
-      <div class="dm-stitle"><span class="han">四象</span> 사상의학 體質</div>
-      <div style="font-size:11px;color:var(--mo-l);line-height:1.55;margin-bottom:6px">
-        東武 李濟馬 의 「東醫壽世保元」 — 사람의 체질을 太陽人 · 少陽人 · 太陰人 · 少陰人 의 네 유형으로 분류.
-      </div>
-      <div class="dm-sasangs">
-        <div class="dm-sasang-card" style="border-color:#9C3030">
-          <div class="dm-sasang-han" style="color:#9C3030">太陽人</div>
-          <div class="dm-sasang-ko">태양인</div>
-          <div class="dm-sasang-desc">肺大肝小 · 上焦盛 · 진취·결단력</div>
-        </div>
-        <div class="dm-sasang-card" style="border-color:#C9A227">
-          <div class="dm-sasang-han" style="color:#C9A227">少陽人</div>
-          <div class="dm-sasang-ko">소양인</div>
-          <div class="dm-sasang-desc">脾大腎小 · 中上焦熱 · 명민·열정</div>
-        </div>
-        <div class="dm-sasang-card" style="border-color:#2A7060">
-          <div class="dm-sasang-han" style="color:#2A7060">太陰人</div>
-          <div class="dm-sasang-ko">태음인</div>
-          <div class="dm-sasang-desc">肝大肺小 · 下焦盛 · 침착·인내</div>
-        </div>
-        <div class="dm-sasang-card" style="border-color:#1A4C7C">
-          <div class="dm-sasang-han" style="color:#1A4C7C">少陰人</div>
-          <div class="dm-sasang-ko">소음인</div>
-          <div class="dm-sasang-desc">腎大脾小 · 下焦寒 · 섬세·신중</div>
-        </div>
+// 프로필 편집 모달 — 이름·진영
+function _openProfileEdit(){
+  const S = window.S || {};
+  const FACTIONS = window.FACTIONS || [];
+  const facOpts = FACTIONS.map(f => {
+    const sel = (S.faction === f.id) ? ' selected' : '';
+    return `<option value="${esc(f.id)}"${sel}>${esc(f.han)} · ${esc(f.ko)}</option>`;
+  }).join('');
+  openModal(`
+    <div style="padding:8px 4px">
+      <div style="font-family:'Noto Serif SC',serif;font-size:16px;color:var(--zhusha-d);margin-bottom:11px"><b>編 · 프로필 변경</b></div>
+      <div style="font-size:11.5px;color:var(--mo);margin-bottom:5px">이름</div>
+      <input type="text" id="ed-name" value="${esc(S.name||'')}" maxlength="20" style="width:100%;padding:9px 10px;font-size:13px;border:1.5px solid #C9A22755;border-radius:6px;font-family:inherit;background:#fff;margin-bottom:11px">
+      <div style="font-size:11.5px;color:var(--mo);margin-bottom:5px">진영 (passive 능력)</div>
+      <select id="ed-fac" style="width:100%;padding:9px 10px;font-size:13px;border:1.5px solid #C9A22755;border-radius:6px;font-family:inherit;background:#fff;margin-bottom:14px">
+        ${facOpts}
+      </select>
+      <div style="font-size:10.5px;color:var(--mo-l);margin-bottom:11px;line-height:1.6">캐릭터 변경은 메달 사진을 탭하거나 「印·業」 에서.</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-o" type="button" id="ed-cancel" style="flex:1">취소</button>
+        <button class="btn" type="button" id="ed-save" style="flex:1">저장</button>
       </div>
     </div>
-
-    <div class="dm-section">
-      <div class="dm-stitle"><span class="han">四診</span> 사진법 (望聞問切)</div>
-      <div class="dm-card-placeholder">
-        望診(망진) · 聞診(문진) · 問診(문진) · 切診(절진) — 진단학의 기본 4법.
-        데이터·문항·시각화 콘텐츠는 강의 자료 주입 후 구축 예정.
-      </div>
-    </div>
-
-    <div class="dm-section">
-      <div class="dm-stitle"><span class="han">辨證</span> 변증 體系</div>
-      <div class="dm-card-placeholder">
-        八綱 · 氣血津液 · 臟腑 · 六經 · 衛氣營血 · 三焦 등.
-        데이터 주입 대기 중.
-      </div>
-    </div>
-
-    <div class="dm-section" style="border-color:#9C302055;background:#FFF8F0">
-      <div class="dm-stitle"><span class="han">建</span> 1차 구축 알림</div>
-      <div style="font-size:11.5px;color:var(--mo-l);line-height:1.7">
-        본 房은 <b>v11.0 skeleton</b> 단계입니다. UI shell·체질 구조·四診/辨證 틀이 갖춰져 있으며,
-        구체 콘텐츠(강의노트·기출·문항)는 자료 주입 후 본격 구축됩니다.<br>
-        멀티 對決·플래시카드·SRS·메달리온·氣 시스템 등 <b>공유 인프라</b>는
-        다른 房 진학 시 그대로 작동.
-      </div>
-    </div>
-  `;
-
-  const back = document.getElementById('dm-to-hub');
-  if(back) back.addEventListener('click', () => {
-    if(typeof window.setTab === 'function') window.setTab('hub');
+  `);
+  const cancel = document.getElementById('ed-cancel');
+  if(cancel) cancel.addEventListener('click', () => closeModal());
+  const save = document.getElementById('ed-save');
+  if(save) save.addEventListener('click', () => {
+    const nameEl = document.getElementById('ed-name');
+    const facEl = document.getElementById('ed-fac');
+    const nm = String(nameEl ? nameEl.value : '').trim().slice(0, 20);
+    const fc = facEl ? facEl.value : null;
+    if(nm) S.name = nm;
+    const FACTION_BY_ID = window.FACTION_BY_ID || {};
+    if(fc && FACTION_BY_ID[fc]) S.faction = fc;
+    if(typeof window.saveState === 'function') window.saveState();
+    if(typeof window.refreshHeader === 'function') window.refreshHeader();
+    closeModal();
+    toast('프로필 저장','gold');
+    renderClinicHub();
   });
 }
-window.renderDongmuHome = renderDongmuHome;
 
-// ─── 5. ROUTES 등록 ───────────────────────────────────────────────────
-function _registerRoutes(){
-  // v11.4: window.ROUTES 가 없어도 OK — setTab wrap 이 fallback 으로 작동.
-  //   ROUTES 가 있으면 정식 등록, 없으면 skip (setTab wrap 만으로 라우팅 가능).
-  if(window.ROUTES){
-    window.ROUTES.hub    = renderClinicHub;
-    window.ROUTES.dongmu = renderDongmuHome;
+// ─── 3. presence 로드 ───────────────────────────────────────────────
+async function _loadPresence(){
+  const list = $('#hub-pres-list');
+  const cnt = $('#hub-pres-count');
+  if(!list) return;
+  const FB = window.FB;
+  if(!FB || !FB.get){
+    list.innerHTML = '<span class="hub-presence-empty">서버 연결 없음</span>';
+    if(cnt) cnt.textContent = '0';
+    return;
   }
-  // setTab wrap 은 _forceHubOnFreshSession 안에서 호출됨.
+  try{
+    const data = await FB.get('presence');
+    const FRESH = 90 * 1000;
+    const now = Date.now();
+    const active = [];
+    if(data && typeof data === 'object'){
+      Object.keys(data).forEach(uid => {
+        const p = data[uid];
+        if(!p || !p.ts) return;
+        if(now - p.ts > FRESH) return;
+        active.push({ uid, ...p });
+      });
+    }
+    active.sort((a,b) => (b.qi||0) - (a.qi||0));
+    if(cnt) cnt.textContent = String(active.length);
+    if(active.length === 0){
+      list.innerHTML = '<span class="hub-presence-empty">아무도 없습니다.</span>';
+      return;
+    }
+    const top = active.slice(0, 12);
+    list.innerHTML = top.map(p => `
+      <div class="hub-presence-item">
+        <div class="hub-presence-medal">${_medal(p.character||'qibo', 22)}</div>
+        <span class="hub-presence-name">${esc(p.name||'?')}</span>
+        ${p.activity ? `<span class="hub-presence-act">· ${esc(p.activity)}</span>` : ''}
+      </div>
+    `).join('') + (active.length > 12 ? `<span class="hub-presence-empty">+${active.length-12}</span>` : '');
+  }catch(e){
+    list.innerHTML = '<span class="hub-presence-empty">불러오기 실패</span>';
+  }
 }
 
-// ─── 6. 헤더에 宮 chip inject — 어디서나 의서궁으로 복귀 ─────────────
+// ─── 4. 명전 미리보기 ──────────────────────────────────────────────
+async function _loadHallPreview(){
+  const list = $('#hub-hall-list');
+  if(!list) return;
+  const FB = window.FB;
+  if(!FB || !FB.get){
+    list.innerHTML = '<div class="hub-presence-empty">서버 연결 없음</div>';
+    return;
+  }
+  try{
+    // presence 데이터에서 qi 순 정렬 (명전 데이터를 받기 어려운 경우 fallback)
+    const data = await FB.get('presence');
+    if(!data || typeof data !== 'object'){
+      list.innerHTML = '<div class="hub-presence-empty">데이터 없음</div>';
+      return;
+    }
+    const all = Object.keys(data).map(uid => ({ uid, ...data[uid] }));
+    all.sort((a,b) => (b.qi||0) - (a.qi||0));
+    const top = all.slice(0, 5);
+    list.innerHTML = top.map((p, i) => `
+      <div class="hub-hall-row">
+        <span class="hub-hall-rank">${i+1}</span>
+        <div class="hub-hall-medal">${_medal(p.character||'qibo', 24)}</div>
+        <span class="hub-hall-name">${esc(p.name||'?')}</span>
+        <span class="hub-hall-qi"><b>${(p.qi||0).toLocaleString()}</b> 氣</span>
+      </div>
+    `).join('');
+  }catch(e){
+    list.innerHTML = '<div class="hub-presence-empty">불러오기 실패</div>';
+  }
+}
+
+// ─── 5. 건의사항 ───────────────────────────────────────────────────
+async function _loadFeedback(){
+  const list = $('#hub-fb-list');
+  if(!list) return;
+  const FB = window.FB;
+  if(!FB || !FB.get){
+    list.innerHTML = '<div class="hub-presence-empty">서버 연결 없음</div>';
+    return;
+  }
+  try{
+    const data = await FB.get('feedback');
+    if(!data || typeof data !== 'object'){
+      list.innerHTML = '<div class="hub-presence-empty">아직 건의사항이 없습니다.</div>';
+      return;
+    }
+    const items = Object.keys(data).map(k => ({ k, ...data[k] }))
+                        .filter(x => x && x.msg)
+                        .sort((a,b) => (b.ts||0) - (a.ts||0))
+                        .slice(0, 15);
+    if(items.length === 0){
+      list.innerHTML = '<div class="hub-presence-empty">아직 건의사항이 없습니다.</div>';
+      return;
+    }
+    list.innerHTML = items.map(it => {
+      const dt = it.ts ? new Date(it.ts) : null;
+      const dtStr = dt ? `${dt.getMonth()+1}/${dt.getDate()} ${('0'+dt.getHours()).slice(-2)}:${('0'+dt.getMinutes()).slice(-2)}` : '';
+      return `<div class="hub-fb-item">
+        <span class="who">${esc(it.name||'익명')}</span><span class="ts">${esc(dtStr)}</span>
+        <div style="margin-top:2px;white-space:pre-wrap">${esc(it.msg)}</div>
+      </div>`;
+    }).join('');
+  }catch(e){
+    list.innerHTML = '<div class="hub-presence-empty">불러오기 실패</div>';
+  }
+}
+
+async function _sendFeedback(){
+  const ta = $('#hub-fb-msg');
+  if(!ta) return;
+  const msg = ta.value.trim();
+  if(!msg){ toast('내용을 입력해주세요','warn'); return; }
+  const S = window.S || {};
+  const FB = window.FB;
+  if(!FB || !FB.push){ toast('서버 연결 없음','warn'); return; }
+  try{
+    await FB.push('feedback', { name: S.name||'익명', msg, ts: Date.now() });
+    ta.value = '';
+    toast('건의 전송 완료','gold');
+    _loadFeedback();
+  }catch(e){
+    toast('전송 실패','warn');
+  }
+}
+
+// ─── 6. setTab 래퍼 + 라우팅 ────────────────────────────────────────
+function _registerRoutes(){
+  if(window.ROUTES){
+    window.ROUTES.hub    = renderClinicHub;
+    window.ROUTES.dongmu = (window.renderDongmuHome || renderClinicHub);
+  }
+}
 function _injectGungChip(){
   if(document.getElementById('gung-chip')) return;
   const chips = document.querySelector('.head-chips');
@@ -586,41 +657,25 @@ function _injectGungChip(){
   chip.id = 'gung-chip';
   chip.className = 'head-chip';
   chip.title = '醫書宮 — 8房 입구';
-  chip.style.cssText = 'cursor:pointer; font-family:"ZCOOL XiaoWei",serif; font-size:15px; padding:4px 9px; background:linear-gradient(135deg,#C9A227,#A07020); color:#3C1810; border:1px solid #6E4810; font-weight:700; letter-spacing:.05em';
+  chip.style.cssText = 'cursor:pointer;font-family:"ZCOOL XiaoWei",serif;font-size:15px;padding:4px 9px;background:linear-gradient(135deg,#C9A227,#A07020);color:#3C1810;border:1px solid #6E4810;font-weight:700;letter-spacing:.05em';
   chip.innerHTML = '宮';
-  chip.addEventListener('click', () => {
-    if(typeof window.setTab === 'function') window.setTab('hub');
-  });
-  // 맨 앞에 삽입 (rank-chip 앞)
+  chip.addEventListener('click', () => { if(typeof window.setTab === 'function') window.setTab('hub'); });
   chips.insertBefore(chip, chips.firstChild);
 }
 
-// ─── 7. 업뎃 진입 — 더 이상 first-time 만 X, 진입은 app.js init 이 처리 ─
-// (app.js 의 firstTab = 'hub' 로 처리됨)
-// v11.3: 방어적 — app.js 가 갱신되지 않아도 강제 hub 진입 + bottom nav 토글
-
-// setTab을 wrap하여 (1) bottom nav on/off 처리, (2) hub/dongmu 라우트 fallback 처리.
-// v11.4: window.ROUTES 가 노출되지 않은 구버전 app.js 에서도 작동하도록 강화.
-//   기존 app.js 의 setTab 은 'const ROUTES = {...}' 가 window 에 안 붙기 때문에
-//   외부에서 ROUTES.hub 등록이 안 됨 → setTab('hub') 가 ROUTES.home 으로 fallback.
-//   이 wrap 이 setTab 호출 후 view 를 재렌더링하여 hub/dongmu 가 정상 표시되도록 보장.
-function _wrapSetTabForNavToggle(){
+function _wrapSetTab(){
   if(typeof window.setTab !== 'function' || window._v11SetTabWrapped) return;
   const original = window.setTab;
   window._v11SetTabWrapped = true;
   window.setTab = function(name){
-    // bottom nav: 'hub' 일 때만 숨김, 그 외 표시
     document.body.classList.toggle('on-hub', name === 'hub');
     const ret = original.apply(this, arguments);
-    // v11.4: hub/dongmu 라우트가 ROUTES 에 등록 안 됐을 가능성 대비 — view 강제 재렌더링.
-    //   원본 setTab 이 ROUTES.home 으로 fallback 했더라도, 여기서 진짜 화면으로 교체.
-    //   - hub  → window.renderClinicHub
-    //   - dongmu → window.renderDongmuHome  (jindan 이 expand 로 override 했으면 그게 호출됨)
+    // hub/dongmu 라우트 fallback (ROUTES 미등록 시)
     const view = document.getElementById('view');
     if(view){
-      if(name === 'hub' && typeof window.renderClinicHub === 'function'){
+      if(name === 'hub' && typeof renderClinicHub === 'function'){
         view.innerHTML = '';
-        try{ window.renderClinicHub(); }catch(e){ console.error('hub render fail', e); }
+        try{ renderClinicHub(); }catch(e){ console.error('hub render fail', e); }
       } else if(name === 'dongmu' && typeof window.renderDongmuHome === 'function'){
         view.innerHTML = '';
         try{ window.renderDongmuHome(); }catch(e){ console.error('dongmu render fail', e); }
@@ -630,52 +685,31 @@ function _wrapSetTabForNavToggle(){
   };
 }
 
-// 신규 세션 (브라우저 탭 새로 열기, 새로고침) 마다 강제 hub
-// sessionStorage 는 탭 닫으면 비워짐 → 매 진입마다 hub 한 번 표시
-// v11.4: window.ROUTES 가 없어도 작동 — setTab wrap 이 fallback 렌더링을 수행함.
 function _forceHubOnFreshSession(){
   if(typeof window.setTab !== 'function'){
     return setTimeout(_forceHubOnFreshSession, 50);
   }
-  // ROUTES 가 노출되어 있으면 정식 등록 (v11.4 app.js)
-  if(window.ROUTES){
-    if(!window.ROUTES.hub) window.ROUTES.hub = renderClinicHub;
-    if(!window.ROUTES.dongmu) window.ROUTES.dongmu = renderDongmuHome;
-  }
-  
-  // setTab wrap (bottom nav toggle + hub/dongmu fallback 렌더)
-  _wrapSetTabForNavToggle();
-  
-  // 신규 세션? sessionStorage 가 비어있으면 신규
-  const SESSION_KEY = 'v11_session_init';
-  if(sessionStorage.getItem(SESSION_KEY)) return;  // 이미 이 세션에서 hub 한 번 표시함
-  sessionStorage.setItem(SESSION_KEY, '1');
-  
-  // hash 가 admin/특수루트면 그쪽으로 (디버그용)
-  const hash = (location.hash || '').toLowerCase().slice(1);
-  const directRoutes = ['admin', 'home', 'hall', 'cube', 'flash', 'quiz', 'formula', 'herb', 'stats', 'dongmu'];
-  if(directRoutes.includes(hash)) return;  // 디버그 hash 면 hub로 강제 안함
-  
-  // app.js 가 다른 탭으로 진입했어도, 강제로 hub 로
-  setTimeout(() => {
-    window.setTab('hub');
-  }, 150);
+  _registerRoutes();
+  _wrapSetTab();
+  const KEY = 'v11_session_init';
+  if(sessionStorage.getItem(KEY)) return;
+  sessionStorage.setItem(KEY, '1');
+  const hash = (location.hash||'').toLowerCase().slice(1);
+  const direct = ['admin','home','hall','cube','flash','quiz','formula','herb','stats','dongmu'];
+  if(direct.includes(hash)) return;
+  setTimeout(() => window.setTab('hub'), 150);
 }
 
-// ─── 8. 초기화 ────────────────────────────────────────────────────────
 function _init(){
   _registerRoutes();
-  // v11.4: setTab wrap 을 가능한 빨리 설치 — DOMContentLoaded 전에 setTab 이 호출되어도
-  //   wrap 이 hub/dongmu 를 가로채 fallback 렌더링을 수행할 수 있도록.
   const tryWrap = () => {
-    if(typeof window.setTab === 'function') _wrapSetTabForNavToggle();
+    if(typeof window.setTab === 'function') _wrapSetTab();
     else setTimeout(tryWrap, 30);
   };
   tryWrap();
   const startup = () => {
     setTimeout(_injectGungChip, 200);
     setTimeout(_forceHubOnFreshSession, 100);
-    // 추가 보장 — app.js init 완료 후에도 한 번 더 체크
     setTimeout(_forceHubOnFreshSession, 800);
   };
   if(document.readyState === 'loading'){
@@ -686,13 +720,10 @@ function _init(){
 }
 _init();
 
-// ─── 9. 외부 API ──────────────────────────────────────────────────────
 window.V11ClinicHub = {
-  SUBJECTS,
-  SUBJECT_BY_ID,
-  CHANGELOG_ENTRIES,
+  SUBJECTS, SUBJECT_BY_ID, CHANGELOG_ENTRIES,
   open: renderClinicHub,
-  openDongmu: renderDongmuHome,
+  openDongmu: () => { if(typeof window.renderDongmuHome === 'function') window.renderDongmuHome(); },
 };
 
 })();
