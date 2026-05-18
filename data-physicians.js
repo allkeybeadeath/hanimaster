@@ -209,7 +209,7 @@ const PHYSICIANS = [
     }
   },
 
-  // ═══ 隋唐 (3) ════════════════════════════════════════════════════════════
+  // ═══ 隋唐 (4) ════════════════════════════════════════════════════════════
   {
     id: 'sunsimiao', ko: '손사막', han: '孫思邈', py: 'Sūn Sīmiǎo',
     era: '唐', cat: 'tang', init: '邈',
@@ -241,6 +241,17 @@ const PHYSICIANS = [
       han: '代傳醫方者，皆云三世',
       ko: '대를 이어 의방을 전하는 자는 모두 三世라 일컫는다',
       src: '外台秘要·序'
+    }
+  },
+  {
+    id: 'lindaoren', ko: '린도인', han: '藺道人', py: 'Lìn Dàorén',
+    era: '唐', cat: 'tang', init: '藺',
+    work_han: '仙授理傷續斷秘方', work_ko: '선수이상속단비방',
+    ep: '현존 최고(最古) 정형·접골 醫書의 著者 · 影像房의 主',
+    quote: {
+      han: '凡跌打損傷，先須整骨，骨正則氣血自和',
+      ko: '무릇 부딪히고 다친 손상에는 먼저 뼈를 바로 잡아야 하니, 뼈가 바르면 기혈이 절로 화한다',
+      src: '仙授理傷續斷秘方'
     }
   },
 
@@ -584,7 +595,7 @@ const PHYSICIANS = [
     }
   },
 
-  // ═══ 朝鮮 (2) — 한국 의가 ════════════════════════════════════════════════
+  // ═══ 朝鮮 (3) — 한국 의가 ════════════════════════════════════════════════
   {
     id: 'heojun', ko: '허준', han: '許浚', py: 'Heo Jun',
     era: '朝鮮', cat: 'korean', init: '浚',
@@ -605,6 +616,17 @@ const PHYSICIANS = [
       han: '天稟之已定固無可論，重在反躬修身',
       ko: '하늘이 부여한 바탕은 이미 정해져 논할 것이 없고, 중요한 것은 자신을 돌이켜 닦는 데 있다',
       src: '東醫壽世保元·性命論'
+    }
+  },
+  {
+    id: 'saamdoin', ko: '사암도인', han: '舍巖道人', py: 'Saam Doin',
+    era: '朝鮮 中期', cat: 'korean', init: '巖',
+    work_han: '舍巖道人鍼灸要訣', work_ko: '사암도인침구요결',
+    ep: '舍巖鍼法의 創始者 · 經穴房의 主',
+    quote: {
+      han: '陰陽虛實 補瀉迎隨 五行相生相克 在於指下',
+      ko: '음양·허실·보사·영수와 오행의 상생상극은 손끝(지하)에 있다',
+      src: '舍巖道人鍼灸要訣·總論'
     }
   },
 
@@ -725,6 +747,7 @@ const CHARACTER_IMAGES = {
   sunsimiao:   { url: _LOCAL('sunsimiao'),   fallback: _W('Chinese_woodcut,_Famous_medical_figures;_Sun_Simiao_Wellcome_L0039324.jpg'),           caption: '孫思邈 — Wellcome 의가 시리즈',         license: 'CC BY 4.0' },
   wangbing:    { url: _LOCAL('wangbing'),    fallback: _W('Wang_Bing.jpg'),                                                                        caption: '王冰 — 歷代名醫圖贊 (추정)',            license: 'PD-old' },
   wangtao:     { url: _LOCAL('wangtao'),     fallback: _W('Wang_Tao.jpg'),                                                                         caption: '王燾 — 歷代名醫圖贊 (추정)',            license: 'PD-old' },
+  lindaoren:   { url: _LOCAL('lindaoren','jpeg'), fallback: '',                                                                                    caption: '藺道人 — 唐 唐僖宗 인물도 차용 (실재 초상 부재)', license: '사용자 제공' },
 
   // ═ 宋 (4인) ═
   qianyi:      { url: _LOCAL('qianyi'),      fallback: _W('Qian_Yi.jpg'),                                                                          caption: '錢乙 — 歷代名醫圖贊 (추정)',            license: 'PD-old' },
@@ -769,6 +792,7 @@ const CHARACTER_IMAGES = {
   // ═ 朝鮮 (2인) ═
   heojun:      { url: _LOCAL('heojun'),      fallback: _W('Heo_Jun-Choi_Gwang-su.jpg'),                                                            caption: '許浚 — 최광수 그림 (1989) 표준영정',    license: 'PD/공용' },
   leejema:     { url: _LOCAL('leejema'),     fallback: _W('Lee_Je-ma.jpg'),                                                                        caption: '李濟馬 — 표준영정',                     license: 'PD-old' },
+  saamdoin:    { url: _LOCAL('saamdoin','jpeg'), fallback: '',                                                                                     caption: '舍巖道人 — 수묵 後背圖 (사용자 제공)', license: 'PD/공용' },
 
   // ═ 番外 (시트콤) ═
   leesoonjae:  { url: 'leesoonjae-medallion.jpeg',                                                                                caption: '이순재 — 거침없이 하이킥 (MBC 2006)',   license: 'fair-use, 개인 학습용' }

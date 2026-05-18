@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v10.0.8';                // ★ 시험 범위 (2026-05) — 6장 溫裏劑 제거 (2차 수시 외)
+const APP_VERSION = 'v11.0';                  // ★ 醫書宮 — 다과목 hub (2026-05) — 8房 (방제·진단·상한·한방병리·예방·양방병리·영상·경혈)
 const APP_BUILD   = '2026.05.18.v10.0.8';     // v10.0.8 scope correction
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
