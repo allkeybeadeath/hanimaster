@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v10.0.5';                // ★ 로비 (2026-05) — 多本草 同含 검색 모드 추가 + v10.0.4 패치 누계
-const APP_BUILD   = '2026.05.18.v10.0.5';     // v10.0.5 同含 모드
+const APP_VERSION = 'v10.0.6';                // ★ 로비 (2026-05) — 큐브 둘째 出牌부터 base 부분집합(≥3미) 허용 + v10.0.5 누계
+const APP_BUILD   = '2026.05.18.v10.0.6';     // v10.0.6 partial subset
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 

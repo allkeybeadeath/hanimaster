@@ -13,7 +13,7 @@
 // ──────────────────────────────────────────────────────────────────
 // 0. 상수
 // ──────────────────────────────────────────────────────────────────
-const BC_VER          = '1.2';
+const BC_VER          = '1.3';  // v10.0.6: 둘째 出牌부터 base 부분집합(≥3미) 허용
 const HAND_4P         = 10;
 const HAND_23P        = 12;
 const PENALTY_DRAW    = 3;
@@ -190,8 +190,52 @@ function build(){
   console.log(`[方劑Cube v${BC_VER}] sets=${sets.length} (base ${baseN}: 핵심 ${baseN-extraN} +확장 ${extraN} · 派生 ${deriveN} · 加減 ${symN}) deck=${proto.length} herbs=${Object.keys(freq).length}`);
 }
 
-function matchSet(herbs){ build(); return _sigIdx[sig(herbs)] || []; }
+function matchSet(herbs){
+  build();
+  const exact = _sigIdx[sig(herbs)] || [];
+  if(exact.length > 0) return exact;
+  // v10.0.6: 정확 매칭 0건이면 base 처방의 부분집합 매칭을 시도.
+  //   조건: 본 set 의 distinct 본초 ≥ 3 AND 어떤 base 처방 composition ⊇ 본 set.
+  //   가장 작은 base (가까운 처방) 우선. 결과 type='partial' 로 표시.
+  //   첫 出牌 검증 (V98CubeRules._hasBaseMatch) 은 type==='base' 만 보므로
+  //   partial 매칭으로는 첫 出牌 불가 — 둘째 出牌부터만 valid.
+  const pb = _findPartialBase(herbs);
+  if(pb){
+    return [{
+      type: 'partial', formulaId: pb.formulaId,
+      label: `${pb.label} 부분`, han: (pb.han || '') + '部',
+      herbs: herbs.slice(),
+      baseLabel: pb.label, baseHan: pb.han, baseSize: pb.herbs.length,
+    }];
+  }
+  return [];
+}
 function isValidSet(h){ return matchSet(h).length > 0; }
+// v10.0.6: 본 set 이 어떤 base 처방의 composition 의 부분집합인지.
+//   distinct 본초 < 3 이면 null. 매칭되는 base 가 여럿이면 composition 이 가장
+//   작은 (즉 가장 가까운) 처방 우선 반환. 동률은 declaration 순서.
+function _findPartialBase(herbs){
+  if(!_sets) return null;
+  const norm = (herbs||[]).map(herbNorm).filter(x=>x);
+  const hSet = new Set(norm);
+  if(hSet.size < 3) return null;
+  let best = null;
+  for(const s of _sets){
+    if(s.type !== 'base') continue;
+    const compSet = new Set(s.herbs);
+    let allIn = true;
+    for(const x of hSet){
+      if(!compSet.has(x)){ allIn = false; break; }
+    }
+    if(allIn){
+      // 정확 매칭은 위에서 이미 처리됨 — 여기는 진정한 partial 만 (compSet 이 더 큼)
+      if(s.herbs.length > hSet.size){
+        if(!best || s.herbs.length < best.herbs.length) best = s;
+      }
+    }
+  }
+  return best;
+}
 function validateBoard(b){
   for(const s of (b||[])) if(!isValidSet(s.herbs||[])) return {ok:false, badSet:s};
   return {ok:true};
