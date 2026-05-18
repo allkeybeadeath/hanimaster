@@ -116,6 +116,13 @@ SUBJECTS.forEach(s => { SUBJECT_BY_ID[s.id] = s; });
 // ─── 0.5 업뎃 내역 ──────────────────────────────────────────────────────
 // 새 버전 release 시 맨 위에 추가. id 는 unique 식별자 (S.seenChangelogs 에 저장).
 const CHANGELOG_ENTRIES = [
+  { id:'v11.3', label:'v11.3', date:'2026-05-18', title:'강제 hub 첫진입 + bottom nav 숨김',
+    body:`<ul>
+      <li><b>매 진입 시 무조건 醫書宮부터</b> — app.js 안 받아도 v11.3 모듈이 sessionStorage 로 신규 세션 감지 후 강제 hub 표시</li>
+      <li>hub 화면에서 <b>하단 방제학 메뉴 (家·方·藥·卡·問·析·譽) 완전 숨김</b> — 과목 선택 후에만 노출</li>
+      <li>방어적 setTab wrap — 어느 코드가 다른 탭으로 가려해도 bottom nav 자동 토글</li>
+      <li>SW 더 공격적 갱신 — data-*.js 도 network-first, sw.js 자체도 network-first</li>
+    </ul>`},
   { id:'v11.2', label:'v11.2', date:'2026-05-18', title:'醫書宮 1st-screen · 도구 4종 · 업뎃 상시 표시',
     body:`<ul>
       <li><b>醫書宮을 항상 첫 화면</b>으로 — 매 진입 hub에서 시작, 방 선택 후 입실</li>
@@ -589,16 +596,62 @@ function _injectGungChip(){
 
 // ─── 7. 업뎃 진입 — 더 이상 first-time 만 X, 진입은 app.js init 이 처리 ─
 // (app.js 의 firstTab = 'hub' 로 처리됨)
+// v11.3: 방어적 — app.js 가 갱신되지 않아도 강제 hub 진입 + bottom nav 토글
+
+// setTab을 wrap하여 bottom nav on/off 처리
+function _wrapSetTabForNavToggle(){
+  if(typeof window.setTab !== 'function' || window._v11SetTabWrapped) return;
+  const original = window.setTab;
+  window._v11SetTabWrapped = true;
+  window.setTab = function(name){
+    // bottom nav: 'hub' 일 때만 숨김, 그 외 표시
+    document.body.classList.toggle('on-hub', name === 'hub');
+    return original.apply(this, arguments);
+  };
+}
+
+// 신규 세션 (브라우저 탭 새로 열기, 새로고침) 마다 강제 hub
+// sessionStorage 는 탭 닫으면 비워짐 → 매 진입마다 hub 한 번 표시
+function _forceHubOnFreshSession(){
+  if(typeof window.setTab !== 'function' || typeof window.ROUTES === 'undefined'){
+    return setTimeout(_forceHubOnFreshSession, 50);
+  }
+  // ROUTES.hub 가 아직 등록 안되었으면 지금 등록
+  if(!window.ROUTES.hub) window.ROUTES.hub = renderClinicHub;
+  if(!window.ROUTES.dongmu) window.ROUTES.dongmu = renderDongmuHome;
+  
+  // setTab wrap (bottom nav toggle)
+  _wrapSetTabForNavToggle();
+  
+  // 신규 세션? sessionStorage 가 비어있으면 신규
+  const SESSION_KEY = 'v11_session_init';
+  if(sessionStorage.getItem(SESSION_KEY)) return;  // 이미 이 세션에서 hub 한 번 표시함
+  sessionStorage.setItem(SESSION_KEY, '1');
+  
+  // hash 가 admin/특수루트면 그쪽으로 (디버그용)
+  const hash = (location.hash || '').toLowerCase().slice(1);
+  const directRoutes = ['admin', 'home', 'hall', 'cube', 'flash', 'quiz', 'formula', 'herb', 'stats', 'dongmu'];
+  if(directRoutes.includes(hash)) return;  // 디버그 hash 면 hub로 강제 안함
+  
+  // app.js 가 다른 탭으로 진입했어도, 강제로 hub 로
+  setTimeout(() => {
+    window.setTab('hub');
+  }, 150);
+}
 
 // ─── 8. 초기화 ────────────────────────────────────────────────────────
 function _init(){
   _registerRoutes();
+  const startup = () => {
+    setTimeout(_injectGungChip, 200);
+    setTimeout(_forceHubOnFreshSession, 100);
+    // 추가 보장 — app.js init 완료 후에도 한 번 더 체크
+    setTimeout(_forceHubOnFreshSession, 800);
+  };
   if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', () => {
-      setTimeout(_injectGungChip, 300);
-    });
+    document.addEventListener('DOMContentLoaded', startup);
   } else {
-    setTimeout(_injectGungChip, 300);
+    startup();
   }
 }
 _init();

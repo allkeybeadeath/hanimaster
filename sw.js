@@ -10,7 +10,7 @@
  *   • 캐릭터 사진 → images/characters/ 폴더로 이동
  *   • 캐시 키 갱신
  */
-const CACHE = 'bangje-pwa-v11-2-2026-05';
+const CACHE = 'bangje-pwa-v11-3-2026-05';
 const PRECACHE = [
   './',
   './index.html',
@@ -89,13 +89,15 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if(req.method !== 'GET') return;
   const url = new URL(req.url);
-  // network-first: index.html, app.js, bangje-cube.js, bangje-v9{6,7}-*.js (변경이 잦은 코드)
+  // network-first: index.html, app.js, bangje-cube.js, v9x/v1x 모듈, data-*.js (변경이 잦은 코드+데이터)
   const networkFirst =
     url.pathname.endsWith('index.html') ||
     url.pathname.endsWith('/') ||
     url.pathname.endsWith('app.js') ||
     url.pathname.endsWith('bangje-cube.js') ||
-    /bangje-v(9[6789]|1[01])-[\w-]+\.js$/.test(url.pathname);
+    url.pathname.endsWith('sw.js') ||
+    /bangje-v(9[6789]|1[01])-[\w-]+\.js$/.test(url.pathname) ||
+    /\/data-[\w-]+\.js$/.test(url.pathname);
   if(networkFirst){
     e.respondWith(
       fetch(req).then(r => {

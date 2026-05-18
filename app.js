@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v11.2';                  // ★ 醫書宮 1st-screen + 도구4종 + 업뎃 상시 표시 (2026-05)
+const APP_VERSION = 'v11.3';                  // ★ 강제 hub 첫진입 + bottom nav 숨김 (2026-05)
 const APP_BUILD   = '2026.05.18.v10.0.8';     // v10.0.8 scope correction
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
