@@ -160,10 +160,29 @@ function open(){
   }catch(_){}
 }
 
+// v11.6.0 patched: 「전부다」 모드로 직접 진입 — 정답 매트릭스 일괄 표시
+//   동무의 방 home 에서 「對位 · 전부다」 버튼이 호출.
+//   drag-drop 없이 정답 5×5 가 즉시 펼쳐지므로 빠른 열람·복습용.
+function openStudy(){
+  if(!window.TONGUES || !window.TONGUE_BY_ID){
+    toast('설진 데이터 미로드','warn');
+    return;
+  }
+  _state = _newState();
+  _state.mode = 'study';
+  _render();
+  try{
+    if(window.V96Activity) window.V96Activity.set('舌診 對位', '전부다 (정답 일괄 표시)');
+    if(typeof window.recordPresence === 'function') window.recordPresence();
+  }catch(_){}
+}
+
 // ─── 4. UI: 메인 렌더 ───────────────────────────────────────────────────
 function _render(){
   const view = document.getElementById('view');
   if(!view || !_state) return;
+  // v11.6.0 patched: 매트릭스도 동무의 방 컨텍스트 — 헤더·하단 nav 진단학 정체성 유지
+  try{ if(typeof window.setHeaderContext === 'function') window.setHeaderContext('dongmu'); }catch(_){}
   
   if(_state.mode === 'study'){
     return _renderStudy();
@@ -313,11 +332,35 @@ function _styleBlock(){
                    max-width:340px; max-height:80vh; overflow:auto; box-shadow:0 10px 28px rgba(60,12,12,.4); }
       .mx-modal h4 { margin:0 0 8px; font-family:'Noto Serif SC',serif; color:var(--zhusha-d); font-size:14px;
                       display:flex; gap:6px; align-items:center; }
-      .mx-modal .pho { width:100%; max-height:240px; object-fit:cover; border-radius:6px; margin-bottom:8px; }
+      .mx-modal .pho { width:100%; max-height:240px; object-fit:cover; border-radius:6px; margin-bottom:8px; cursor:zoom-in; }
+      .mx-modal .pho:hover { filter:brightness(1.06); }
       .mx-modal .row { font-size:11.5px; line-height:1.65; margin-bottom:4px; }
       .mx-modal .row b { color:var(--zhusha-d); font-family:'Noto Serif SC',serif; }
       .mx-modal .close { width:100%; margin-top:6px; padding:8px; background:var(--zhusha); color:#fff;
                           border:0; border-radius:6px; cursor:pointer; font-size:12px; }
+      
+      /* v11.6.0 patched — 라이트박스 (사진 클릭 확대) */
+      .mx-lightbox-bg { position:fixed; inset:0; background:rgba(8,4,2,.94); z-index:10000;
+                         display:flex; align-items:center; justify-content:center; padding:18px;
+                         cursor:zoom-out; animation:mx-lb-in .18s ease; }
+      .mx-lightbox-bg img { max-width:100%; max-height:92vh; object-fit:contain; border-radius:8px;
+                              box-shadow:0 12px 38px rgba(0,0,0,.7); }
+      .mx-lightbox-bg .mx-lb-cap { position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+                                    background:rgba(20,8,4,.78); color:#FFE08A; padding:6px 14px;
+                                    border-radius:18px; font-family:'Noto Serif SC',serif; font-size:13px;
+                                    letter-spacing:.04em; max-width:88vw; text-align:center;
+                                    pointer-events:none; }
+      .mx-lightbox-bg .mx-lb-close { position:fixed; top:14px; right:14px; width:36px; height:36px;
+                                       border-radius:50%; background:rgba(255,224,138,.18); border:1px solid #FFE08A;
+                                       color:#FFE08A; font-size:18px; cursor:pointer; line-height:1; }
+      @keyframes mx-lb-in { from { opacity:0; } to { opacity:1; } }
+      
+      /* tray 타일 long-press 힌트 (클릭 시 확대) */
+      .mx-tile { position:relative; }
+      .mx-tile-zoom { position:absolute; right:1px; bottom:1px; width:14px; height:14px;
+                       border-radius:50%; background:rgba(0,0,0,.55); color:#fff;
+                       font-size:9px; line-height:14px; text-align:center; pointer-events:auto;
+                       cursor:zoom-in; z-index:2; }
     </style>
   `;
 }
@@ -347,16 +390,18 @@ function _trayHTML(remaining){
     const t = _getTongueById(e.tid);
     if(!t) return '';
     const inf = e.conf === 'inferred' ? ' inferred' : '';
+    // v11.6.0 patched: 우하단 ⤢ 버튼으로 확대 (drag 와 분리: button 은 pointerdown 시 stopPropagation)
     return `<div class="mx-tile draggable${inf}" data-tid="${e.tid}" title="${esc(t.han)}">
               <span class="tid">${('00'+e.tid).slice(-2)}</span>
               <img src="${esc(t.img)}" alt="">
+              <div class="mx-tile-zoom" data-zoom-tid="${e.tid}" title="확대">⤢</div>
             </div>`;
   }).join('');
   return `
     <div class="mx-tray-wrap">
       <div class="mx-tray-head">
         <span class="han">待診</span> 미배치 ${remaining.length}장
-        <span style="margin-left:auto;font-size:9.5px;color:var(--gutong)">사진을 누른 채 매트릭스로 끌어다 놓으세요</span>
+        <span style="margin-left:auto;font-size:9.5px;color:var(--gutong)">⤢ 확대 · 사진을 끌어 매트릭스로</span>
       </div>
       <div class="mx-tray" id="mx-tray">${tiles}</div>
     </div>
@@ -496,7 +541,7 @@ function _openDetailModal(tid){
         <span style="color:#999">·</span>
         <span style="font-family:'ZCOOL XiaoWei',serif;color:${ca.accent}">${esc(ca.han)}</span>
       </h4>
-      <img class="pho" src="${esc(t.img)}" alt="${esc(t.han)}">
+      <img class="pho" src="${esc(t.img)}" alt="${esc(t.han)}" title="클릭하여 확대">
       <div class="row"><b>${esc(t.label_full || t.han)}</b></div>
       <div class="row" style="color:var(--mo-l)">${esc(t.ko || '')}</div>
       ${t.pattern_han ? `<div class="row">辨證 · <b style="color:var(--feicui)">${esc(t.pattern_han)}</b> · ${esc(t.pattern || '')}</div>` : ''}
@@ -509,13 +554,66 @@ function _openDetailModal(tid){
   bg.addEventListener('click', (e) => {
     if(e.target === bg || e.target.classList.contains('close')) bg.remove();
   });
+  // v11.6.0 patched: 사진 클릭 시 라이트박스 확대
+  const photoEl = bg.querySelector('.pho');
+  if(photoEl) photoEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const cap = `${('00'+t.id).slice(-2)}. ${co.han}·${ca.han} — ${t.label_full || t.han}`;
+    _openLightbox(t.img, cap);
+  });
+  document.body.appendChild(bg);
+}
+
+// v11.6.0 patched: 라이트박스 (사진 풀스크린 확대)
+function _openLightbox(src, caption){
+  // 이미 열려있으면 교체 (다중 layer 방지)
+  const ex = document.querySelector('.mx-lightbox-bg');
+  if(ex) ex.remove();
+  const bg = document.createElement('div');
+  bg.className = 'mx-lightbox-bg';
+  bg.innerHTML = `
+    <button class="mx-lb-close" type="button" aria-label="닫기">×</button>
+    <img src="${esc(src)}" alt="${esc(caption||'')}">
+    ${caption ? `<div class="mx-lb-cap">${esc(caption)}</div>` : ''}
+  `;
+  const close = () => bg.remove();
+  bg.addEventListener('click', (e) => {
+    // 사진 자체를 클릭해도 닫힘 (zoom-out cursor)
+    if(e.target.tagName !== 'BUTTON' || e.target.classList.contains('mx-lb-close')) close();
+  });
+  // ESC 로도 닫기
+  const esc_h = (e) => { if(e.key === 'Escape'){ close(); document.removeEventListener('keydown', esc_h); } };
+  document.addEventListener('keydown', esc_h);
   document.body.appendChild(bg);
 }
 
 // ─── 7. 드래그-드롭 (Pointer Events) ────────────────────────────────────
 function _attachDragSources(){
   $$('.mx-tile.draggable').forEach(tile => {
-    tile.addEventListener('pointerdown', (e) => _startDrag(e, tile));
+    tile.addEventListener('pointerdown', (e) => {
+      // v11.6.0 patched: 확대 버튼 클릭은 드래그로 시작되지 않게 가드
+      if(e.target && e.target.classList && e.target.classList.contains('mx-tile-zoom')) return;
+      _startDrag(e, tile);
+    });
+  });
+  // v11.6.0 patched: 우하단 ⤢ 버튼 → 라이트박스로 확대
+  $$('.mx-tile-zoom').forEach(zb => {
+    zb.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const tid = parseInt(zb.dataset.zoomTid, 10);
+      const t = _getTongueById(tid);
+      if(!t) return;
+      const entry = ENTRIES.find(en => en.tid === tid);
+      let cap = `${('00'+t.id).slice(-2)}. ${t.label_full || t.han}`;
+      if(entry){
+        const co = COLORS[entry.color]; const ca = COATINGS[entry.coating];
+        if(co && ca) cap = `${('00'+t.id).slice(-2)}. ${co.han}·${ca.han} — ${t.label_full || t.han}`;
+      }
+      _openLightbox(t.img, cap);
+    });
+    // pointerdown 도 막아 drag 가 시작되지 않게
+    zb.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
   });
 }
 
@@ -672,6 +770,7 @@ function _quit(){
 // ─── 9. 외부 API ────────────────────────────────────────────────────────
 window.V11Matrix = {
   open,
+  openStudy,    // v11.6.0 patched: 「전부다」 (정답 매트릭스 일괄 표시)
   ENTRIES,
   COLORS,
   COATINGS,

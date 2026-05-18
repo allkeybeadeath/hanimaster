@@ -171,6 +171,8 @@ function openHome(){
   if(!view) return;
   document.body.classList.remove('on-hub');
   document.body.classList.add('on-saam');
+  // v11.6.0 patched: 헤더 컨텍스트 갱신 → 상·하단 모두 경혈학 정체성으로 전환
+  try{ if(typeof window.setHeaderContext === 'function') window.setHeaderContext('saamdoin'); }catch(_){}
   view.innerHTML = _styles() + `
     <div class="saam-banner">
       <div class="saam-banner-medal">${_medal('saamdoin', 60)}</div>
@@ -987,5 +989,26 @@ window.V11Saam = {
   openMulti: openMultiLobby,
   MODES,
 };
+
+// v11.6.1 FIX: 라우트 재등록 (구버전 jingxue-race.js 의 등록을 덮어씀) — 더 강력한 잠금
+//   — 구버전은 multi 가 placeholder. 신버전 V11Saam 이 정식 구현체.
+//   — 즉시 + 100ms + 500ms + 1500ms 4단계로 재등록하여 어떤 경합도 이김.
+//   — V11Saam.openHome 이 함수임을 ROUTES.saamdoin === openHome 으로 확정 보장.
+if(typeof window !== 'undefined'){
+  const _lock = () => {
+    if(!window.ROUTES) return false;
+    window.ROUTES.saamdoin = openHome;
+    window.ROUTES.jingxue  = openHome;  // 백워드 호환 (구 라우트 이름)
+    return true;
+  };
+  const _tryLock = (delay) => setTimeout(() => {
+    if(!_lock()){ setTimeout(_tryLock.bind(null, 100), 50); }
+  }, delay);
+  // 즉시 + 100ms + 500ms + 1500ms 4단계 잠금 시도
+  _tryLock(0);
+  _tryLock(100);
+  _tryLock(500);
+  _tryLock(1500);
+}
 
 })();

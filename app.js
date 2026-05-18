@@ -20,8 +20,8 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v11.6';                  // ★ 醫書宮 同學 활동상태 통합 + 설진 對位 48장 完備 + 參考書 (2026-05)
-const APP_BUILD   = '2026.05.18.v10.0.8';     // v10.0.8 scope correction
+const APP_VERSION = 'v11.6.0';                // ★ 경혈학 V11Saam 통합 + 과목별 하단nav 분리 + 對位 라이트박스 + 「전부다」 분리 (2026-05-18 patched)
+const APP_BUILD   = '2026.05.18.v11.6.0';     // patched build
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
 
@@ -581,14 +581,79 @@ function baguaSVG(size){
 // v11.6: 과목별 헤더 컨텍스트 시스템 — 다른 房에 진입 시 logo·title·subtitle 자동 전환.
 //   각 모듈(jindan/jingxue 등)이 `setHeaderContext('dongmu')` 등으로 헤더 정체성 갱신.
 //   user-name-mini 는 더 이상 사용자명이 아니라 房의 부제(室號) 표시 — 정체성 통합.
+// v11.6.0 patched: bottomNav 도 컨텍스트별로 교체 — 방제학에서 진단학·경혈학으로 진입 시
+//   '處方/약재/암기/기출' 같은 방제학 전용 탭이 그대로 뜨던 버그 픽스.
 const HEADER_CTX = {
-  shennong: { title:'方劑學', subtitle:'神農의 방',   logo:'icon-192.png',   accent:'#9C3030' },
-  hub:      { title:'醫書宮', subtitle:'八房 입구',   logo:'icon-192.png',   accent:'#7A3D27' },
-  dongmu:   { title:'診斷學', subtitle:'東武의 방',   logo:'',               accent:'#9C3030' },
-  saamdoin: { title:'經穴',   subtitle:'舍巖의 방',   logo:'',               accent:'#3A6A4A' },
+  shennong: { title:'方劑學', subtitle:'神農의 방',   logo:'icon-192.png',   accent:'#9C3030',
+              bottomNav:[
+                {ic:'家', lb:'대청',   tab:'home'},
+                {ic:'方', lb:'처방',   tab:'formula'},
+                {ic:'藥', lb:'약재',   tab:'herb'},
+                {ic:'卡', lb:'암기',   tab:'flash'},
+                {ic:'問', lb:'기출',   tab:'quiz'},
+                {ic:'析', lb:'통계',   tab:'stats'},
+                {ic:'譽', lb:'명예',   tab:'hall'},
+              ] },
+  hub:      { title:'醫書宮', subtitle:'八房 입구',   logo:'icon-192.png',   accent:'#7A3D27',
+              bottomNav:[ {ic:'宮', lb:'醫書宮', tab:'hub'} ] },
+  dongmu:   { title:'診斷學', subtitle:'東武의 방',   logo:'',               accent:'#9C3030',
+              bottomNav:[
+                {ic:'宮', lb:'醫書宮', tab:'hub'},
+                {ic:'武', lb:'동무',   tab:'dongmu'},
+                {ic:'圖', lb:'圖鑑',   call:'V11Jindan.openGallery'},
+                {ic:'對', lb:'對位',   call:'V11Matrix.open'},
+                {ic:'問', lb:'問答',   call:'V11Jindan.openMcq'},
+                {ic:'速', lb:'速習',   call:'V11Jindan.openDrill'},
+                {ic:'析', lb:'析究',   call:'V11Jindan.openStats'},
+              ] },
+  saamdoin: { title:'經穴',   subtitle:'舍巖의 방',   logo:'',               accent:'#3A6A4A',
+              bottomNav:[
+                {ic:'宮', lb:'醫書宮', tab:'hub'},
+                {ic:'舍', lb:'사암',   tab:'saamdoin'},
+                {ic:'獨', lb:'싱글',   call:'V11Saam.openSingle:shu'},
+                {ic:'群', lb:'멀티',   call:'V11Saam.openMulti'},
+              ] },
 };
 let _curHeaderCtx = 'shennong';
+
+// v11.6.1 FIX: bottomNav 동적 재구성 — 더 견고하게.
+//   • body class 동기화: on-hub / on-dongmu / on-saam 자동 토글 (단일 진실 출처)
+//   • 활성 탭(active 클래스) 도 같이 적용 — 호출자가 별도 호출 안 해도 일관 동작
+//   • 클릭 핸들러 중복 방지를 위해 매번 innerHTML 으로 완전 재생성
+function _rebuildBottomNav(items, ctxId){
+  // 컨텍스트별 body class 동기화 — 단일 진실 출처
+  if(typeof document !== 'undefined' && document.body){
+    document.body.classList.toggle('on-hub',    ctxId === 'hub');
+    document.body.classList.toggle('on-dongmu', ctxId === 'dongmu');
+    document.body.classList.toggle('on-saam',   ctxId === 'saamdoin' || ctxId === 'jingxue');
+  }
+  const inner = document.querySelector('.bottom-nav .bottom-nav-inner');
+  if(!inner || !Array.isArray(items)) return;
+  // 현재 활성 탭은 S.lastTab 기준
+  const activeTab = (typeof S !== 'undefined' && S && S.lastTab) ? S.lastTab : '';
+  inner.innerHTML = items.map(it => {
+    const dataAttr = it.tab ? `data-tab="${it.tab}"` : `data-call="${it.call || ''}"`;
+    const isActive = it.tab && it.tab === activeTab;
+    return `<button class="nav-btn${isActive ? ' active' : ''}" type="button" ${dataAttr}><span class="ic">${it.ic}</span><span class="lb">${it.lb}</span></button>`;
+  }).join('');
+  // 클릭 핸들러 (data-tab 은 setTab, data-call 은 점-구분 경로로 window 함수 호출, ':' 뒤 인자)
+  inner.querySelectorAll('.nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      if(tab){ if(typeof window.setTab === 'function') window.setTab(tab); return; }
+      const call = btn.dataset.call;
+      if(!call) return;
+      const [path, arg] = call.split(':');
+      const parts = path.split('.');
+      let ref = window;
+      for(const p of parts){ if(!ref) return; ref = ref[p]; }
+      if(typeof ref === 'function'){ try{ arg !== undefined ? ref(arg) : ref(); }catch(e){ console.error('nav call fail', call, e); } }
+    });
+  });
+}
+
 function setHeaderContext(ctx){
+  const ctxId = (typeof ctx === 'string') ? ctx : '';
   const c = (typeof ctx === 'string') ? (HEADER_CTX[ctx] || HEADER_CTX.shennong) : (ctx || {});
   if(typeof ctx === 'string') _curHeaderCtx = ctx;
   const ttl = $('.app-header .title');
@@ -600,6 +665,8 @@ function setHeaderContext(ctx){
     if(c.logo){ lg.style.display=''; lg.src = c.logo; lg.alt = c.title || ''; }
     else      { lg.style.display='none'; }  // 房별 banner 가 신원 표시
   }
+  // v11.6.1 FIX: bottomNav + body class 같이 갱신 (ctxId 전달)
+  if(c.bottomNav) _rebuildBottomNav(c.bottomNav, ctxId);
 }
 window.setHeaderContext = setHeaderContext;
 
@@ -1143,6 +1210,18 @@ function setTab(name){
   // v7: 카드 對決 스트림 정리 (배틀 탭이 아닐 때만 — 배틀 중 자기 화면 갱신은 막지 않음)
   if(name !== 'battle' && typeof stopCardStreams === 'function') stopCardStreams();
   S.lastTab = name; saveState();
+  // v11.6.0 patched: 메인 房 라우트 진입 시 헤더·하단nav 컨텍스트 자동 복원
+  //   shennong 전용 탭(home/formula/herb/flash/quiz/stats/hall/cube/warrior2h)으로 가면 → shennong
+  //   hub → hub, dongmu → dongmu, saamdoin → saamdoin (모듈 자체도 호출하지만 setTab 단에서 한번 더 확정)
+  try{
+    const CTX_BY_TAB = {
+      home:'shennong', formula:'shennong', herb:'shennong', flash:'shennong',
+      quiz:'shennong', stats:'shennong', hall:'shennong', cube:'shennong', warrior2h:'shennong', battle:'shennong',
+      hub:'hub', dongmu:'dongmu', saamdoin:'saamdoin', jingxue:'saamdoin',
+    };
+    const wantCtx = CTX_BY_TAB[name];
+    if(wantCtx && typeof setHeaderContext === 'function') setHeaderContext(wantCtx);
+  }catch(_){}
   $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   view.scrollTop = 0; window.scrollTo({top:0, behavior:'instant'});
   // v9.6: 활동 라벨 갱신 (presence detail 모달에서 표시)
@@ -6360,6 +6439,11 @@ function renderFlashHub(){
         <span class="ttl">주관식 문제 (정통 시험형)</span>
         <span class="desc">조성·효능·주치·군약·출전을 직접 입력. 띄어쓰기·오타 허용, 객관식 대비 2~5배 氣</span>
       </button>
+      <button class="flash-mode-tile wide gold" type="button" id="fl-mode-essay">
+        <span class="ic">論·試</span>
+        <span class="ttl">서술형 기출 (4년치) <span style="background:var(--zhusha-d);color:#FFE08A;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;margin-left:3px">NEW</span></span>
+        <span class="desc">22·21·20·19·18학번 서술형 기출. 문제 → 머리로 답안 구성 → 「답안 보기」 → 핵심 키워드 + 모범 답안 → 자가 평가</span>
+      </button>
     </div>
 
     <div class="card fade-in" style="margin-top:14px">
@@ -6386,6 +6470,15 @@ function renderFlashHub(){
   $('#fl-mode-addition').addEventListener('click',      () => startFlashAddition(scope, 'mc'));
   $('#fl-mode-addition-sa').addEventListener('click',   () => startFlashAddition(scope, 'sa'));
   $('#fl-mode-shortanswer').addEventListener('click',   () => startShortAnswer(scope));
+  // v11.6.1: 서술형 기출 플래시 (V11EssayFlash 모듈)
+  const eb = $('#fl-mode-essay');
+  if(eb) eb.addEventListener('click', () => {
+    if(window.V11EssayFlash && typeof window.V11EssayFlash.open === 'function'){
+      window.V11EssayFlash.open('all');
+    } else {
+      toast('서술형 모듈 미로드 — 새로고침 후 재시도','warn');
+    }
+  });
 }
 if(typeof window !== 'undefined') window.renderFlashHub = renderFlashHub;
 

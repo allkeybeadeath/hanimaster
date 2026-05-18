@@ -833,18 +833,21 @@ window.V11Jingxue = {
   openMulti, openLearn,
 };
 
-// ROUTES 등록 (clinic-hub _registerRoutes 도 등록하지만 안전망)
-function _registerRoute(){
-  if(window.ROUTES){
+// v11.6.1 FIX — V11Saam(신모듈)이 이 라우트를 점유해야 하므로 OLD 모듈의 등록을 비활성화한다.
+//   기존 setTimeout(_registerRoute, 300) 이 NEW의 즉시 등록을 덮어쓰던 경합을 제거.
+//   V11Jingxue API 객체는 그대로 유지 (외부 호환). 단 ROUTES 등록만 차단.
+//   만약 신모듈이 끝까지 로드 실패할 경우에만 fallback 으로 OLD 라우트가 등록되도록 보호망 추가.
+function _registerRouteIfMissing(){
+  if(!window.ROUTES) return;
+  // V11Saam 이 이미 등록했으면 절대 덮어쓰지 않음
+  if(window.V11Saam && typeof window.V11Saam.openHome === 'function') return;
+  // V11Saam 미로드 + ROUTES.saamdoin 미정의일 때만 OLD 로 fallback
+  if(typeof window.ROUTES.saamdoin !== 'function'){
     window.ROUTES.saamdoin = renderSaamdoinHome;
     window.ROUTES.jingxue  = renderSaamdoinHome;
   }
 }
-if(document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', _registerRoute);
-} else {
-  _registerRoute();
-}
-setTimeout(_registerRoute, 300);
+// 5초 후에만 한 번 확인 — V11Saam 로드 충분히 기다린 뒤
+setTimeout(_registerRouteIfMissing, 5000);
 
 })();

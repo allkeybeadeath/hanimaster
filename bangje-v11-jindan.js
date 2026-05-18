@@ -191,6 +191,8 @@ function _newSession(mode, catId){
 function renderDongmuHome(){
   const view = document.getElementById('view');
   if(!view) return;
+  // v11.6.0 patched: 헤더 + 하단 nav 컨텍스트 전환 (방제학 탭이 그대로 떠 있던 버그 픽스)
+  try{ if(typeof window.setHeaderContext === 'function') window.setHeaderContext('dongmu'); }catch(_){}
   // v11.6: 활동 라벨 갱신 (의서궁 同學 표시용).
   try{
     if(window.V96Activity) window.V96Activity.set('東武之房', '진단학 동무대청');
@@ -198,9 +200,13 @@ function renderDongmuHome(){
   }catch(_){}
   view.innerHTML = _baseStyles() + _bannerHTML() + `
     <div class="dm-modes">
-      <button class="dm-mode-btn duiwei" type="button" data-mode="duiwei" style="grid-column:1 / -1">
-        <div class="dm-mode-han">對位 · 設色×設苔 매트릭스</div>
-        <div class="dm-mode-ko">색·태 좌표 끌어다 놓는 학습세트</div>
+      <button class="dm-mode-btn duiwei" type="button" data-mode="duiwei">
+        <div class="dm-mode-han">對位 · 기존</div>
+        <div class="dm-mode-ko">하나씩 끌어다 놓기</div>
+      </button>
+      <button class="dm-mode-btn duiwei" type="button" data-mode="duiwei-all">
+        <div class="dm-mode-han">對位 · 전부다</div>
+        <div class="dm-mode-ko">정답 매트릭스 일괄 표시</div>
       </button>
       <button class="dm-mode-btn" type="button" data-mode="gallery">
         <div class="dm-mode-han">圖鑑</div>
@@ -270,6 +276,15 @@ function renderDongmuHome(){
       else if(m === 'stats')   openStats();
       else if(m === 'duiwei'){
         if(window.V11Matrix && window.V11Matrix.open) window.V11Matrix.open();
+        else toast('對位 모듈 미로드','warn');
+      }
+      else if(m === 'duiwei-all'){
+        if(window.V11Matrix && window.V11Matrix.openStudy) window.V11Matrix.openStudy();
+        else if(window.V11Matrix && window.V11Matrix.open){
+          // fallback: 일반 open 후 toggle 클릭 시뮬레이션
+          window.V11Matrix.open();
+          setTimeout(() => { const t=document.getElementById('mx-toggle'); if(t) t.click(); }, 80);
+        }
         else toast('對位 모듈 미로드','warn');
       }
     });
@@ -386,24 +401,25 @@ function _renderQuizPickRange(mode, title, sub){
 }
 
 function _buildMcqQ(t){
+  // v11.6.1 FIX: 변증(pattern) axis 제거 — 설진 시험 범위는 설체·설태만.
+  //   사용자 시험 정책: 변증(辨證)은 진단학 다른 단원에서 별도 출제되므로
+  //   설진 단원 시험 (5/19·5/26) 에서는 설체 形態(body_features) 와 설태 色苔(quality_features),
+  //   그리고 한자 라벨(han) 만 묻는다.
   const axes = [];
-  if(t.pattern_han)                  axes.push('pattern');
   if(t.han)                          axes.push('han');
   if((t.body_features||[]).length)   axes.push('body');
   if((t.quality_features||[]).length) axes.push('quality');
   const axis = axes[Math.floor(Math.random() * axes.length)] || 'han';
   let q, correct;
   const pool = window.TONGUES || [];
-  if(axis === 'pattern'){ q = '이 사진의 <span class="han">辨證</span>은?'; correct = t.pattern_han || '?'; }
-  else if(axis === 'han'){ q = '이 사진의 <span class="han">舌象</span> 한자 라벨은?'; correct = t.han || '?'; }
+  if(axis === 'han'){ q = '이 사진의 <span class="han">舌象</span> 한자 라벨은?'; correct = t.han || '?'; }
   else if(axis === 'body'){ q = '이 사진의 <span class="han">形態</span> 특징은?'; correct = (t.body_features||[])[0] || '?'; }
   else { q = '이 사진의 <span class="han">色苔</span>는?'; correct = (t.quality_features||[])[0] || '?'; }
   const distrSet = new Set();
   pool.forEach(o => {
     if(o.id === t.id) return;
     let v;
-    if(axis === 'pattern')   v = o.pattern_han;
-    else if(axis === 'han')  v = o.han;
+    if(axis === 'han')       v = o.han;
     else if(axis === 'body') v = (o.body_features||[])[0];
     else                     v = (o.quality_features||[])[0];
     if(v && v !== correct) distrSet.add(v);
@@ -494,9 +510,9 @@ function _renderSubjQ(t, cat, progress){
     </div>
     <div class="dm-card-q">
       <img class="dm-img" src="${esc(t.img)}" alt="">
-      <div class="dm-q-text">이 사진의 <span class="han">舌象 라벨</span> 또는 <span class="han">辨證</span>을 입력 (한자/한글):</div>
+      <div class="dm-q-text">이 사진의 <span class="han">舌象 라벨</span> 또는 <span class="han">形態</span>·<span class="han">色苔</span>를 입력 (한자/한글):</div>
       <div class="dm-input-row">
-        <input type="text" id="dm-subj-input" placeholder="예: 紅舌  /  열증  /  陰虛">
+        <input type="text" id="dm-subj-input" placeholder="예: 紅舌  /  胖大  /  黃膩苔">
         <button type="button" id="dm-subj-submit">확인</button>
       </div>
       <div id="dm-feedback"></div>
@@ -514,7 +530,9 @@ function _handleSubjAnswer(raw, t){
   const v = String(raw||'').trim().replace(/\s+/g,'').toLowerCase();
   if(!v) return;
   const cand = [];
-  [t.han, t.label_full, t.pattern_han, t.pattern, t.ko].forEach(x => { if(x) cand.push(x); });
+  // v11.6.1 FIX: 변증(pattern/pattern_han) 은 시험 범위 외 — 정답 후보에서 제외.
+  //   설체 형태(body_features) + 설태 색태(quality_features) + 한자 라벨(han/label_full/ko) 만 인정.
+  [t.han, t.label_full, t.ko].forEach(x => { if(x) cand.push(x); });
   (t.body_features||[]).forEach(x => cand.push(x));
   (t.quality_features||[]).forEach(x => cand.push(x));
   const norm = s => String(s||'').replace(/\s+/g,'').toLowerCase();

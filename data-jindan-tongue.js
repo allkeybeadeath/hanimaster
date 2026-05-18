@@ -605,7 +605,11 @@ if(typeof window !== 'undefined'){
 }
 
 // ─── 참고서적 ────────────────────────────────────────────────────────
-// v11.6: 학습 보강용 표준 설진 참고서. 한국 한의대 표준 + 영미 임상 + 중의약 圖譜.
+// v11.6.1 UPDATE: 한의대 표준교재 (현행) 로 보강·교체.
+//   기존 「한방진단학 (대성출판사)」 → 「한의진단학 진찰편·진단편 (군자출판사)」로 정확화.
+//   Maciocia 본은 2021년 3판 (사진 175장) 으로 업데이트.
+//   국내 임상가용 컬러 아틀라스·실습서·중의진단학 통합본 추가.
+//
 //   각 entry:
 //     name_ko / name_han  — 한글·한자 제목
 //     authors             — 저자
@@ -617,59 +621,113 @@ if(typeof window !== 'undefined'){
 //     standard            — 한국 한의대 표준교재 여부
 const TONGUE_REFERENCES = [
   {
-    name_ko:'한방진단학', name_han:'韓方診斷學',
-    authors:'전국 한의과대학 진단학교실',
-    pub:'대성출판사', year:'2014~', lang:'ko',
-    pages:'설진 章 약 70~80p, 도판 40+',
-    why:'본 PWA 의 48장 사진·라벨 出處. 시험 표준.',
+    name_ko:'한의진단학 — 진찰편', name_han:'韓醫診斷學 — 診察篇',
+    authors:'한의진단학 편찬위원회 (대한한의진단학회)',
+    pub:'군자출판사', year:'2019 (전면개정)', lang:'ko',
+    pages:'설진 章 본문 + 컬러 도판 약 50',
+    why:'대한한의진단학회 공식 교재. 望診(설진 포함) 전반의 체계적 분류. 시험 출제 표준.',
+    standard:true,
+  },
+  {
+    name_ko:'한의진단학 — 진단편', name_han:'韓醫診斷學 — 診斷篇',
+    authors:'한의진단학 편찬위원회 (대한한의진단학회)',
+    pub:'군자출판사', year:'2019', lang:'ko',
+    pages:'변증·진단 체계',
+    why:'진찰편의 자매편. 변증 논리 (설진 → 변증 연결). 설진 단원과 별도 학습.',
+    standard:true,
+  },
+  {
+    name_ko:'한의진단학 실습', name_han:'韓醫診斷學 實習',
+    authors:'대한한의진단학회 / 한의진단학실습 편찬위원회',
+    pub:'군자출판사', year:'2020', lang:'ko',
+    pages:'실습 매뉴얼 + 사진',
+    why:'한의과대학 진단 실습 지도용. 실제 환자 사진·소견 작성 양식 수록. 설진 임상 적용 강화.',
     standard:true,
   },
   {
     name_ko:'동의진단학', name_han:'東醫診斷學',
     authors:'이봉교 외',
-    pub:'성보사', year:'1985', lang:'ko',
+    pub:'성보사', year:'1985 (1版) · 이후 重刷',
+    lang:'ko',
     pages:'설진 도판 약 30',
-    why:'전통 韓醫 관점 설진 분류. 변증과 설상의 연계 강조.',
+    why:'1세대 표준교재. 韓醫 전통 관점의 설진 분류 + 변증 연계. 군자판과 비교 학습 권장.',
     standard:true,
+  },
+  {
+    name_ko:'중의진단학 (한역)', name_han:'中醫診斷學',
+    authors:'홍순석 譯',
+    pub:'군자출판사', year:'2014',
+    lang:'ko',
+    pages:'설진 章 단독 + 컬러 도판',
+    why:'중의약대학 統編教材 한역본. 한국 교재보다 설진 항목이 세분화 (淡白舌·淡紅舌·紅舌·絳舌·紫舌 별도 章). 깊이 학습용.',
+    standard:false,
+  },
+  {
+    name_ko:'설진 임상증례집 — 컬러 아틀라스',
+    name_han:'舌診 臨床症例集',
+    authors:'한의학 임상연구회 編',
+    pub:'한미의학', year:'2008',
+    lang:'ko',
+    pages:'환자 사진 + 임상 case 200+',
+    why:'증례 중심으로 「혀 소견 → 변증·처방」 흐름. 시험 후 임상 단계에서 유용.',
+    standard:false,
   },
   {
     name_ko:'중의설진도보', name_han:'中醫舌診圖譜',
     authors:'人民衛生出版社 編',
-    pub:'人民衛生出版社', year:'2010~ (개정 다수)', lang:'zh',
+    pub:'人民衛生出版社', year:'2010~ (개정 다수)',
+    lang:'zh',
     pages:'컬러 사진 200+',
-    why:'설질·설태 조합별 대표 사진 多. 對位 매트릭스 셀 보강용.',
+    why:'설질·설태 조합별 대표 사진 풍부. 對位 매트릭스 셀별 사진 보강에 최적.',
     standard:false,
   },
   {
-    name_ko:'중국 설진 아틀라스', name_han:'Atlas of Chinese Tongue Diagnosis',
+    name_ko:'Atlas of Chinese Tongue Diagnosis',
+    name_han:'(중국 설진 아틀라스)',
     authors:'Barbara Kirschbaum',
-    pub:'Eastland Press (US)', year:'2010 (2nd ed.)', lang:'en',
+    pub:'Eastland Press (US)', year:'2010 (2nd ed.)',
+    lang:'en',
     pages:'컬러 사진 320+',
     why:'서양인 환자 사진 多. 五臟 別 (肺·脾胃·腎·心·肝) 정리. 임상 case 풍부.',
     standard:false,
   },
   {
-    name_ko:'설진학 (Maciocia)', name_han:'Tongue Diagnosis in Chinese Medicine',
+    name_ko:'Tongue Diagnosis in Chinese Medicine (Maciocia)',
+    name_han:'(설진학)',
     authors:'Giovanni Maciocia',
-    pub:'Eastland Press', year:'1995 (Rev.)', lang:'en',
-    pages:'사진 200+',
-    why:'영문 표준 텍스트. 정의·발생 기전 상세. 본 PWA 의 변증 해설 보강.',
+    pub:'Eastland Press', year:'2021 (3rd ed., 신간)',
+    lang:'en',
+    pages:'컬러 사진 175 (3판 기준, 100 점이 신규)',
+    why:'영문 표준 텍스트 30년 베스트. 設形·色·苔 체계 + 六經·四分·三焦 변증 연계. 본 PWA 변증 해설 보강의 기준.',
     standard:false,
   },
   {
-    name_ko:'포켓 설진 아틀라스', name_han:'Pocket Atlas of Tongue Diagnosis',
+    name_ko:'Pocket Atlas of Tongue Diagnosis (Schnorrenberger)',
+    name_han:'(포켓 설진 아틀라스)',
     authors:'Claus C. Schnorrenberger',
-    pub:'Thieme', year:'2011 (2nd)', lang:'en',
-    pages:'컬러 도판',
-    why:'휴대용 아틀라스. 침구·처방·식이 가이드 통합.',
+    pub:'Thieme', year:'2011 (2nd ed.)',
+    lang:'en',
+    pages:'컬러 도판 + 침구·처방·식이',
+    why:'휴대용 아틀라스. 설진 → 침구·처방·식이 통합 가이드. 임상 빠른 참조용.',
     standard:false,
   },
   {
     name_ko:'대한한의진단학회지', name_han:'大韓韓醫診斷學會誌',
     authors:'대한한의진단학회',
-    pub:'대한한의진단학회', year:'분기 발행', lang:'ko',
+    pub:'대한한의진단학회', year:'분기 발행 (KCI 등재)',
+    lang:'ko',
     pages:'논문',
-    why:'설진 정량화·AI 융합 최신 연구. 學會 발표 자료 참조.',
+    why:'설진 정량화·디지털 설진기·AI 분석 등 최신 연구. KCI 검색 가능.',
+    standard:false,
+  },
+  {
+    name_ko:'국가한의임상정보포털 (NCKM)',
+    name_han:'(NCKM)',
+    authors:'한국한의학연구원',
+    pub:'https://nikom.or.kr/nckm', year:'운영중',
+    lang:'ko',
+    pages:'웹 DB',
+    why:'한의 임상 표준 정보 (변증·처방·진단 기준) 공식 포털. 임상가 표준 참조.',
     standard:false,
   },
 ];

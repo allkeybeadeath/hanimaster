@@ -1,19 +1,23 @@
-/* sw.js — v11.6 서비스 워커 (2026-05-18 update fix)
+/* sw.js — v11.6.2 서비스 워커 (2026-05-18 fix build 2)
  *
- *  v11.6 변경:
- *   • 의서궁 同學 활동상태 통합 픽스 — [object Object] 렌더 버그 수정
- *   • 진단학·경혈학·설진 진입 시 V96Activity 자동 갱신
- *   • 對位 매트릭스 48장 全 매핑
- *   • 진단학 참고서적 패널
+ *  v11.6.2 변경 (이번 빌드, 누적):
+ *   • 방미큐브 orphan 본초 15종 제거 — 처방 어디에도 없는 飴糖·龍眼肉·山茱萸·龜板·鱉甲·
+ *     石斛·沙蔘·肉蓯蓉·巴戟天·蜀椒·茯神·通草·石菖蒲·豬脊髓·麝香 (v11.5.4 syllabus 축소
+ *     이후 HERBS dict 에 잔존). HERBS 79 → 64. 본초 팝오버·카드 對決 distractor 정화.
+ *   • 진단학 MCQ 에서 변증(pattern) 축 제거 — 시험은 설체·설태(라벨)만.
+ *   • 서술형 기출 플래시카드 모드 추가 — 22~18학번 4년치 서술형 문제 (보혈제까지).
  *
- *  ★ 캐시 키에 빌드 timestamp 박음 (`-build-20260518-...`) →
- *    이전 SW 와 byte-level 차이 발생 → 브라우저가 새 SW install + activate →
- *    기존 캐시 (v11.5 / v11.6 초기 빌드) 자동 폐기 + PRECACHE 전체 재다운로드.
+ *  v11.6.1 변경 (이전 빌드, 누적):
+ *   • 하단 nav 과목별 분리 — body.on-dongmu / on-saam CSS 추가 + body class 중앙 관리.
+ *     setHeaderContext 가 _rebuildBottomNav 와 함께 body class 까지 토글하므로
+ *     어느 경로로 진입해도 색상·표시 일관성 보장.
+ *   • 경혈학 라우팅 경합 픽스 — 구 jingxue-race 의 setTimeout(300) 재등록이
+ *     신 V11Saam 의 즉시 등록을 덮어쓰던 버그 제거. V11Saam 이 0/100/500/1500ms
+ *     4단계 잠금으로 어떤 타이밍에도 신모듈이 최종 등록 보장.
  *
- *  network-first: index.html / app.js / 모든 bangje-v*-*.js / data-*.js  (변경 잦음)
- *  cache-first:   icons / manifest / 사진 (변경 적음)
+ *  ★ 캐시 키 build timestamp bump → SW 강제 재install + PRECACHE 재다운로드
  */
-const CACHE = 'bangje-pwa-v11-6-build-20260518-1830';
+const CACHE = 'bangje-pwa-v11-6-2-build-20260518-2200';
 const PRECACHE = [
   './',
   './index.html',
@@ -60,6 +64,9 @@ const PRECACHE = [
   './bangje-v11-jingxue-race.js',
   // v11.6 — 경혈 도표 (acupoints) — 누락 → 추가
   './bangje-v11-6-acupoints.js',
+  // v11.6.1 — 서술형 기출 플래시 (4년치 22~18학번, 보혈제까지)
+  './data-essay-exams.js',
+  './bangje-v11-6-1-essay-flash.js',
   // v11 신규 캐릭터 사진
   './saamdoin.jpeg',
   './lindaoren.jpeg',

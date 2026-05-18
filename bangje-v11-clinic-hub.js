@@ -33,12 +33,17 @@ const SUBJECTS = [
   { id:'huangdi',   room_han:'黃帝之房', subject_han:'醫經',   subject_ko:'의경',     mascot_id:'huangdi',   status:'placeholder', route:null,     accent:'#7C5810', desc:'內經要旨' },
   { id:'huatuo',    room_han:'華佗之房', subject_han:'外科',   subject_ko:'외과',     mascot_id:'huatuo',    status:'placeholder', route:null,     accent:'#7A3030', desc:'外治·導引' },
   { id:'lindaoren', room_han:'道人之房', subject_han:'影像',   subject_ko:'영상진단', mascot_id:'lindaoren', status:'placeholder', route:null,     accent:'#5C4070', desc:'영상의학' },
-  { id:'saamdoin',  room_han:'舍巖之房', subject_han:'經穴',   subject_ko:'경혈학',   mascot_id:'saamdoin',  status:'placeholder', route:null,     accent:'#3A6A4A', desc:'舍巖鍼法·經絡' },
+  { id:'saamdoin',  room_han:'舍巖之房', subject_han:'經穴',   subject_ko:'경혈학',   mascot_id:'saamdoin',  status:'active',      route:'saamdoin', accent:'#3A6A4A', desc:'舍巖鍼法·經絡·五輸穴' },
 ];
 const SUBJECT_BY_ID = {}; SUBJECTS.forEach(s => SUBJECT_BY_ID[s.id] = s);
 
 // ─── CHANGELOG ─────────────────────────────────────────────────────────
 const CHANGELOG_ENTRIES = [
+  { id:'v11.6.0', label:'v11.6.0', date:'2026-05-18', title:'경혈학 정식 통합 · 과목별 하단nav 분리 · 對位 사진 확대 · 「전부다」 분리', body:
+    '경혈학 (舍巖之房) — V11Saam 신규 모듈 정식 편입 (五輸穴·特定要穴 + 멀티 fully implemented). 의서궁 타일에서 바로 진입. ' +
+    '하단 nav 가 房별로 교체됨 — 방제학은 處方·약재·암기·기출·통계·명예, 진단학은 圖鑑·對位·問答·速習·析究, 경혈학은 五輸·멀티. ' +
+    '동무의 방: 「對位 · 기존(끌어다 놓기)」 + 「對位 · 전부다(정답 일괄 표시)」 두 버튼으로 분리. ' +
+    '對位 매트릭스 사진 클릭 시 풀스크린 라이트박스 확대 (tray ⤢ 버튼 / 셀 상세 모달의 .pho 모두 동작, ESC 또는 사진 클릭으로 닫기).' },
   { id:'v11.6', label:'v11.6', date:'2026-05-18', title:'醫書宮 同學 활동상태 통합 · 설진 對位 48장 完備 · 參考書', body:
     '의서궁 同學 목록의 activity 객체 렌더 버그 픽스 (이전: [object Object] / 빈 라벨 → 안 보임). ' +
     '진단학·경혈학·설진 등 八房 전 과목 진입 시 V96Activity.set 자동 호출 → 의서궁에서 어디서 학습 중인지 실시간 표시. ' +
@@ -671,9 +676,15 @@ async function _sendFeedback(){
 function _registerRoutes(){
   if(window.ROUTES){
     window.ROUTES.hub    = renderClinicHub;
+    // v11.6.1 FIX: renderDongmuHome 는 jindan 모듈이 더 늦게 로드되므로 fallback 처리.
+    //   이 함수가 여러 시점에 재호출되므로 jindan 로드 후 정확한 함수가 잡힘.
     window.ROUTES.dongmu = (window.renderDongmuHome || renderClinicHub);
   }
 }
+// v11.6.1 FIX: jindan 로드 완료 후 dongmu 라우트 재등록 (초기 _init 시점엔 미정의일 수 있음)
+setTimeout(_registerRoutes, 100);
+setTimeout(_registerRoutes, 500);
+setTimeout(_registerRoutes, 1500);
 function _injectGungChip(){
   if(document.getElementById('gung-chip')) return;
   const chips = document.querySelector('.head-chips');
@@ -693,7 +704,8 @@ function _wrapSetTab(){
   const original = window.setTab;
   window._v11SetTabWrapped = true;
   window.setTab = function(name){
-    document.body.classList.toggle('on-hub', name === 'hub');
+    // v11.6.1 FIX: body class 토글은 setHeaderContext (app.js) 가 중앙 관리.
+    //   원래 여기서 'on-hub' 만 토글했지만, 이제 on-dongmu/on-saam 도 함께 토글되어야 하므로 위임.
     const ret = original.apply(this, arguments);
     // v11.6: 의서궁 / 다른 과목 진입 시 활동 라벨을 명확히 설정 (방제학 setTab labels 에는 없는 키 보완).
     //        → 의서궁의 同學 목록에 "醫書宮 둘러보는 중" / "東武之房 진단학" 등이 표시됨.

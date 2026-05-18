@@ -178,6 +178,15 @@ label{font-size:12px;color:var(--mo-l);font-weight:600;letter-spacing:.04em;disp
 /* v11.3: hub 진입 시 bottom nav 완전 숨김 — 醫書宮은 과목 선택 화면이므로 방제학 메뉴 X */
 body.on-hub .bottom-nav { display:none !important; }
 body.on-hub main#view { padding-bottom:18px !important; }
+/* v11.6.1 FIX: 진단학·경혈학 房에서는 하단 nav 가 반드시 보이도록 강제 + 색상 토큰 */
+body.on-dongmu .bottom-nav { display:block !important; border-top-color:#9C3030 !important; }
+body.on-saam   .bottom-nav { display:block !important; border-top-color:#3A6A4A !important; }
+body.on-dongmu .nav-btn.active{color:#9C3030 !important;}
+body.on-dongmu .nav-btn.active .ic{color:#9C3030 !important;}
+body.on-dongmu .nav-btn.active::after{background:#9C3030 !important;}
+body.on-saam   .nav-btn.active{color:#3A6A4A !important;}
+body.on-saam   .nav-btn.active .ic{color:#3A6A4A !important;}
+body.on-saam   .nav-btn.active::after{background:#3A6A4A !important;}
 .bottom-nav-inner{display:flex;max-width:680px;margin:0 auto}
 .nav-btn{
   flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
@@ -1449,8 +1458,16 @@ body.on-hub main#view { padding-bottom:18px !important; }
 <script src="bangje-v11-tongue-matrix.js"></script>
 <!-- v11.5: 동무의 방 풀스택은 bangje-v11-jindan.js 로 통합. dongmu-suite 는 제거. -->
 
-<!-- v11.6: 경혈학 (舍巖之房) — 五輸穴 레이스 + 12경락 + 임독대 -->
+<!-- v11.6.0: 경혈학 (舍巖之房) — V11Saam (五輸穴·特定要穴 + 멀티 fully implemented)
+     ※ 구버전 bangje-v11-jingxue-race.js 는 V11Jingxue API 호환 위해 먼저 로드 (multi 가 placeholder 였음).
+        신규 모듈은 동일 라우트('saamdoin')를 마지막에 재등록하여 우선권 확보. -->
 <script src="bangje-v11-jingxue-race.js"></script>
+<script src="data-acupoints.js"></script>
+<script src="bangje-v11-6-acupoints.js"></script>
+
+<!-- v11.6.1: 서술형 기출 플래시카드 (22·21·20·19·18학번 4년치, 시험범위 보혈제까지) -->
+<script src="data-essay-exams.js"></script>
+<script src="bangje-v11-6-1-essay-flash.js"></script>
 
 <!-- 서비스 워커 v11.6: 자동 업데이트 감지 + skipWaiting -->
 <script>
