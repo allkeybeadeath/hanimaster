@@ -568,12 +568,13 @@ window.renderDongmuHome = renderDongmuHome;
 
 // ─── 5. ROUTES 등록 ───────────────────────────────────────────────────
 function _registerRoutes(){
-  if(typeof window.ROUTES === 'undefined'){
-    setTimeout(_registerRoutes, 200);  // ROUTES 가 아직 정의되기 전이면 대기
-    return;
+  // v11.4: window.ROUTES 가 없어도 OK — setTab wrap 이 fallback 으로 작동.
+  //   ROUTES 가 있으면 정식 등록, 없으면 skip (setTab wrap 만으로 라우팅 가능).
+  if(window.ROUTES){
+    window.ROUTES.hub    = renderClinicHub;
+    window.ROUTES.dongmu = renderDongmuHome;
   }
-  window.ROUTES.hub    = renderClinicHub;
-  window.ROUTES.dongmu = renderDongmuHome;
+  // setTab wrap 은 _forceHubOnFreshSession 안에서 호출됨.
 }
 
 // ─── 6. 헤더에 宮 chip inject — 어디서나 의서궁으로 복귀 ─────────────
@@ -598,7 +599,11 @@ function _injectGungChip(){
 // (app.js 의 firstTab = 'hub' 로 처리됨)
 // v11.3: 방어적 — app.js 가 갱신되지 않아도 강제 hub 진입 + bottom nav 토글
 
-// setTab을 wrap하여 bottom nav on/off 처리
+// setTab을 wrap하여 (1) bottom nav on/off 처리, (2) hub/dongmu 라우트 fallback 처리.
+// v11.4: window.ROUTES 가 노출되지 않은 구버전 app.js 에서도 작동하도록 강화.
+//   기존 app.js 의 setTab 은 'const ROUTES = {...}' 가 window 에 안 붙기 때문에
+//   외부에서 ROUTES.hub 등록이 안 됨 → setTab('hub') 가 ROUTES.home 으로 fallback.
+//   이 wrap 이 setTab 호출 후 view 를 재렌더링하여 hub/dongmu 가 정상 표시되도록 보장.
 function _wrapSetTabForNavToggle(){
   if(typeof window.setTab !== 'function' || window._v11SetTabWrapped) return;
   const original = window.setTab;
@@ -606,21 +611,39 @@ function _wrapSetTabForNavToggle(){
   window.setTab = function(name){
     // bottom nav: 'hub' 일 때만 숨김, 그 외 표시
     document.body.classList.toggle('on-hub', name === 'hub');
-    return original.apply(this, arguments);
+    const ret = original.apply(this, arguments);
+    // v11.4: hub/dongmu 라우트가 ROUTES 에 등록 안 됐을 가능성 대비 — view 강제 재렌더링.
+    //   원본 setTab 이 ROUTES.home 으로 fallback 했더라도, 여기서 진짜 화면으로 교체.
+    //   - hub  → window.renderClinicHub
+    //   - dongmu → window.renderDongmuHome  (jindan 이 expand 로 override 했으면 그게 호출됨)
+    const view = document.getElementById('view');
+    if(view){
+      if(name === 'hub' && typeof window.renderClinicHub === 'function'){
+        view.innerHTML = '';
+        try{ window.renderClinicHub(); }catch(e){ console.error('hub render fail', e); }
+      } else if(name === 'dongmu' && typeof window.renderDongmuHome === 'function'){
+        view.innerHTML = '';
+        try{ window.renderDongmuHome(); }catch(e){ console.error('dongmu render fail', e); }
+      }
+    }
+    return ret;
   };
 }
 
 // 신규 세션 (브라우저 탭 새로 열기, 새로고침) 마다 강제 hub
 // sessionStorage 는 탭 닫으면 비워짐 → 매 진입마다 hub 한 번 표시
+// v11.4: window.ROUTES 가 없어도 작동 — setTab wrap 이 fallback 렌더링을 수행함.
 function _forceHubOnFreshSession(){
-  if(typeof window.setTab !== 'function' || typeof window.ROUTES === 'undefined'){
+  if(typeof window.setTab !== 'function'){
     return setTimeout(_forceHubOnFreshSession, 50);
   }
-  // ROUTES.hub 가 아직 등록 안되었으면 지금 등록
-  if(!window.ROUTES.hub) window.ROUTES.hub = renderClinicHub;
-  if(!window.ROUTES.dongmu) window.ROUTES.dongmu = renderDongmuHome;
+  // ROUTES 가 노출되어 있으면 정식 등록 (v11.4 app.js)
+  if(window.ROUTES){
+    if(!window.ROUTES.hub) window.ROUTES.hub = renderClinicHub;
+    if(!window.ROUTES.dongmu) window.ROUTES.dongmu = renderDongmuHome;
+  }
   
-  // setTab wrap (bottom nav toggle)
+  // setTab wrap (bottom nav toggle + hub/dongmu fallback 렌더)
   _wrapSetTabForNavToggle();
   
   // 신규 세션? sessionStorage 가 비어있으면 신규
@@ -642,6 +665,13 @@ function _forceHubOnFreshSession(){
 // ─── 8. 초기화 ────────────────────────────────────────────────────────
 function _init(){
   _registerRoutes();
+  // v11.4: setTab wrap 을 가능한 빨리 설치 — DOMContentLoaded 전에 setTab 이 호출되어도
+  //   wrap 이 hub/dongmu 를 가로채 fallback 렌더링을 수행할 수 있도록.
+  const tryWrap = () => {
+    if(typeof window.setTab === 'function') _wrapSetTabForNavToggle();
+    else setTimeout(tryWrap, 30);
+  };
+  tryWrap();
   const startup = () => {
     setTimeout(_injectGungChip, 200);
     setTimeout(_forceHubOnFreshSession, 100);

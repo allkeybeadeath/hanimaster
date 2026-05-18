@@ -10,7 +10,7 @@
  *   • 캐릭터 사진 → images/characters/ 폴더로 이동
  *   • 캐시 키 갱신
  */
-const CACHE = 'bangje-pwa-v11-3-2026-05';
+const CACHE = 'bangje-pwa-v11-4-2026-05';
 const PRECACHE = [
   './',
   './index.html',
@@ -51,6 +51,8 @@ const PRECACHE = [
   // v11 진단학 — 동무의 방
   './bangje-v11-jindan.js',
   './data-jindan-tongue.js',
+  // v11.4 — 對位 매트릭스
+  './bangje-v11-tongue-matrix.js',
   // v11 신규 캐릭터 사진
   './saamdoin.jpeg',
   './lindaoren.jpeg',

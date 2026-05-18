@@ -20,7 +20,7 @@
  * ============================================================================ */
 
 // ───── 1. 상수·설정 ─────────────────────────────────────────────────────────
-const APP_VERSION = 'v11.3';                  // ★ 강제 hub 첫진입 + bottom nav 숨김 (2026-05)
+const APP_VERSION = 'v11.4';                  // ★ ROUTES window 노출 (hub/dongmu 라우팅 픽스) + 對位 매트릭스 (2026-05)
 const APP_BUILD   = '2026.05.18.v10.0.8';     // v10.0.8 scope correction
 const FIREBASE_URL = 'https://hanimaster-245f6-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const STORAGE_KEY = 'bangje.state.v2';
@@ -1243,6 +1243,10 @@ const ROUTES = {
   warrior2h: (typeof window !== 'undefined' && typeof window.V96RenderWarrior2H === 'function') ? window.V96RenderWarrior2H : renderHome,  // v9.6: 2시간의전사
   admin: renderAdminPanel,  // v8.2: PWA 내장 관리자 패널 (#admin URL 또는 hidden 진입)
 };
+// v11.4: ROUTES 를 window 에 노출 — clinic-hub 및 외부 모듈이 hub/dongmu 라우트를 등록할 수 있도록.
+//   (top-level const 는 기본적으로 window 에 안 붙기 때문에 명시적 export.
+//    이게 빠지면 setTab('hub') 가 ROUTES.home 으로 fallback 되어 방제학 home 만 뜸.)
+if(typeof window !== 'undefined') window.ROUTES = ROUTES;
 
 // ───── 7.5. 관리자 패널 (v8.2) ────────────────────────────────────────────────
 // PWA 와 같은 origin 이라 admin HTML 의 cross-origin/sandbox 문제 우회.

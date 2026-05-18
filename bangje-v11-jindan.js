@@ -443,11 +443,13 @@ function expandDongmuHome(){
       .dm-section { background:#FAF1E0; border:1px solid #9C303033; border-radius:10px; padding:12px; margin-bottom:10px; }
       .dm-stitle { font-family:var(--font-display); font-size:14px; color:var(--zhusha-d); margin-bottom:6px; display:flex; align-items:center; gap:6px; }
       .dm-stitle .han { font-family:'ZCOOL XiaoWei',serif; font-size:18px; }
-      .dm-modes { display:grid; grid-template-columns:repeat(2,1fr); gap:6px; margin-top:8px; }
-      .dm-mode-btn { background:#fff; border:1px solid #9C303055; padding:10px 8px; border-radius:8px; text-align:center; cursor:pointer; font-size:12px; }
+      .dm-modes { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:8px; }
+      .dm-mode-btn { background:#fff; border:1px solid #9C303055; padding:10px 6px; border-radius:8px; text-align:center; cursor:pointer; font-size:12px; }
       .dm-mode-btn:hover { background:#FFF0D0; border-color:#9C3030; }
       .dm-mode-han { font-family:'Noto Serif SC',serif; font-size:14px; color:var(--zhusha-d); font-weight:700; }
       .dm-mode-ko { font-size:10.5px; color:var(--mo-l); margin-top:2px; }
+      .dm-mode-btn.duiwei { background:linear-gradient(135deg,#FFF8E8,#FFE0B0); border-color:#C9A227; }
+      .dm-mode-btn.duiwei .dm-mode-han { color:#7C1818; }
       .dm-range-tabs { display:flex; gap:4px; margin-bottom:8px; background:#fff; padding:4px; border-radius:8px; border:1px solid #C9A22744; }
       .dm-range-tab { flex:1; padding:7px 4px; text-align:center; font-size:11.5px; cursor:pointer; border-radius:5px; border:0; background:transparent; color:var(--mo); font-weight:600; }
       .dm-range-tab.active { background:#9C3030; color:#FFE08A; }
@@ -490,6 +492,10 @@ function expandDongmuHome(){
       </div>
 
       <div class="dm-modes">
+        <button class="dm-mode-btn duiwei" type="button" data-mode="duiwei" style="grid-column:1 / -1">
+          <div class="dm-mode-han">對位 · 設色×設苔 매트릭스</div>
+          <div class="dm-mode-ko">색·태를 좌표로 끌어다 놓는 학습세트 (5/26 對備)</div>
+        </button>
         <button class="dm-mode-btn" type="button" data-mode="mcq">
           <div class="dm-mode-han">客觀</div>
           <div class="dm-mode-ko">객관식 4지선다</div>
@@ -502,7 +508,7 @@ function expandDongmuHome(){
           <div class="dm-mode-han">速習</div>
           <div class="dm-mode-ko">드릴 (자동 진행)</div>
         </button>
-        <button class="dm-mode-btn" type="button" data-mode="gallery">
+        <button class="dm-mode-btn" type="button" data-mode="gallery" style="grid-column:1 / -1">
           <div class="dm-mode-han">圖鑑</div>
           <div class="dm-mode-ko">사진첩 (라벨 토글)</div>
         </button>
@@ -522,6 +528,13 @@ function expandDongmuHome(){
       const m = b.dataset.mode;
       if(m === 'gallery'){
         openGallery(currentRange);
+      } else if(m === 'duiwei'){
+        // v11.4: 對位 — 설색×설태 매트릭스 (별도 모듈)
+        if(window.V11Matrix && typeof window.V11Matrix.open === 'function'){
+          window.V11Matrix.open();
+        } else {
+          toast('對位 모듈 미로드','warn');
+        }
       } else {
         start(m, currentRange);
       }
