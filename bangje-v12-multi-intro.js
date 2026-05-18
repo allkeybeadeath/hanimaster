@@ -160,7 +160,7 @@ if(!document.getElementById('v12-intro-style')){
   document.head.appendChild(st);
 }
 
-window.V12Intro = { show, charPhoto, eggQuote, eggNameOverride, _eggRoll, setSubjectIcon, removeSubjectIcon };
+window.V12Intro = { show, charPhoto, eggQuote, eggNameOverride, _eggRoll };
 window.V12Intro_VERSION = '12.0';
 })();
 

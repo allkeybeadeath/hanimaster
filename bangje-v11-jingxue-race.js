@@ -335,7 +335,15 @@ function renderSaamdoinHome(){
       const m = b.dataset.mode;
       if(m === 'solo')       openRaceSolo();
       else if(m === 'multi') openMulti();
-      else if(m === 'poker') { if(window.setTab) window.setTab('jxpoker'); else if(window.V12JxPoker) window.V12JxPoker.open(); }
+      else if(m === 'poker') {
+        // v12.1: 경혈학 內부에서만 진입 — setTab 의존 제거, 직접 호출
+        if(window.V12JxPoker && window.V12JxPoker.open){
+          try{ if(window.V12Intro && window.V12Intro.setSubjectIcon) window.V12Intro.setSubjectIcon('poker'); }catch(_){}
+          window.V12JxPoker.open();
+        } else {
+          toast('經穴포커 모듈 미로드 — 페이지 새로고침 후 다시 시도','warn');
+        }
+      }
       else if(m === 'learn') openLearn();
     });
   });

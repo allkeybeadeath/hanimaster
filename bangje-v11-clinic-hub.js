@@ -24,19 +24,18 @@ function toast(m,k){ try{ window.toast && window.toast(m,k); }catch(_){} }
 function openModal(html){ try{ window.openModal && window.openModal(html); }catch(_){} }
 function closeModal(){ try{ window.closeModal && window.closeModal(); }catch(_){} }
 
-// ─── SUBJECTS ─────────────────────────────────────────────── v12.0 ──
-//   黃帝 → 預防醫學, 岐伯 → 病理學, 華佗 → 洋方病理學, 道人(lindaoren) → 影像診斷學
-//   經穴포커 (jxpoker) 신설 — 방미큐브 옆에 NEW 표시
+// ─── SUBJECTS ─────────────────────────────────────────────── v12.1 ──
+//   v12.1: 經穴포커는 의서궁에서 제거 — 경혈학(舍巖之房) 內부에서만 진입.
+//          黃帝→預防醫學, 岐伯→病理學, 華佗→洋方病理學, 道人(lindaoren)→影像診斷學
 const SUBJECTS = [
   { id:'shennong',  room_han:'神農之房', subject_han:'方劑學', subject_ko:'방제학',   mascot_id:'shennong',  status:'active',      route:'home',   accent:'#C9A227', desc:'處方·本草·君臣佐使', badge:'方米큐브 最終 v1.1' },
-  { id:'jxpoker',   room_han:'卦象之房', subject_han:'經穴포커', subject_ko:'경혈포커', mascot_id:'bianque',   status:'active',      route:'jxpoker', accent:'#D4AF37', desc:'361穴 카드 · 14단계 족보 · 최대 8人', isNew:true },
   { id:'dongmu',    room_han:'東武之房', subject_han:'診斷學', subject_ko:'진단학',   mascot_id:'leejema',   status:'active',      route:'dongmu', accent:'#9C3030', desc:'設診·四象·辨證' },
   { id:'zhongjing', room_han:'仲景之房', subject_han:'傷寒論', subject_ko:'상한론',   mascot_id:'zhongjing', status:'placeholder', route:null,     accent:'#1A4C7C', desc:'六經辨證·經方' },
   { id:'qibo',      room_han:'岐伯之房', subject_han:'病理學',   subject_ko:'병리학',     mascot_id:'qibo',      status:'active', route:null,     accent:'#2A7060', desc:'臟象·經絡·病機 — 內經 病理' },
   { id:'huangdi',   room_han:'黃帝之房', subject_han:'預防醫學', subject_ko:'예방의학',     mascot_id:'huangdi',   status:'active', route:null,     accent:'#7C5810', desc:'上工治未病·攝生·三因制宜' },
   { id:'huatuo',    room_han:'華佗之房', subject_han:'洋方病理', subject_ko:'양방병리학',     mascot_id:'huatuo',    status:'active', route:null,     accent:'#7A3030', desc:'세포·조직·종양·염증 — 현대 病理' },
   { id:'lindaoren', room_han:'道人之房', subject_han:'影像診斷', subject_ko:'영상진단학', mascot_id:'lindaoren', status:'active', route:null,     accent:'#5C4070', desc:'X-ray·CT·MRI·초음파 판독' },
-  { id:'saamdoin',  room_han:'舍巖之房', subject_han:'經穴',   subject_ko:'경혈학',   mascot_id:'saamdoin',  status:'active',      route:'saamdoin', accent:'#3A6A4A', desc:'舍巖鍼法·經絡·五輸穴' },
+  { id:'saamdoin',  room_han:'舍巖之房', subject_han:'經穴',   subject_ko:'경혈학',   mascot_id:'saamdoin',  status:'active',      route:'saamdoin', accent:'#3A6A4A', desc:'舍巖鍼法·經絡·五輸穴 · 經穴포커 NEW' },
 ];
 const SUBJECT_BY_ID = {}; SUBJECTS.forEach(s => SUBJECT_BY_ID[s.id] = s);
 
@@ -46,10 +45,12 @@ const CHANGELOG_ENTRIES = [
     '經穴 포커 (jingxue-poker) 신규 — 361穴 카드덱 124장 / 14단계 족보 (확률 정확계산) / 최대 8人 멀티 + AI 봇 / ' +
     '베팅 (콜·체크·하프·쿼터·올인·폴드) · 최소 판돈 참여자 평균 氣 1/100. ' +
     '모드: 五札引換(드로우)·七札對局(세븐)·德州式(홀덤)·隨機(랜덤). ' +
+    '<b>v12.1 修正</b> — 經穴포커는 의서궁(醫書宮) home 에서 제거. <b>경혈학(舍巖之房) 內부의 4번째 모드 버튼에서만 진입</b>. ' +
+    '의서궁 → 경혈학 → 「經穴 포커 NEW」 버튼 클릭하면 진입.<br>' +
     '의서궁 八房 재편: 黃帝→預防醫學, 岐伯→病理學, 華佗→洋方病理學, 道人→影像診斷學. ' +
     '모든 멀티 게임(방제 對決·방미큐브·경혈 포커·오수혈 레이스) 시작 컷 統一. ' +
-    '오수혈 레이스 公開房 추가. 각 방 좌상단 마스코트 아이콘. ' +
-    '방미큐브는 v2.0 (게임시간 ≤10분) 으로 最終 업데이트 — 이후 추가 없음. ' +
+    '오수혈 레이스 公開房 추가. ' +
+    '방미큐브는 v1.1 (게임시간 ≤10분) 으로 最終 업데이트 — 이후 추가 없음. ' +
     'HERB_ALIASES dead alias 20종 제거.' },
   { id:'v11.6.0', label:'v11.6.0', date:'2026-05-18', title:'경혈학 정식 통합 · 과목별 하단nav 분리 · 對位 사진 확대 · 「전부다」 분리', body:
     '경혈학 (舍巖之房) — V11Saam 신규 모듈 정식 편입 (五輸穴·特定要穴 + 멀티 fully implemented). 의서궁 타일에서 바로 진입. ' +
@@ -340,12 +341,11 @@ function renderClinicHub(){
       <button class="gedit" type="button" id="hub-profile-edit">編 변경</button>
     </div>
     
-    <!-- 도구 4종 -->
-    <div class="hub-tools" data-v12-poker-target="1">
+    <!-- 도구 4종 (v12.1: 經穴포커 도구 버튼 제거 — 경혈학 房 내부에서만 진입) -->
+    <div class="hub-tools">
       <button class="hub-tool-btn" type="button" id="hub-tool-prof"><div class="hub-tool-han">印·業</div><div class="hub-tool-ko">프로필·업적</div></button>
       <button class="hub-tool-btn" type="button" id="hub-tool-hall"><div class="hub-tool-han">譽</div><div class="hub-tool-ko">명예의 전당</div></button>
       <button class="hub-tool-btn" type="button" id="hub-tool-cube"><div class="hub-tool-han">方米</div><div class="hub-tool-ko">방미큐브</div><span class="hub-final-badge">最終</span></button>
-      <button class="hub-tool-btn is-new" type="button" id="hub-tool-poker"><div class="hub-tool-han">經穴</div><div class="hub-tool-ko">포커</div><span class="hub-new-badge">NEW</span></button>
       <button class="hub-tool-btn" type="button" id="hub-tool-duel"><div class="hub-tool-han">對決</div><div class="hub-tool-ko">멀티 入場</div></button>
     </div>
     
@@ -465,11 +465,6 @@ function _wireHub(){
   if(hall) hall.addEventListener('click', () => { if(typeof window.setTab === 'function') window.setTab('hall'); });
   const cube = $('#hub-tool-cube');
   if(cube) cube.addEventListener('click', () => { if(typeof window.setTab === 'function') window.setTab('cube'); });
-  const poker = $('#hub-tool-poker');
-  if(poker) poker.addEventListener('click', () => {
-    if(window.V12Poker && window.V12Poker.openHome) window.V12Poker.openHome();
-    else if(typeof window.setTab === 'function') window.setTab('jingxue-poker');
-  });
   const duel = $('#hub-tool-duel');
   if(duel) duel.addEventListener('click', () => {
     if(typeof window.setTab === 'function') window.setTab('hall');
@@ -706,15 +701,8 @@ function _registerRoutes(){
   if(window.ROUTES){
     window.ROUTES.hub    = renderClinicHub;
     window.ROUTES.dongmu = (window.renderDongmuHome || renderClinicHub);
-    // v12: 경혈포커 라우트 — V12JxPoker.open()
-    window.ROUTES.jxpoker = function(){
-      if(window.V12JxPoker && window.V12JxPoker.open){
-        try{ if(window.V12Intro && window.V12Intro.setSubjectIcon) window.V12Intro.setSubjectIcon('poker'); }catch(_){}
-        window.V12JxPoker.open();
-      } else {
-        toast('經穴포커 모듈 로드 실패','warn');
-      }
-    };
+    // v12.1: 經穴포커는 의서궁에서 제거 — ROUTES.jxpoker 등록 안 함.
+    //        경혈학(舍巖之房) 內부에서 window.V12JxPoker.open() 으로 직접 진입.
   }
 }
 // v11.6.1 FIX: jindan 로드 완료 후 dongmu 라우트 재등록 (초기 _init 시점엔 미정의일 수 있음)
@@ -768,11 +756,11 @@ function _wrapSetTab(){
         try{ window.renderDongmuHome(); }catch(e){ console.error('dongmu render fail', e); }
       }
     }
-    // v12: 房 별 좌상단 과목 아이콘 표시
+    // v12: 房 별 좌상단 과목 아이콘 표시 (v12.1: jxpoker 제외 — 경혈학 內부에서 자체 처리)
     try{
       const ICON_BY_TAB = {
         hub:'', home:'shennong', dongmu:'dongmu', tongue:'dongmu',
-        jingxue:'saamdoin', saamdoin:'saamdoin', jxpoker:'poker',
+        jingxue:'saamdoin', saamdoin:'saamdoin',
         cube:'cube', clinic:'',
       };
       const target = ICON_BY_TAB[name];
