@@ -1,4 +1,4 @@
-/* bangje-cube.js — 方劑Cube (방미큐브) v1.0
+/* bangje-cube.js — 方劑Cube (방미큐브) v1.1
  * 본초 카드 2~4人 멀티 對局 — 루미큐브 룰 + 方劑學
  *  - 손패에서 본초 조합 → 처방(set) 만들어 보드에 출패
  *  - 유효 set = 완성 방제 | 派生方 | 증상별 加減
@@ -13,11 +13,11 @@
 // ──────────────────────────────────────────────────────────────────
 // 0. 상수
 // ──────────────────────────────────────────────────────────────────
-const BC_VER          = '1.0';
-const HAND_4P         = 10;
-const HAND_23P        = 12;
-const PENALTY_DRAW    = 3;
-const TURN_SEC        = 90;
+const BC_VER          = '1.1';
+const HAND_4P         = 4;     // v1.1: 10→4 (4P 對局 약 10분 이하)
+const HAND_23P        = 5;     // v1.1: 12→5 (2~3P 對局 약 6~8분)
+const PENALTY_DRAW    = 2;     // v1.1: 3→2 (페널티 누적 축소)
+const TURN_SEC        = 35;    // v1.1: 90→35 (턴 시간 단축, 4P 對局 worst-case ≤10분)
 const POLL_MS         = 1800;
 const REWARD_WIN      = 80;
 const REWARD_RUNNER   = 20;
