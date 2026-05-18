@@ -4978,28 +4978,130 @@ function renderFormulas(){
       <h2 class="view-title"><span class="han">方</span>처방</h2>
       <div class="card"><div style="text-align:center;padding:24px;font-size:13px;color:var(--gutong)">
         <div class="han" style="font-size:24px;color:var(--zhusha-d);margin-bottom:8px">未充</div>
-        data-formulas.js 에 24 처방 데이터를 넣어주세요.<br>
-        v1.0 의 data-formulas.js 를 그대로 복사하면 됩니다.
+        data-formulas.js 의 FORMULAS 가 필요합니다.
       </div></div>
     `;
     return;
   }
+
+  // v11.5.4: CHAPTER_TAXONOMY 기준으로 大分類·小分類 그룹화
+  // 구조: { mainIdx: [{sub, formulas[]}, ...] }
+  // 같은 main 안에서 sub 가 null 인 처방(서론 등)은 '미분류' 버킷.
+  const grouped = CHAPTER_TAXONOMY.map(main => ({
+    main,
+    bySub: main.subs.map(sub => ({ sub, formulas: [] })),
+    unsorted: [],
+  }));
+  const unmatched = [];
+  formulas.forEach(f => {
+    const tax = getChapterByFormula(f.chapter);
+    if(!tax){ unmatched.push(f); return; }
+    const g = grouped.find(x => x.main === tax.main);
+    if(!g){ unmatched.push(f); return; }
+    if(tax.sub){
+      const subBucket = g.bySub.find(b => b.sub === tax.sub);
+      if(subBucket) subBucket.formulas.push(f);
+      else g.unsorted.push(f);
+    } else {
+      g.unsorted.push(f);
+    }
+  });
+
+  const inScopeCount = formulas.length;
+
+  // 펼침 상태 — localStorage 캐시 (탭 전환 후에도 유지)
+  const openState = JSON.parse(localStorage.getItem('formula.groups.open.v1') || '{}');
+  // 기본: 8장 펼침, 7장 펼침
+  CHAPTER_TAXONOMY.forEach(m => {
+    if(openState[m.main] === undefined) openState[m.main] = true;
+  });
+
+  const groupHtml = grouped.map(g => {
+    const isOpen = openState[g.main.main] !== false;
+    const totalInGroup = g.bySub.reduce((s,b)=>s+b.formulas.length,0) + g.unsorted.length;
+    if(totalInGroup === 0) return '';
+    return `
+      <div class="fm-group" data-main="${esc(g.main.main)}">
+        <button class="fm-group-head" type="button" data-toggle-main="${esc(g.main.main)}">
+          <span class="han fm-group-han">${esc(g.main.mainHan)}</span>
+          <span class="fm-group-ko">${esc(g.main.mainKo)}</span>
+          <span class="fm-group-count">${totalInGroup} 處方</span>
+          <span class="fm-group-caret">${isOpen ? '▾' : '▸'}</span>
+        </button>
+        <div class="fm-group-body" style="display:${isOpen?'block':'none'}">
+          ${g.bySub.map(b => b.formulas.length ? `
+            <div class="fm-sub">
+              <div class="fm-sub-head">
+                <span class="han fm-sub-han">${esc(b.sub.han)}</span>
+                <span class="fm-sub-ko">${esc(b.sub.ko)}</span>
+                <span class="fm-sub-count">${b.formulas.length}</span>
+              </div>
+              <div class="fm-sub-list">
+                ${b.formulas.map(f => fmCardHtml(f)).join('')}
+              </div>
+            </div>
+          ` : '').join('')}
+          ${g.unsorted.length ? `
+            <div class="fm-sub">
+              <div class="fm-sub-head"><span class="fm-sub-ko" style="color:var(--gutong)">미분류</span></div>
+              <div class="fm-sub-list">${g.unsorted.map(f => fmCardHtml(f)).join('')}</div>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  function fmCardHtml(f){
+    return `<button class="card fm-card" type="button" onclick="showFormulaDetail('${esc(f.id)}')">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="han" style="font-size:17px;color:var(--zhusha-d);font-weight:700">${esc(f.han||'')}</span>
+        <span style="font-size:13px;color:var(--mo);font-weight:600">${esc(f.ko||'')}</span>
+      </div>
+      ${f.action?`<div style="font-size:11.5px;color:var(--mo-l);margin-top:3px"><span class="han">${esc(f.action)}</span></div>`:''}
+    </button>`;
+  }
+
   view.innerHTML = `
     <h2 class="view-title"><span class="han">方</span>처방</h2>
-    <div class="view-sub">${formulas.length} 처방</div>
-    <div style="display:flex;flex-direction:column;gap:6px">
-      ${formulas.map(f => `
-        <button class="card" type="button" style="text-align:left;cursor:pointer;width:100%" onclick="showFormulaDetail('${esc(f.id)}')">
-          <div style="display:flex;align-items:center;gap:10px">
-            <span class="han" style="font-size:18px;color:var(--zhusha-d);font-weight:700">${esc(f.han||'')}</span>
-            <span style="font-size:13px;color:var(--mo);font-weight:600">${esc(f.ko||'')}</span>
-            <span style="margin-left:auto;font-size:11px;color:var(--gutong)">${esc(f.chapter||'')}</span>
-          </div>
-          ${f.action?`<div style="font-size:12px;color:var(--mo-l);margin-top:4px"><span class="han">${esc(f.action)}</span></div>`:''}
-        </button>
-      `).join('')}
-    </div>
+    <div class="view-sub">${inScopeCount} 처방 — 시험범위 (補血劑까지)</div>
+    <div class="fm-groups">${groupHtml}</div>
+    ${unmatched.length ? `<div class="card" style="margin-top:8px"><div class="card-title">기타 미분류 (${unmatched.length})</div>${unmatched.map(fmCardHtml).join('')}</div>` : ''}
   `;
+
+  // 동적 스타일
+  if(!document.getElementById('formula-group-style')){
+    const st = document.createElement('style');
+    st.id = 'formula-group-style';
+    st.textContent = `
+      .fm-groups{display:flex;flex-direction:column;gap:10px}
+      .fm-group{background:var(--mi-w);border:1.5px solid var(--gutong);border-radius:10px;overflow:hidden}
+      .fm-group-head{width:100%;background:linear-gradient(180deg,var(--mi-w),var(--mi));border:none;border-bottom:1px solid rgba(135,106,54,.25);padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;font-family:var(--font-display);color:var(--mo);transition:background .12s}
+      .fm-group-head:hover{background:linear-gradient(180deg,var(--mi),var(--mi-w))}
+      .fm-group-han{font-size:18px;font-weight:700;color:var(--zhusha-d)}
+      .fm-group-ko{font-size:13px;font-weight:600;color:var(--mo-l)}
+      .fm-group-count{margin-left:auto;font-size:11px;color:var(--gutong);font-weight:600}
+      .fm-group-caret{font-size:13px;color:var(--gutong);margin-left:6px}
+      .fm-group-body{padding:8px 10px}
+      .fm-sub{margin-bottom:8px}
+      .fm-sub:last-child{margin-bottom:0}
+      .fm-sub-head{display:flex;align-items:center;gap:8px;padding:4px 4px 6px;border-bottom:1px dashed rgba(135,106,54,.3);margin-bottom:6px}
+      .fm-sub-han{font-size:14px;font-weight:700;color:var(--feicui)}
+      .fm-sub-ko{font-size:11.5px;color:var(--mo-l);font-weight:500}
+      .fm-sub-count{margin-left:auto;font-size:10.5px;color:var(--gutong)}
+      .fm-sub-list{display:flex;flex-direction:column;gap:5px}
+      .fm-card{text-align:left;cursor:pointer;width:100%;padding:8px 10px}
+    `;
+    document.head.appendChild(st);
+  }
+
+  // 토글
+  $$('.fm-group-head').forEach(b => b.addEventListener('click', () => {
+    const k = b.dataset.toggleMain;
+    openState[k] = !(openState[k] !== false);
+    localStorage.setItem('formula.groups.open.v1', JSON.stringify(openState));
+    renderFormulas();
+  }));
 }
 
 window.showFormulaDetail = function(fid){
@@ -5054,6 +5156,69 @@ const DIFFICULTY_META = {
 };
 window.DIFFICULTY_META = DIFFICULTY_META;
 
+// ─── 章·分類 體系 (v11.5.4) ─────────────────────────────────────────────
+// FORMULAS.chapter   포맷: '8장 補益劑·補氣'      (한자 '·' 구분)
+// PAST_EXAMS.chapter 포맷: '8-1'                  (숫자 코드)
+// 두 포맷을 잇는 단일 출처. renderFormulas / renderQuiz / startQuizSession 공용.
+// ----------------------------------------------------------------------
+//   code: 기출 chapter 코드 (8-1 등)
+//   formulaPrefix: FORMULAS.chapter 의 시작 부분 (matchByStartsWith)
+//   대분류는 7·8장 (大), 소분류는 그 안의 절 (小).
+const CHAPTER_TAXONOMY = [
+  { main: '7장 表裏雙解劑', mainHan: '表裏雙解劑', mainKo: '표리쌍해제',
+    formulaPrefix: '7장 表裏雙解劑',
+    subs: [
+      { code: '7-0', han: '서론',       ko: '서론',       formulaPrefix: null,
+        desc: '표리쌍해제 총론 (병기·치법)' },
+      { code: '7-1', han: '解表攻裏',   ko: '해표공리',   formulaPrefix: '7장 表裏雙解劑·解表攻裏',
+        desc: '대시호탕·방풍통성산' },
+      { code: '7-2', han: '解表淸裡',   ko: '해표청리',   formulaPrefix: '7장 表裏雙解劑·解表淸裡',
+        desc: '갈근황금황련탕·석고탕' },
+      { code: '7-3', han: '解表溫裏',   ko: '해표온리',   formulaPrefix: '7장 表裏雙解劑·解表溫裏',
+        desc: '오적산·계지인삼탕' },
+    ]
+  },
+  { main: '8장 補益劑', mainHan: '補益劑', mainKo: '보익제',
+    formulaPrefix: '8장 補益劑',
+    subs: [
+      { code: '8-0', han: '서론',     ko: '서론',     formulaPrefix: null,
+        desc: '보익제 총론 (기허·혈허·음허·양허 6분류)' },
+      { code: '8-1', han: '補氣劑',   ko: '보기제',   formulaPrefix: '8장 補益劑·補氣',
+        desc: '사군자탕·보중익기탕·삼령백출산 + 부방' },
+      { code: '8-2', han: '補血劑',   ko: '보혈제',   formulaPrefix: '8장 補益劑·補血',
+        desc: '사물탕·당귀보혈탕 (★시험범위 마지막)' },
+    ]
+  },
+];
+window.CHAPTER_TAXONOMY = CHAPTER_TAXONOMY;
+
+// 헬퍼: 기출 chapter 코드 → taxonomy entry
+function getChapterByCode(code){
+  for(const main of CHAPTER_TAXONOMY){
+    for(const sub of main.subs){
+      if(sub.code === code) return {main, sub};
+    }
+  }
+  return null;
+}
+// 헬퍼: FORMULAS.chapter → {main, sub}
+function getChapterByFormula(fchapter){
+  if(!fchapter) return null;
+  for(const main of CHAPTER_TAXONOMY){
+    for(const sub of main.subs){
+      if(sub.formulaPrefix && fchapter.startsWith(sub.formulaPrefix)){
+        return {main, sub};
+      }
+    }
+    if(fchapter.startsWith(main.formulaPrefix)){
+      return {main, sub: null};
+    }
+  }
+  return null;
+}
+window.getChapterByCode = getChapterByCode;
+window.getChapterByFormula = getChapterByFormula;
+
 function renderQuiz(){
   const pastAll = (typeof PAST_EXAMS !== 'undefined') ? PAST_EXAMS : [];
   const bulkAll = (typeof BULK_QUESTIONS !== 'undefined') ? BULK_QUESTIONS : [];
@@ -5075,15 +5240,59 @@ function renderQuiz(){
   bulkAll.forEach(e => { byDiffNew[e.difficulty||1]  = (byDiffNew[e.difficulty||1]||0)+1; });
   const totalAuto = formulas.length;  // 자동 생성 가능 풀
 
+  // v11.5.4: 章·小分類별 문항 수 — 출제 풀과 동일하게 chapter 코드 기준
+  // sel.chapterCode 가 'all' 이면 전체, '7' 또는 '8' 이면 大分類, '7-1' 등은 小分類
+  const chapterCounts = {};
+  exams.forEach(e => {
+    const ch = e.chapter || '';
+    chapterCounts[ch] = (chapterCounts[ch]||0) + 1;
+    // 大分類 prefix 도 누적
+    const big = ch.split('-')[0];
+    if(big && big !== ch){
+      chapterCounts[big] = (chapterCounts[big]||0) + 1;
+    }
+  });
+  const totalAll = exams.length;
+
   // 현재 선택 상태 (localStorage 캐시)
   const sel = JSON.parse(localStorage.getItem('quiz.sel.v1')||'{}');
   if(!sel.diff)  sel.diff = 1;
   if(!sel.count) sel.count = 5;
   if(!sel.mode)  sel.mode = 'past';   // v2.3: default 'past' (기출만 — v3 자작 제외)
+  if(!sel.chapterCode) sel.chapterCode = 'all';  // v11.5.4
+
+  // 章 선택 칩 HTML 빌더
+  const chapterChipHtml = (code, label, han, count, isActive) => `
+    <button class="ch-chip ${isActive?'on':''}" type="button" data-ch="${esc(code)}">
+      <span class="ch-chip-han han">${esc(han||'')}</span>
+      <span class="ch-chip-ko">${esc(label)}</span>
+      <span class="ch-chip-n">${count}</span>
+    </button>`;
 
   view.innerHTML = `
     <h2 class="view-title"><span class="han">問</span>기출·암기</h2>
-    <div class="view-sub">난이도·문제수를 골라 시작하세요</div>
+    <div class="view-sub">章을 좁히고 난이도·문제수를 골라 시작하세요</div>
+
+    <!-- v11.5.4: 章·小分類 선택 -->
+    <div class="card fade-in">
+      <div class="card-title"><span class="han">章</span> 章·小分類</div>
+      <div class="ch-row">
+        ${chapterChipHtml('all','전체','全',totalAll, sel.chapterCode==='all')}
+        ${CHAPTER_TAXONOMY.map(main => {
+          const bigCode = main.main.charAt(0);  // '7' or '8'
+          const n = chapterCounts[bigCode] || 0;
+          if(!n) return '';
+          return chapterChipHtml(bigCode, main.mainKo, main.mainHan, n, sel.chapterCode===bigCode);
+        }).join('')}
+      </div>
+      <div class="ch-sub-row">
+        ${CHAPTER_TAXONOMY.flatMap(main => main.subs.map(sub => {
+          const n = chapterCounts[sub.code] || 0;
+          if(!n) return '';
+          return chapterChipHtml(sub.code, sub.ko, sub.han, n, sel.chapterCode===sub.code);
+        })).filter(Boolean).join('')}
+      </div>
+    </div>
 
     <!-- 난이도 선택 -->
     <div class="card imperial fade-in">
@@ -5170,11 +5379,26 @@ function renderQuiz(){
       .mode-btn:hover{transform:translateY(-1px)}
       .mode-btn.on{background:var(--feicui);color:var(--mi-w);border-color:var(--feicui)}
       .mode-btn .hint{font-size:10.5px;opacity:.7;font-weight:400}
+      /* v11.5.4 章 선택 칩 */
+      .ch-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+      .ch-sub-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(135,106,54,.3)}
+      .ch-chip{background:var(--mi-w);border:1.5px solid var(--gutong);border-radius:18px;padding:5px 10px;cursor:pointer;font-size:11.5px;display:inline-flex;align-items:center;gap:5px;color:var(--mo);transition:all .12s;font-family:var(--font-display)}
+      .ch-chip:hover{transform:translateY(-1px);border-color:var(--zhusha)}
+      .ch-chip.on{background:var(--zhusha);color:var(--mi-w);border-color:var(--zhusha)}
+      .ch-chip-han{font-size:13px;font-weight:700;color:var(--zhusha-d)}
+      .ch-chip.on .ch-chip-han{color:var(--mi-w)}
+      .ch-chip-ko{font-weight:600}
+      .ch-chip-n{font-size:10px;color:var(--gutong);background:rgba(135,106,54,.15);border-radius:8px;padding:1px 5px;font-weight:600}
+      .ch-chip.on .ch-chip-n{color:var(--mi-w);background:rgba(255,255,255,.2)}
     `;
     document.head.appendChild(st);
   }
 
   // 이벤트
+  $$('.ch-chip').forEach(b => b.addEventListener('click', () => {
+    sel.chapterCode = b.dataset.ch;
+    localStorage.setItem('quiz.sel.v1', JSON.stringify(sel)); renderQuiz();
+  }));
   $$('.diff-btn').forEach(b => b.addEventListener('click', () => {
     sel.diff = +b.dataset.d; localStorage.setItem('quiz.sel.v1', JSON.stringify(sel)); renderQuiz();
   }));
@@ -5185,7 +5409,12 @@ function renderQuiz(){
     sel.mode = b.dataset.m; localStorage.setItem('quiz.sel.v1', JSON.stringify(sel)); renderQuiz();
   }));
   $('#quiz-start-btn').addEventListener('click', () => {
-    startQuizSession(sel.mode, sel.diff, sel.count);
+    // v11.5.4: 章·小分類 필터 — 'all' 이면 미적용, '7'/'8' 大分類는 prefix, '7-1' 등은 정확매칭
+    const opts = {};
+    if(sel.chapterCode && sel.chapterCode !== 'all'){
+      opts.chapterCode = sel.chapterCode;
+    }
+    startQuizSession(sel.mode, sel.diff, sel.count, opts);
   });
 }
 
@@ -5198,10 +5427,24 @@ window.startQuizSession = function(mode, diff, count, opts){
   const bulkAll = (typeof BULK_QUESTIONS !== 'undefined') ? BULK_QUESTIONS : [];
 
   // v4: chapter 또는 formulaIds 필터 — 약점 章/처방 집중 학습용
+  // v11.5.4: chapterCode 필터 추가 — '7'·'8' 大分類는 prefix, '7-1' 등 小分類는 정확매칭
   const filterByOpts = (arr) => {
     let r = arr;
     if(opts.chapter){
       r = r.filter(e => e.chapter === opts.chapter);
+    }
+    if(opts.chapterCode){
+      const cc = opts.chapterCode;
+      if(cc.indexOf('-') >= 0){
+        // 小分類: 정확 매칭
+        r = r.filter(e => (e.chapter||'') === cc);
+      } else {
+        // 大分類: '7-' 또는 '8-' 으로 시작 (서론 '7-0' 도 포함)
+        r = r.filter(e => {
+          const ch = e.chapter || '';
+          return ch === cc || ch.startsWith(cc + '-');
+        });
+      }
     }
     if(opts.formulaIds && opts.formulaIds.length){
       const idset = new Set(opts.formulaIds);
@@ -6833,9 +7076,22 @@ function generateQuizQuestions(n, diff, opts){
   const herbs       = (typeof HERBS    !== 'undefined') ? HERBS    : [];
   if(!allFormulas.length) return [];
   // v4: 필터링된 처방 풀 (chapter 또는 formulaIds 제한 시)
+  // v11.5.4: chapterCode (기출 코드체계 '7-1'/'8-2' 등) 도 지원 → FORMULAS.chapter 매칭으로 변환
   let formulas = allFormulas;
   if(opts.chapter){
     formulas = allFormulas.filter(f => f.chapter === opts.chapter);
+  } else if(opts.chapterCode){
+    const cc = opts.chapterCode;
+    const tax = (typeof getChapterByCode === 'function') ? getChapterByCode(cc) : null;
+    if(tax){
+      const subPref = tax.sub && tax.sub.formulaPrefix;
+      const mainPref = tax.main && tax.main.formulaPrefix;
+      if(cc.indexOf('-') >= 0 && subPref){
+        formulas = allFormulas.filter(f => (f.chapter||'').startsWith(subPref));
+      } else if(mainPref){
+        formulas = allFormulas.filter(f => (f.chapter||'').startsWith(mainPref));
+      }
+    }
   } else if(opts.formulaIds && opts.formulaIds.length){
     const idset = new Set(opts.formulaIds);
     formulas = allFormulas.filter(f => idset.has(f.id));
