@@ -189,9 +189,22 @@ function openHome(){
       </div>
       <div class="saam-tool-row">
         <button class="saam-tool-btn" type="button" id="saam-single"><span class="ic">獨</span>싱글 레이스<div class="lb">혼자 기록 도전</div></button>
-        <button class="saam-tool-btn" type="button" id="saam-multi"><span class="ic">群</span>멀티 對決<div class="lb">최대 4인 동시</div></button>
+        <button class="saam-tool-btn" type="button" id="saam-multi"><span class="ic">群</span>公開 對決<div class="lb">자동 매칭 입장</div></button>
       </div>
     </div>
+    <!-- v12.1: 經穴 포커 NEW 버튼 — 경혈학 內부 진입점 -->
+    <div class="saam-card" id="saam-poker-card" style="position:relative;background:linear-gradient(135deg,#FFF8E0,#FFE5C0);border:1px solid #D4AF37;box-shadow:0 0 0 1px #D4AF37 inset">
+      <span style="position:absolute;top:8px;right:10px;background:linear-gradient(135deg,#FF6B35,#E55934);color:#fff;font-size:10px;font-weight:700;padding:3px 9px;border-radius:10px;letter-spacing:1px;box-shadow:0 2px 6px rgba(229,89,52,.5);animation:saamNewPulse 1.6s ease-in-out infinite">NEW</span>
+      <div class="saam-card-title" style="color:#7C5810">經穴 포커</div>
+      <div style="font-size:12px;color:var(--mo-l);margin-bottom:9px;line-height:1.5">
+        361穴 카드 덱 124장 · 14단계 족보 (★ 表裏原絡·募兪相應·六腑下合·聖手鍼經 학술 보너스) · 최대 8人 멀티 + AI 봇.
+        <br>모드: <b>五札引換</b>(드로우) · <b>七札對局</b>(세븐) · <b>德州式</b>(홀덤) · <b>隨機</b>(랜덤).
+      </div>
+      <div class="saam-tool-row">
+        <button class="saam-tool-btn" type="button" id="saam-poker" style="border-color:#D4AF37;color:#7C5810"><span class="ic">卦</span>經穴 포커<div class="lb">14단계 족보 · 公開房</div></button>
+      </div>
+    </div>
+    <style>@keyframes saamNewPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}</style>
     <div class="saam-card">
       <div class="saam-card-title">모드 선택</div>
       <div class="saam-mode-row">
@@ -232,7 +245,14 @@ function openHome(){
   const def = $$('.saam-mode-btn').find(b => b.dataset.mode === pickedMode);
   if(def) def.style.boxShadow = '0 0 0 3px rgba(58,106,74,.4)';
   $('#saam-single').addEventListener('click', () => openSingle(pickedMode));
-  $('#saam-multi').addEventListener('click', () => openMultiLobby(pickedMode));
+  $('#saam-multi').addEventListener('click', () => _openAutoPublicMatch(pickedMode));
+  // v12.1: 經穴 포커 진입 — jxpoker 라우트 (V12JxPoker.open)
+  const pokerBtn = $('#saam-poker');
+  if(pokerBtn) pokerBtn.addEventListener('click', () => {
+    if(typeof window.setTab === 'function') window.setTab('jxpoker');
+    else if(window.V12JxPoker && window.V12JxPoker.open) window.V12JxPoker.open();
+    else toast('經穴포커 모듈 미로드','warn');
+  });
 }
 
 // ─── 게임 세션 빌드 ────────────────────────────────────────────────────
@@ -467,6 +487,83 @@ function _myChar(){ return (window.S && window.S.character) || 'huatuo'; }
 function _hasFB(){ return !!(window.FB && window.FB.put && window.FB.get && window.FB.subscribe); }
 
 function openMultiLobby(modeId){
+  // v12.1: openMultiLobby 는 호환용으로 보존 (외부 호출 가능). 기본 경로는 _openAutoPublicMatch.
+  return _openAutoPublicMatch(modeId);
+}
+
+// v12.1: 다른 멀티(방미큐브·방제대결)처럼 公開 자동 매칭.
+//   1) 같은 모드의 waiting/lobby 방이 있으면 즉시 합류 (가장 최근 + 滿員 아닌 것)
+//   2) 없으면 새 방 자동 생성 → 다른 사람을 대기
+//   3) 호스트는 30초 후 인원 부족이면 AI 봇으로 채워서 시작 (옵션)
+async function _openAutoPublicMatch(modeId){
+  const view = document.getElementById('view');
+  if(!view) return;
+  const modeMeta = MODE_BY_ID[modeId] || MODES[0];
+  // 매칭 중 화면
+  view.innerHTML = _styles() + `
+    <div class="saam-banner">
+      <div class="saam-banner-medal">${_medal('saamdoin', 60)}</div>
+      <div>
+        <div class="saam-banner-title">五輸穴 · 公開 對決</div>
+        <div class="saam-banner-sub">${esc(modeMeta.han)} · 자동 매칭 중…</div>
+      </div>
+      <button class="saam-back" type="button" id="saam-back">取消</button>
+    </div>
+    <div class="saam-card" style="text-align:center;padding:32px 16px">
+      <div style="font-family:'ZCOOL XiaoWei',serif;font-size:24px;color:#3A6A4A;margin-bottom:12px">尋對手中…</div>
+      <div style="font-size:13px;color:var(--mo-l);margin-bottom:16px">참가 가능한 방을 찾고 있습니다</div>
+      <div class="saam-spin" style="width:48px;height:48px;border:3px solid #D8C9A0;border-top-color:#3A6A4A;border-radius:50%;margin:0 auto;animation:saamSpin 0.9s linear infinite"></div>
+      <div style="margin-top:14px;font-size:11px;color:#888" id="saam-match-status">서버 조회 중…</div>
+    </div>
+    <style>@keyframes saamSpin{to{transform:rotate(360deg)}}</style>
+  `;
+  let cancelled = false;
+  $('#saam-back').addEventListener('click', () => { cancelled = true; openHome(); });
+
+  if(!_hasFB()){
+    $('#saam-match-status').textContent = '서버 연결 없음 — 싱글 모드로 진행하세요';
+    toast('서버 미연결 — 싱글로 폴백','warn');
+    setTimeout(() => { if(!cancelled) openSingle(modeId); }, 1200);
+    return;
+  }
+
+  try{
+    // 1) 동일 모드의 lobby 상태 방 찾기 — 최근 5분 이내, 만원 아닌 것
+    const all = (await window.FB.get('saam_rooms')) || {};
+    const candidates = Object.keys(all).map(k => ({ id:k, ...all[k] }))
+      .filter(r => r && r.mode === modeId && r.status === 'lobby'
+                && (Date.now() - (r.createdAt||0)) < 5*60*1000
+                && Object.keys(r.players||{}).length < MAX_PLAYERS
+                && !r.players[_myId()])   // 내가 이미 들어간 방은 제외
+      .sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+
+    if(cancelled) return;
+
+    if(candidates.length > 0){
+      // 가장 최근 방에 자동 합류
+      const target = candidates[0];
+      $('#saam-match-status').textContent = `對手 ${Object.keys(target.players||{}).length}人 발견 → 합류 중…`;
+      await new Promise(r => setTimeout(r, 600));
+      if(cancelled) return;
+      _joinRoom(target.id);
+      return;
+    }
+
+    // 2) 없으면 새 방 자동 생성 (公開 방)
+    $('#saam-match-status').textContent = '對手 없음 — 새 방 개설 → 대기 중…';
+    await new Promise(r => setTimeout(r, 500));
+    if(cancelled) return;
+    const name = `${_myName()}의 公開房 · ${modeMeta.han}`;
+    _createRoom(name, modeId);
+  }catch(e){
+    console.error('auto match fail', e);
+    $('#saam-match-status').textContent = '매칭 실패 — 다시 시도';
+    toast('매칭 실패','warn');
+    setTimeout(() => { if(!cancelled) openHome(); }, 1400);
+  }
+}
+
+function _openMultiLobby_LEGACY(modeId){
   const view = document.getElementById('view');
   if(!view) return;
   view.innerHTML = _styles() + `

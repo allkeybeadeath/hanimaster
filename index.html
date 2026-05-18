@@ -1419,6 +1419,12 @@ body.on-saam   .nav-btn.active::after{background:#3A6A4A !important;}
 <script src="bangje-cube.js"></script>
 <script src="app.js"></script>
 
+<!-- v12.1: V12Intro (이스터에그 + _charPhotoMedallion 후킹) — app.js 직후 로드해야
+     이후 렌더되는 모든 메달리온에 후킹 적용됨 (의서궁·진단학·경혈학·매치 컨펌 전부) -->
+<script src="data-jingxue-poker.js"></script>
+<script src="bangje-v12-multi-intro.js"></script>
+<script src="bangje-v12-jingxue-poker.js"></script>
+
 <!-- v9.7 業績 추적 + 시그니처 효과 + 프로필 UI (app 이후 로드, S/saveState/toast 의존) -->
 <script src="bangje-v97-signatures.js"></script>
 <script src="bangje-v97-achievements.js"></script>
@@ -1469,14 +1475,7 @@ body.on-saam   .nav-btn.active::after{background:#3A6A4A !important;}
 <script src="data-essay-exams.js"></script>
 <script src="bangje-v11-6-1-essay-flash.js"></script>
 
-<!-- ═══════════════════════════════════════════════════════════════════════
-     v12.0 — 經穴 포커 + 멀티 컷 統一 + 八房 학과 재편
-     로드 순서: data → multi-intro (먼저) → poker game (이후)
-     bangje-v11-clinic-hub.js 는 위에서 이미 로드됨 (SUBJECTS v12 반영 + jxpoker 라우트)
-═══════════════════════════════════════════════════════════════════════ -->
-<script src="data-jingxue-poker.js"></script>
-<script src="bangje-v12-multi-intro.js"></script>
-<script src="bangje-v12-jingxue-poker.js"></script>
+<!-- v12.1: V12 모듈 로드는 app.js 직후로 옮겨짐 (이스터에그 후킹을 일찍 설치하기 위해) -->
 
 <!-- 서비스 워커 v11.6: 자동 업데이트 감지 + skipWaiting -->
 <script>
