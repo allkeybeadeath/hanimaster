@@ -705,9 +705,16 @@ async function _sendFeedback(){
 function _registerRoutes(){
   if(window.ROUTES){
     window.ROUTES.hub    = renderClinicHub;
-    // v11.6.1 FIX: renderDongmuHome 는 jindan 모듈이 더 늦게 로드되므로 fallback 처리.
-    //   이 함수가 여러 시점에 재호출되므로 jindan 로드 후 정확한 함수가 잡힘.
     window.ROUTES.dongmu = (window.renderDongmuHome || renderClinicHub);
+    // v12: 경혈포커 라우트 — V12JxPoker.open()
+    window.ROUTES.jxpoker = function(){
+      if(window.V12JxPoker && window.V12JxPoker.open){
+        try{ if(window.V12Intro && window.V12Intro.setSubjectIcon) window.V12Intro.setSubjectIcon('poker'); }catch(_){}
+        window.V12JxPoker.open();
+      } else {
+        toast('經穴포커 모듈 로드 실패','warn');
+      }
+    };
   }
 }
 // v11.6.1 FIX: jindan 로드 완료 후 dongmu 라우트 재등록 (초기 _init 시점엔 미정의일 수 있음)
@@ -761,6 +768,19 @@ function _wrapSetTab(){
         try{ window.renderDongmuHome(); }catch(e){ console.error('dongmu render fail', e); }
       }
     }
+    // v12: 房 별 좌상단 과목 아이콘 표시
+    try{
+      const ICON_BY_TAB = {
+        hub:'', home:'shennong', dongmu:'dongmu', tongue:'dongmu',
+        jingxue:'saamdoin', saamdoin:'saamdoin', jxpoker:'poker',
+        cube:'cube', clinic:'',
+      };
+      const target = ICON_BY_TAB[name];
+      if(window.V12Intro && window.V12Intro.setSubjectIcon){
+        if(target) window.V12Intro.setSubjectIcon(target);
+        else if(window.V12Intro.removeSubjectIcon) window.V12Intro.removeSubjectIcon();
+      }
+    }catch(_){}
     // v11.6: 의서궁 진입 시 본인 presence 즉시 push (label 갱신을 다른 사람도 빨리 보도록)
     if(name === 'hub'){
       try{ if(typeof window.recordPresence === 'function') window.recordPresence(); }catch(_){}

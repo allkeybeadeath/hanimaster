@@ -1417,16 +1417,7 @@ body.on-saam   .nav-btn.active::after{background:#3A6A4A !important;}
 <script src="bangje-v96-part5.js"></script>
 
 <script src="bangje-cube.js"></script>
-  <!-- v12.0: 經穴 포커 + 멀티 시작 컷 공통 -->
-  <script src="data-jingxue-poker.js"></script>
-  <script src="bangje-v12-multi-intro.js"></script>
-  <script src="bangje-v12-jingxue-poker.js"></script>
-
-  <!-- v12.0 신규 모듈 -->
-  <script src="data-jingxue-poker.js"></script>
-  <script src="bangje-v12-multi-intro.js"></script>
-  <script src="bangje-v12-jingxue-poker.js"></script>
-  <script src="app.js"></script>
+<script src="app.js"></script>
 
 <!-- v9.7 業績 추적 + 시그니처 효과 + 프로필 UI (app 이후 로드, S/saveState/toast 의존) -->
 <script src="bangje-v97-signatures.js"></script>
@@ -1477,6 +1468,15 @@ body.on-saam   .nav-btn.active::after{background:#3A6A4A !important;}
 <!-- v11.6.1: 서술형 기출 플래시카드 (22·21·20·19·18학번 4년치, 시험범위 보혈제까지) -->
 <script src="data-essay-exams.js"></script>
 <script src="bangje-v11-6-1-essay-flash.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     v12.0 — 經穴 포커 + 멀티 컷 統一 + 八房 학과 재편
+     로드 순서: data → multi-intro (먼저) → poker game (이후)
+     bangje-v11-clinic-hub.js 는 위에서 이미 로드됨 (SUBJECTS v12 반영 + jxpoker 라우트)
+═══════════════════════════════════════════════════════════════════════ -->
+<script src="data-jingxue-poker.js"></script>
+<script src="bangje-v12-multi-intro.js"></script>
+<script src="bangje-v12-jingxue-poker.js"></script>
 
 <!-- 서비스 워커 v11.6: 자동 업데이트 감지 + skipWaiting -->
 <script>

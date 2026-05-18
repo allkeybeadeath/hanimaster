@@ -506,12 +506,7 @@ function _charPhotoMedallion(charOrId, size){
   const c = (typeof charOrId === 'string') ? PHYSICIAN_BY_ID[charOrId] : charOrId;
   if(!c) return _charMedallion(charOrId, size);
   const imgs = (typeof CHARACTER_IMAGES !== 'undefined') ? CHARACTER_IMAGES : {};
-  let meta = imgs[c.id];
-  // v12.0: 이스터에그 — 인도인(lindaoren)·오우가(wuyouke) 1/10 확률 사진 교체
-  if(typeof window.V12MultiIntro !== 'undefined' && window.V12MultiIntro.applyEasterEgg){
-    const ee = window.V12MultiIntro.applyEasterEgg(c);
-    if(ee && ee.photo){ meta = {url: ee.photo, fallback: '', caption: '???'}; }
-  }
+  const meta = imgs[c.id];
   if(!meta || !meta.url) return _charMedallion(c, size);
   // 메달리온을 안쪽에 깔고 사진을 위에 덮음.
   const showName = size >= 80;
@@ -3052,6 +3047,14 @@ async function renderMatchConfirmation(roomId, isCreator){
   const oppChar = (typeof PHYSICIAN_BY_ID !== 'undefined' && PHYSICIAN_BY_ID[opp.character]) || (typeof PHYSICIANS !== 'undefined' ? PHYSICIANS[0] : {han:'?', ko:'?'});
   const lvlInfo = (typeof BET_LEVELS !== 'undefined') ? BET_LEVELS.find(l => l.id === room.level) : null;
 
+  // v12: V12Intro.charPhoto 사용 (이스터에그 1/10 확률 lindaoren→간디, wuyouke→오우거)
+  const renderMedal = (char) => {
+    if(window.V12Intro && window.V12Intro.charPhoto) return window.V12Intro.charPhoto(char, 110);
+    return _charPhotoMedallion(char, 110);
+  };
+  const meDisp = (window.V12Intro && window.V12Intro.eggNameOverride && window.V12Intro.eggNameOverride(me.character)) || { ko: meChar.ko, han: meChar.han };
+  const oppDisp = (window.V12Intro && window.V12Intro.eggNameOverride && window.V12Intro.eggNameOverride(opp.character)) || { ko: oppChar.ko, han: oppChar.han };
+
   view.innerHTML = `
     <div class="match-confirm fade-in">
       <h2 class="view-title"><span class="han">遇</span>對手出現</h2>
@@ -3062,15 +3065,15 @@ async function renderMatchConfirmation(roomId, isCreator){
 
       <div class="match-confirm-vs">
         <div class="match-confirm-side is-me">
-          ${(window.V12Intro && window.V12Intro.charPhoto ? window.V12Intro.charPhoto(meChar, 110) : _charPhotoMedallion(meChar, 110))}
+          ${renderMedal(meChar)}
           <div class="name">${esc(me.name||'')}</div>
-          <div class="charname han">${esc(meChar.han||'')}</div>
+          <div class="charname han">${esc(meDisp.han||meChar.han||'')}</div>
         </div>
         <div class="match-confirm-vs-han han">對</div>
         <div class="match-confirm-side is-opp">
-          ${(window.V12Intro && window.V12Intro.charPhoto ? window.V12Intro.charPhoto(oppChar, 110) : _charPhotoMedallion(oppChar, 110))}
+          ${renderMedal(oppChar)}
           <div class="name">${esc(opp.name||'')}</div>
-          <div class="charname han">${esc(oppChar.han||'')}</div>
+          <div class="charname han">${esc(oppDisp.han||oppChar.han||'')}</div>
         </div>
       </div>
 

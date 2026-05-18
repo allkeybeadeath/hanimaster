@@ -1,5 +1,4 @@
-/* bangje-v11-jingxue-race.js — 경혈학 (舍巖之房) 오수혈 레이스 v2.0 (v12.0)
- * v12.0 변경: 公開房 모드 추가 — 모르는 사용자와 매칭 가능
+/* bangje-v11-jingxue-race.js — 경혈학 (舍巖之房) 오수혈 레이스 v1.0 (v11.6)
  * ============================================================================
  *  사암지방 첫 모드: 五輸穴 레이스.
  *
@@ -309,8 +308,12 @@ function renderSaamdoinHome(){
         <div class="sx-mode-ko">싱글 · 15 경맥 完走 · 對 AI 3봇</div>
       </button>
       <button class="sx-mode-btn" type="button" data-mode="multi">
-        <div class="sx-mode-han">對決</div>
-        <div class="sx-mode-ko">2~4인 멀티</div>
+        <div class="sx-mode-han">對決 · 公開房 / 私房</div>
+        <div class="sx-mode-ko">2~4인 멀티 · v12 신규</div>
+      </button>
+      <button class="sx-mode-btn" type="button" data-mode="poker" style="position:relative">
+        <div class="sx-mode-han">經穴 포커 <span style="background:linear-gradient(135deg,#FF6B35,#E55934);color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;margin-left:6px">NEW</span></div>
+        <div class="sx-mode-ko">361穴 카드 · 14단계 족보 · 최대 8人</div>
       </button>
       <button class="sx-mode-btn" type="button" data-mode="learn">
         <div class="sx-mode-han">習穴</div>
@@ -332,6 +335,7 @@ function renderSaamdoinHome(){
       const m = b.dataset.mode;
       if(m === 'solo')       openRaceSolo();
       else if(m === 'multi') openMulti();
+      else if(m === 'poker') { if(window.setTab) window.setTab('jxpoker'); else if(window.V12JxPoker) window.V12JxPoker.open(); }
       else if(m === 'learn') openLearn();
     });
   });
@@ -795,33 +799,218 @@ function openLearn(){
 //    각 플레이어 인덱스(idx)와 finished 만 동기화. 카드는 호스트가 생성·broadcast.
 //    Firebase 룰 추가 필요: jingxue_rooms (cube_rooms 와 동일 구조).
 // ════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+// v12.0 · 오수혈 레이스 멀티 (公開房 + 私房)
+// ════════════════════════════════════════════════════════════════════
+const RACE_FB_NODE = 'jingxue_race_rooms';
+const RACE_POLL_MS = 1500;
+
+function _raceMyUid(){ return (window.S && window.S.userId) || null; }
+function _raceMyName(){ return (window.S && window.S.name) || '醫家'; }
+function _raceMyChar(){ return (window.S && window.S.character) || 'saamdoin'; }
+function _raceCode(){ return Math.random().toString(36).slice(2,6).toUpperCase(); }
+
+async function _raceCreateRoom(opts){
+  const FB = window.FB;
+  if(!FB || !_raceMyUid()) return null;
+  opts = Object.assign({ isPublic:true, maxPlayers:4 }, opts);
+  const rid = _raceCode();
+  const room = {
+    roomId: rid, status:'waiting', hostId:_raceMyUid(),
+    name: opts.name || `${_raceMyName()}의 五輸穴 對決`,
+    isPublic: !!opts.isPublic, createdAt: Date.now(),
+    maxPlayers: Math.min(4, Math.max(2, opts.maxPlayers||4)),
+    players: { [_raceMyUid()]: {
+      name:_raceMyName(), character:_raceMyChar(),
+      isHost:true, isReady:true, joinedAt:Date.now(), idx:0, finished:false,
+    }},
+  };
+  const ok = await FB.put(`${RACE_FB_NODE}/${rid}`, room);
+  return ok ? rid : null;
+}
+
+async function _raceJoinRoom(rid){
+  const FB = window.FB;
+  if(!FB || !_raceMyUid()) return {ok:false, msg:'네트워크 없음'};
+  rid = String(rid||'').toUpperCase().trim();
+  const room = await FB.get(`${RACE_FB_NODE}/${rid}`);
+  if(!room) return {ok:false, msg:'방 없음'};
+  if(room.status !== 'waiting') return {ok:false, msg:'이미 시작'};
+  const ps = room.players || {};
+  if(ps[_raceMyUid()]) return {ok:true, roomId:rid, rejoin:true};
+  if(Object.keys(ps).length >= room.maxPlayers) return {ok:false, msg:'가득 참'};
+  await FB.put(`${RACE_FB_NODE}/${rid}/players/${_raceMyUid()}`, {
+    name:_raceMyName(), character:_raceMyChar(),
+    isHost:false, isReady:false, joinedAt:Date.now(), idx:0, finished:false,
+  });
+  return {ok:true, roomId:rid};
+}
+
+async function _raceListPublic(){
+  const FB = window.FB;
+  if(!FB) return [];
+  const all = await FB.get(RACE_FB_NODE);
+  if(!all) return [];
+  return Object.values(all).filter(r => r && r.isPublic && r.status === 'waiting');
+}
+
+function _openPublicLobby(){
+  const view = document.getElementById('view');
+  if(!view) return;
+  view.innerHTML = _baseStyles() + _bannerHTML() + `
+    <style>
+      .race-lobby{padding:12px 16px}
+      .race-lobby h3{font-family:'ZCOOL XiaoWei',serif;color:#1F3F2C;font-size:18px;margin:14px 0 8px}
+      .race-room-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+      .race-room{padding:12px;background:#fff;border:1px solid #D8C9A0;border-radius:8px;cursor:pointer;transition:transform .15s}
+      .race-room:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(58,106,74,0.2)}
+      .race-room .han{font-family:'ZCOOL XiaoWei',serif;font-size:15px;color:#1F3F2C;font-weight:600}
+      .race-room .meta{font-size:11px;color:#888;margin-top:4px}
+      .race-empty{padding:20px;text-align:center;color:#888;background:#FAF6EC;border-radius:8px}
+    </style>
+    <div class="race-lobby">
+      <h3>五輸穴 레이스 · 公開房</h3>
+      <div style="font-size:12px;color:#666;margin-bottom:10px">v12.0 — 모르는 사용자와 자동 매칭 또는 직접 입장</div>
+
+      <div class="sx-actions">
+        <button class="btn btn-gold" id="race-create-public" type="button">公開房 만들기</button>
+        <button class="btn" id="race-create-private" type="button">私房 만들기 (코드)</button>
+        <button class="btn" id="race-join-code" type="button">코드로 입장</button>
+        <button class="btn" id="race-refresh" type="button">↻ 새로고침</button>
+      </div>
+
+      <h3 style="margin-top:14px">현재 모집 중인 公開房</h3>
+      <div class="race-room-list" id="race-room-list">
+        <div class="race-empty">불러오는 중…</div>
+      </div>
+
+      <div style="margin-top:14px">
+        <button class="btn btn-o" id="race-solo-fallback" type="button">대신 싱글로 (對 AI 3봇)</button>
+        <button class="btn btn-o" id="race-multi-back" type="button">← 舍巖之房</button>
+      </div>
+    </div>
+  `;
+  _attachBanner();
+  document.getElementById('race-multi-back').addEventListener('click', renderSaamdoinHome);
+  document.getElementById('race-solo-fallback').addEventListener('click', () => openRaceSolo());
+  document.getElementById('race-refresh').addEventListener('click', _refreshPublicList);
+  document.getElementById('race-create-public').addEventListener('click', async () => {
+    const rid = await _raceCreateRoom({ isPublic:true });
+    if(rid) _openRaceRoom(rid); else toast('방 생성 실패','warn');
+  });
+  document.getElementById('race-create-private').addEventListener('click', async () => {
+    const rid = await _raceCreateRoom({ isPublic:false });
+    if(rid){
+      alert(`방 코드: ${rid}\n친구에게 이 코드를 알려주세요.`);
+      _openRaceRoom(rid);
+    } else toast('방 생성 실패','warn');
+  });
+  document.getElementById('race-join-code').addEventListener('click', async () => {
+    const code = prompt('방 코드 (4자)');
+    if(!code) return;
+    const r = await _raceJoinRoom(code);
+    if(r.ok) _openRaceRoom(r.roomId);
+    else toast(r.msg, 'warn');
+  });
+  _refreshPublicList();
+}
+
+async function _refreshPublicList(){
+  const list = document.getElementById('race-room-list');
+  if(!list) return;
+  list.innerHTML = '<div class="race-empty">불러오는 중…</div>';
+  const rooms = await _raceListPublic();
+  if(!rooms.length){
+    list.innerHTML = '<div class="race-empty">현재 公開房이 없습니다 — 만들어서 호스팅하세요</div>';
+    return;
+  }
+  list.innerHTML = rooms.map(r => {
+    const n = Object.keys(r.players||{}).length;
+    return `<div class="race-room" data-rid="${r.roomId}">
+      <div class="han">${(r.name||'').replace(/[<>&"]/g, '')}</div>
+      <div class="meta">${n}/${r.maxPlayers}人 · 호스트: ${(r.players && Object.values(r.players).find(p=>p.isHost) || {}).name || '?'}</div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.race-room').forEach(el => el.addEventListener('click', async () => {
+    const rid = el.dataset.rid;
+    const r = await _raceJoinRoom(rid);
+    if(r.ok) _openRaceRoom(r.roomId);
+    else toast(r.msg, 'warn');
+  }));
+}
+
+function _openRaceRoom(rid){
+  const view = document.getElementById('view');
+  if(!view) return;
+  let timer = null;
+  const render = (room) => {
+    if(!room){ view.innerHTML = '<div class="race-empty">방이 사라졌습니다.</div>'; return; }
+    const ps = room.players || {};
+    const isHost = room.hostId === _raceMyUid();
+    const players = Object.entries(ps).map(([uid,p]) => ({ id:uid, name:p.name, character:p.character, isMe:uid===_raceMyUid() }));
+    view.innerHTML = _baseStyles() + _bannerHTML() + `
+      <div style="padding:14px 16px">
+        <h3 class="han" style="color:#1F3F2C">방 · ${rid} ${room.isPublic?'(公開)':'(私房)'}</h3>
+        <div style="margin:10px 0">${players.map(p=>`
+          <div style="display:flex;align-items:center;gap:10px;padding:8px;background:#fff;border-radius:8px;margin-bottom:6px;border:1px solid #D8C9A0">
+            ${_medal(p.character, 36)}
+            <div style="flex:1">
+              <div style="font-weight:600">${(p.name||'').replace(/[<>&"]/g,'')}${p.isMe?' <small style="color:#C9A227">(나)</small>':''}</div>
+              <div style="font-size:10px;color:#888">${p.character||''}</div>
+            </div>
+          </div>`).join('')}
+        </div>
+        <div class="sx-actions">
+          ${isHost ? `<button class="btn btn-gold" id="race-start" type="button">對局 시작 (${Object.keys(ps).length}人)</button>` : '<div style="color:#666;font-size:12px;padding:8px">호스트가 시작하기를 기다리는 중…</div>'}
+          <button class="btn btn-o" id="race-leave" type="button">방 나가기</button>
+        </div>
+      </div>
+    `;
+    if(isHost){
+      document.getElementById('race-start').addEventListener('click', () => {
+        clearInterval(timer);
+        // V12Intro 컷 표시 → 끝나면 솔로 레이스로 진입 (모든 참여자가 같은 카드 시퀀스 — 일단 싱글 fallback)
+        if(window.V12Intro && window.V12Intro.show){
+          window.V12Intro.show({
+            gameLabel:'五輸穴 레이스', subLabel:'멀티 對局',
+            han:'走', players,
+            startLabel:'始走', waitText:'시작 신호를 보냈습니다',
+            onStart:()=>{
+              window.V12Intro.hide && window.V12Intro.hide();
+              openRaceSolo();   // TODO: 다음 빌드에서 실제 멀티 동기화 (Firebase polling)
+            },
+          });
+        } else openRaceSolo();
+      });
+    }
+    document.getElementById('race-leave').addEventListener('click', async () => {
+      clearInterval(timer);
+      try{
+        const FB = window.FB;
+        if(isHost) await FB.put(`${RACE_FB_NODE}/${rid}/status`, 'closed');
+        else await FB.put(`${RACE_FB_NODE}/${rid}/players/${_raceMyUid()}`, null);
+      }catch(_){}
+      _openPublicLobby();
+    });
+  };
+  const poll = async () => {
+    const FB = window.FB;
+    if(!FB) return;
+    const room = await FB.get(`${RACE_FB_NODE}/${rid}`);
+    render(room);
+  };
+  poll();
+  timer = setInterval(poll, RACE_POLL_MS);
+}
+
 function openMulti(){
   const FB = window.FB;
   if(!FB || !FB.get || !FB.put){
     toast('Firebase 미연결 — 멀티는 온라인 상태에서만','warn');
     return;
   }
-  const view = document.getElementById('view');
-  if(!view) return;
   try{ if(typeof window.setHeaderContext === 'function') window.setHeaderContext('saamdoin'); }catch(_){}
-  view.innerHTML = _baseStyles() + _bannerHTML() + `
-    <div class="sx-info" style="line-height:1.8">
-      <div style="font-family:'Noto Serif SC',serif;font-size:14px;color:#1F3F2C;margin-bottom:6px"><b>對決 (멀티)</b></div>
-      <div>v1.0 (v11.6) — 멀티는 다음 빌드에서 정식 출시 예정입니다.</div>
-      <div>현재 빌드: 싱글 (對 AI 3봇) 모드만 지원. 동일 알고리즘·카드 풀로 학습 효율 동일.</div>
-      <div style="margin-top:8px;color:var(--mo-l);font-size:10.5px">
-        멀티는 Firebase 룰 (<b>jingxue_rooms/{rid}</b>) 추가 + 매칭 로비가 필요합니다.<br>
-        다음 빌드에서 방미큐브와 동일한 패턴(host broadcast, 1.5s polling)으로 합류·동시 출발·실시간 진행도 표시가 들어갑니다.
-      </div>
-    </div>
-    <div class="sx-actions">
-      <button class="btn" type="button" id="sx-multi-solo">싱글로 對決</button>
-      <button class="btn btn-o" type="button" id="sx-multi-back">← 舍巖之房</button>
-    </div>
-  `;
-  _attachBanner();
-  $('#sx-multi-solo').addEventListener('click', () => openRaceSolo());
-  $('#sx-multi-back').addEventListener('click', () => renderSaamdoinHome());
+  _openPublicLobby();
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -850,140 +1039,5 @@ function _registerRouteIfMissing(){
 }
 // 5초 후에만 한 번 확인 — V11Saam 로드 충분히 기다린 뒤
 setTimeout(_registerRouteIfMissing, 5000);
-
-
-// v12.0: 公開房 지원 추가 (방 목록 공개 / 익명 사용자 매칭)
-async function listPublicRaceRooms(){
-  const f = (typeof FB!=='undefined' && FB) || null; if(!f) return [];
-  const all = await f.get('jingxue_rooms');
-  return Object.values(all||{}).filter(r=>r && r.isPublic && r.status==='waiting');
-}
-if(typeof window!=='undefined'){
-  window.V11Jingxue = window.V11Jingxue || {};
-  window.V11Jingxue.listPublicRooms = listPublicRaceRooms;
-  window.V11Jingxue._v12_publicRooms = true;
-}
-
-
-// v12.0: 사암지방(경혈학房) 메뉴에 經穴 포커 진입점 + 公開房 오수혈 레이스 버튼
-if(typeof window!=='undefined' && !window._v12SaamMenuHook){
-  window._v12SaamMenuHook = true;
-  const _saamObserver = new MutationObserver(()=>{
-    // 경혈학 房 메인 화면에 진입한 직후 (route='saamdoin') 메뉴 패널 찾기
-    const menu = document.querySelector('.saam-home, .jingxue-home, .v11-saam-menu');
-    if(menu && !document.getElementById('v12-jxp-btn')){
-      const btn = document.createElement('button');
-      btn.id = 'v12-jxp-btn';
-      btn.className = 'btn btn-gold';
-      btn.innerHTML = '<span class="han">經穴 포커</span> <sup style="background:#9C3030;color:#fff;font-size:9px;padding:1px 4px;border-radius:6px;margin-left:4px">NEW</sup>';
-      btn.style.cssText = 'margin-top:8px;display:block;width:100%;padding:10px';
-      btn.addEventListener('click', ()=>{
-        if(window.V12JxPoker && window.V12JxPoker.open) window.V12JxPoker.open();
-        else if(window.toast) window.toast('經穴 포커 로딩…','info');
-      });
-      menu.appendChild(btn);
-      // 오수혈 레이스 公開房 버튼
-      const btn2 = document.createElement('button');
-      btn2.id = 'v12-race-public-btn';
-      btn2.className = 'btn';
-      btn2.innerHTML = '오수혈 레이스 — 公開房 찾기';
-      btn2.style.cssText = 'margin-top:6px;display:block;width:100%;padding:8px';
-      btn2.addEventListener('click', async ()=>{
-        if(!window.V11Jingxue || !window.V11Jingxue.listPublicRooms){
-          if(window.toast) window.toast('公開房 기능 로딩 중','info');
-          return;
-        }
-        const rooms = await window.V11Jingxue.listPublicRooms();
-        if(!rooms.length){
-          if(window.toast) window.toast('현재 公開房 없음 — 방 만들어 호스트해보세요','info');
-          return;
-        }
-        const html = '<div class="modal-body"><h3>公開房 오수혈 레이스</h3>' +
-          rooms.map(r=>{
-            const n = Object.keys(r.players||{}).length;
-            return `<div class="jxp-room" data-rid="${r.roomId}" style="cursor:pointer;padding:8px;border-bottom:1px solid #3A2010">
-              <div class="han">${r.name||r.roomId}</div>
-              <div style="font-size:11px;color:#888">${n}/${r.maxPlayers||4}人</div>
-            </div>`;
-          }).join('') + '</div>';
-        if(window.openModal) window.openModal(html);
-        setTimeout(()=>{
-          document.querySelectorAll('.modal-body .jxp-room').forEach(el=>{
-            el.addEventListener('click',()=>{
-              if(window.closeModal) window.closeModal();
-              if(window.V11Jingxue && window.V11Jingxue.openMulti) window.V11Jingxue.openMulti(el.dataset.rid);
-            });
-          });
-        },50);
-      });
-      menu.appendChild(btn2);
-    }
-  });
-  document.addEventListener('DOMContentLoaded',()=>{
-    _saamObserver.observe(document.body,{childList:true,subtree:true});
-  });
-}
-
-
-// ─── v12.0: 公開房 (open room) 헬퍼 ─────────────────────────────────────
-async function _openPublicRoom(){
-  const f = (typeof FB !== 'undefined' && FB) || null;
-  if(!f){ try{ window.toast && window.toast('네트워크 없음','warn'); }catch(_){} return; }
-  // 진행중인 공개방 검색
-  const all = await f.get('jingxue_rooms');
-  let room = null;
-  if(all){
-    for(const r of Object.values(all)){
-      if(r && r.status === 'waiting' && r.isPublic && Object.keys(r.players||{}).length < (r.maxPlayers||4)){
-        room = r; break;
-      }
-    }
-  }
-  if(room){
-    // 입장
-    if(typeof joinMultiRoom === 'function') return joinMultiRoom(room.roomId);
-    if(window.V11Jingxue && window.V11Jingxue.joinRoom) return window.V11Jingxue.joinRoom(room.roomId);
-  } else {
-    // 새 공개방 생성
-    if(window.V11Jingxue && window.V11Jingxue.createRoom){
-      return window.V11Jingxue.createRoom({isPublic:true, name:'公開房'});
-    }
-  }
-}
-if(typeof window !== 'undefined'){
-  window.V11Jingxue = window.V11Jingxue || {};
-  window.V11Jingxue.openPublicRoom = _openPublicRoom;
-}
-
-
-// ─── v12.0: 公開房 (open room) 헬퍼 ─────────────────────────────────────
-async function _openPublicRoom(){
-  const f = (typeof FB !== 'undefined' && FB) || null;
-  if(!f){ try{ window.toast && window.toast('네트워크 없음','warn'); }catch(_){} return; }
-  // 진행중인 공개방 검색
-  const all = await f.get('jingxue_rooms');
-  let room = null;
-  if(all){
-    for(const r of Object.values(all)){
-      if(r && r.status === 'waiting' && r.isPublic && Object.keys(r.players||{}).length < (r.maxPlayers||4)){
-        room = r; break;
-      }
-    }
-  }
-  if(room){
-    // 입장
-    if(typeof joinMultiRoom === 'function') return joinMultiRoom(room.roomId);
-    if(window.V11Jingxue && window.V11Jingxue.joinRoom) return window.V11Jingxue.joinRoom(room.roomId);
-  } else {
-    // 새 공개방 생성
-    if(window.V11Jingxue && window.V11Jingxue.createRoom){
-      return window.V11Jingxue.createRoom({isPublic:true, name:'公開房'});
-    }
-  }
-}
-if(typeof window !== 'undefined'){
-  window.V11Jingxue = window.V11Jingxue || {};
-  window.V11Jingxue.openPublicRoom = _openPublicRoom;
-}
 
 })();
