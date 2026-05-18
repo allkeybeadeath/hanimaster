@@ -53,8 +53,7 @@ const PRECACHE = [
   './data-jindan-tongue.js',
   // v11.4 — 對位 매트릭스
   './bangje-v11-tongue-matrix.js',
-  // v11.5 — 동무의 방 풀스택
-  './bangje-v11-dongmu-suite.js',
+  // v11.5 — dongmu-suite 는 jindan.js 로 통합 (제거)
   // v11 신규 캐릭터 사진
   './saamdoin.jpeg',
   './lindaoren.jpeg',
