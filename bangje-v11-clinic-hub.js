@@ -24,21 +24,33 @@ function toast(m,k){ try{ window.toast && window.toast(m,k); }catch(_){} }
 function openModal(html){ try{ window.openModal && window.openModal(html); }catch(_){} }
 function closeModal(){ try{ window.closeModal && window.closeModal(); }catch(_){} }
 
-// ─── SUBJECTS ──────────────────────────────────────────────────────────
+// ─── SUBJECTS ─────────────────────────────────────────────── v12.0 ──
+//   黃帝 → 預防醫學, 岐伯 → 病理學, 華佗 → 洋方病理學, 道人(lindaoren) → 影像診斷學
+//   經穴포커 (jxpoker) 신설 — 방미큐브 옆에 NEW 표시
 const SUBJECTS = [
-  { id:'shennong',  room_han:'神農之房', subject_han:'方劑學', subject_ko:'방제학',   mascot_id:'shennong',  status:'active',      route:'home',   accent:'#C9A227', desc:'處方·本草·君臣佐使' },
+  { id:'shennong',  room_han:'神農之房', subject_han:'方劑學', subject_ko:'방제학',   mascot_id:'shennong',  status:'active',      route:'home',   accent:'#C9A227', desc:'處方·本草·君臣佐使', badge:'方米큐브 最終 v1.1' },
+  { id:'jxpoker',   room_han:'卦象之房', subject_han:'經穴포커', subject_ko:'경혈포커', mascot_id:'bianque',   status:'active',      route:'jxpoker', accent:'#D4AF37', desc:'361穴 카드 · 14단계 족보 · 최대 8人', isNew:true },
   { id:'dongmu',    room_han:'東武之房', subject_han:'診斷學', subject_ko:'진단학',   mascot_id:'leejema',   status:'active',      route:'dongmu', accent:'#9C3030', desc:'設診·四象·辨證' },
   { id:'zhongjing', room_han:'仲景之房', subject_han:'傷寒論', subject_ko:'상한론',   mascot_id:'zhongjing', status:'placeholder', route:null,     accent:'#1A4C7C', desc:'六經辨證·經方' },
-  { id:'qibo',      room_han:'岐伯之房', subject_han:'內經',   subject_ko:'내경',     mascot_id:'qibo',      status:'placeholder', route:null,     accent:'#2A7060', desc:'素問·靈樞' },
-  { id:'huangdi',   room_han:'黃帝之房', subject_han:'醫經',   subject_ko:'의경',     mascot_id:'huangdi',   status:'placeholder', route:null,     accent:'#7C5810', desc:'內經要旨' },
-  { id:'huatuo',    room_han:'華佗之房', subject_han:'外科',   subject_ko:'외과',     mascot_id:'huatuo',    status:'placeholder', route:null,     accent:'#7A3030', desc:'外治·導引' },
-  { id:'lindaoren', room_han:'道人之房', subject_han:'影像',   subject_ko:'영상진단', mascot_id:'lindaoren', status:'placeholder', route:null,     accent:'#5C4070', desc:'영상의학' },
+  { id:'qibo',      room_han:'岐伯之房', subject_han:'病理學',   subject_ko:'병리학',     mascot_id:'qibo',      status:'active', route:null,     accent:'#2A7060', desc:'臟象·經絡·病機 — 內經 病理' },
+  { id:'huangdi',   room_han:'黃帝之房', subject_han:'預防醫學', subject_ko:'예방의학',     mascot_id:'huangdi',   status:'active', route:null,     accent:'#7C5810', desc:'上工治未病·攝生·三因制宜' },
+  { id:'huatuo',    room_han:'華佗之房', subject_han:'洋方病理', subject_ko:'양방병리학',     mascot_id:'huatuo',    status:'active', route:null,     accent:'#7A3030', desc:'세포·조직·종양·염증 — 현대 病理' },
+  { id:'lindaoren', room_han:'道人之房', subject_han:'影像診斷', subject_ko:'영상진단학', mascot_id:'lindaoren', status:'active', route:null,     accent:'#5C4070', desc:'X-ray·CT·MRI·초음파 판독' },
   { id:'saamdoin',  room_han:'舍巖之房', subject_han:'經穴',   subject_ko:'경혈학',   mascot_id:'saamdoin',  status:'active',      route:'saamdoin', accent:'#3A6A4A', desc:'舍巖鍼法·經絡·五輸穴' },
 ];
 const SUBJECT_BY_ID = {}; SUBJECTS.forEach(s => SUBJECT_BY_ID[s.id] = s);
 
 // ─── CHANGELOG ─────────────────────────────────────────────────────────
 const CHANGELOG_ENTRIES = [
+  { id:'v12.0', label:'v12.0', date:'2026-05-18', title:'經穴 포커 大신설 · 의서궁 八房 재편 · 멀티 컷 統一', body:
+    '經穴 포커 (jingxue-poker) 신규 — 361穴 카드덱 124장 / 14단계 족보 (확률 정확계산) / 최대 8人 멀티 + AI 봇 / ' +
+    '베팅 (콜·체크·하프·쿼터·올인·폴드) · 최소 판돈 참여자 평균 氣 1/100. ' +
+    '모드: 五札引換(드로우)·七札對局(세븐)·德州式(홀덤)·隨機(랜덤). ' +
+    '의서궁 八房 재편: 黃帝→預防醫學, 岐伯→病理學, 華佗→洋方病理學, 道人→影像診斷學. ' +
+    '모든 멀티 게임(방제 對決·방미큐브·경혈 포커·오수혈 레이스) 시작 컷 統一. ' +
+    '오수혈 레이스 公開房 추가. 각 방 좌상단 마스코트 아이콘. ' +
+    '방미큐브는 v2.0 (게임시간 ≤10분) 으로 最終 업데이트 — 이후 추가 없음. ' +
+    'HERB_ALIASES dead alias 20종 제거.' },
   { id:'v11.6.0', label:'v11.6.0', date:'2026-05-18', title:'경혈학 정식 통합 · 과목별 하단nav 분리 · 對位 사진 확대 · 「전부다」 분리', body:
     '경혈학 (舍巖之房) — V11Saam 신규 모듈 정식 편입 (五輸穴·特定要穴 + 멀티 fully implemented). 의서궁 타일에서 바로 진입. ' +
     '하단 nav 가 房별로 교체됨 — 방제학은 處方·약재·암기·기출·통계·명예, 진단학은 圖鑑·對位·問答·速習·析究, 경혈학은 五輸·멀티. ' +
@@ -119,22 +131,33 @@ function renderClinicHub(){
     </button>`;
   }).join('');
   
-  // 8房
+  // 8房 (v12: NEW 배지 + 방미큐브 最終 배지 표시)
   const cards = SUBJECTS.map(s => {
     const dim = s.status === 'placeholder' ? ' hub-card-dim' : '';
     const statusBadge = s.status === 'active'   ? `<span class="hub-status hub-active">運營</span>`
                       : s.status === 'skeleton' ? `<span class="hub-status hub-skel">準備</span>`
                       :                           `<span class="hub-status hub-plc">未開</span>`;
+    const newBadge = s.isNew ? `<span class="hub-new-flag" style="position:absolute;top:6px;right:6px;background:linear-gradient(135deg,#FF6B35,#E55934);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:1px;box-shadow:0 2px 8px rgba(229,89,52,0.5);animation:hubNewPulse 1.6s ease-in-out infinite">NEW</span>` : '';
+    const extraBadge = s.badge ? `<div class="hub-extra-badge" style="font-size:10px;color:#C9A227;margin-top:4px;letter-spacing:1px">${esc(s.badge)}</div>` : '';
     return `
-      <button class="hub-card${dim}" type="button" data-subject="${esc(s.id)}" style="--accent:${s.accent}">
+      <button class="hub-card${dim}" type="button" data-subject="${esc(s.id)}" style="--accent:${s.accent};position:relative">
+        ${newBadge}
         <div class="hub-medal">${_medal(s.mascot_id, 60)}</div>
         <div class="hub-room-han">${esc(s.room_han)}</div>
         <div class="hub-subject"><span class="han">${esc(s.subject_han)}</span> · ${esc(s.subject_ko)}</div>
         <div class="hub-desc">${esc(s.desc)}</div>
+        ${extraBadge}
         <div class="hub-meta">${statusBadge}</div>
       </button>
     `;
   }).join('');
+  // NEW 배지 펄스 애니메이션 한 번만 주입
+  if(!document.getElementById('v12-hub-newflag-style')){
+    const st = document.createElement('style');
+    st.id = 'v12-hub-newflag-style';
+    st.textContent = '@keyframes hubNewPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}';
+    document.head.appendChild(st);
+  }
   
   // changelog
   const seenList = (S.seenChangelogs || []);
@@ -318,10 +341,11 @@ function renderClinicHub(){
     </div>
     
     <!-- 도구 4종 -->
-    <div class="hub-tools">
+    <div class="hub-tools" data-v12-poker-target="1">
       <button class="hub-tool-btn" type="button" id="hub-tool-prof"><div class="hub-tool-han">印·業</div><div class="hub-tool-ko">프로필·업적</div></button>
       <button class="hub-tool-btn" type="button" id="hub-tool-hall"><div class="hub-tool-han">譽</div><div class="hub-tool-ko">명예의 전당</div></button>
-      <button class="hub-tool-btn" type="button" id="hub-tool-cube"><div class="hub-tool-han">方米</div><div class="hub-tool-ko">방미큐브</div></button>
+      <button class="hub-tool-btn" type="button" id="hub-tool-cube"><div class="hub-tool-han">方米</div><div class="hub-tool-ko">방미큐브</div><span class="hub-final-badge">最終</span></button>
+      <button class="hub-tool-btn is-new" type="button" id="hub-tool-poker"><div class="hub-tool-han">經穴</div><div class="hub-tool-ko">포커</div><span class="hub-new-badge">NEW</span></button>
       <button class="hub-tool-btn" type="button" id="hub-tool-duel"><div class="hub-tool-han">對決</div><div class="hub-tool-ko">멀티 入場</div></button>
     </div>
     
@@ -441,6 +465,11 @@ function _wireHub(){
   if(hall) hall.addEventListener('click', () => { if(typeof window.setTab === 'function') window.setTab('hall'); });
   const cube = $('#hub-tool-cube');
   if(cube) cube.addEventListener('click', () => { if(typeof window.setTab === 'function') window.setTab('cube'); });
+  const poker = $('#hub-tool-poker');
+  if(poker) poker.addEventListener('click', () => {
+    if(window.V12Poker && window.V12Poker.openHome) window.V12Poker.openHome();
+    else if(typeof window.setTab === 'function') window.setTab('jingxue-poker');
+  });
   const duel = $('#hub-tool-duel');
   if(duel) duel.addEventListener('click', () => {
     if(typeof window.setTab === 'function') window.setTab('hall');
@@ -676,9 +705,16 @@ async function _sendFeedback(){
 function _registerRoutes(){
   if(window.ROUTES){
     window.ROUTES.hub    = renderClinicHub;
-    // v11.6.1 FIX: renderDongmuHome 는 jindan 모듈이 더 늦게 로드되므로 fallback 처리.
-    //   이 함수가 여러 시점에 재호출되므로 jindan 로드 후 정확한 함수가 잡힘.
     window.ROUTES.dongmu = (window.renderDongmuHome || renderClinicHub);
+    // v12: 경혈포커 라우트 — V12JxPoker.open()
+    window.ROUTES.jxpoker = function(){
+      if(window.V12JxPoker && window.V12JxPoker.open){
+        try{ if(window.V12Intro && window.V12Intro.setSubjectIcon) window.V12Intro.setSubjectIcon('poker'); }catch(_){}
+        window.V12JxPoker.open();
+      } else {
+        toast('經穴포커 모듈 로드 실패','warn');
+      }
+    };
   }
 }
 // v11.6.1 FIX: jindan 로드 완료 후 dongmu 라우트 재등록 (초기 _init 시점엔 미정의일 수 있음)
@@ -732,6 +768,19 @@ function _wrapSetTab(){
         try{ window.renderDongmuHome(); }catch(e){ console.error('dongmu render fail', e); }
       }
     }
+    // v12: 房 별 좌상단 과목 아이콘 표시
+    try{
+      const ICON_BY_TAB = {
+        hub:'', home:'shennong', dongmu:'dongmu', tongue:'dongmu',
+        jingxue:'saamdoin', saamdoin:'saamdoin', jxpoker:'poker',
+        cube:'cube', clinic:'',
+      };
+      const target = ICON_BY_TAB[name];
+      if(window.V12Intro && window.V12Intro.setSubjectIcon){
+        if(target) window.V12Intro.setSubjectIcon(target);
+        else if(window.V12Intro.removeSubjectIcon) window.V12Intro.removeSubjectIcon();
+      }
+    }catch(_){}
     // v11.6: 의서궁 진입 시 본인 presence 즉시 push (label 갱신을 다른 사람도 빨리 보도록)
     if(name === 'hub'){
       try{ if(typeof window.recordPresence === 'function') window.recordPresence(); }catch(_){}
@@ -803,3 +852,51 @@ window.V11ClinicHub = {
 };
 
 })();
+
+
+
+// ─── v12.0: 좌상단 과목 아이콘 헬퍼 (각 房 진입 시 호출) ──────────────────
+// 사용: V11Hub.renderSubjectIcon('saamdoin') → string HTML
+function _renderSubjectIcon(subjectId, size){
+  size = size || 56;
+  const sub = SUBJECT_BY_ID[subjectId];
+  if(!sub) return '';
+  const charId = sub.mascot_id;
+  const photo = (window.V12Intro && V12Intro.charPhoto)
+    ? V12Intro.charPhoto(charId, size, {allowEgg:false})
+    : _medal(charId, size);
+  return `
+    <div class="v12-subject-icon" data-subject="${subjectId}" title="${esc(sub.room_han)} · ${esc(sub.subject_ko)}">
+      ${photo}
+      <div class="v12-subject-icon-label han">${esc(sub.subject_han)}</div>
+    </div>`;
+}
+if(!document.getElementById('v12-subject-icon-style')){
+  const st = document.createElement('style');
+  st.id = 'v12-subject-icon-style';
+  st.textContent = `
+    .v12-subject-icon{position:fixed;top:12px;left:12px;z-index:50;
+      background:rgba(255,248,232,.95);border:1.5px solid #C9A227;border-radius:8px;
+      padding:6px;display:flex;flex-direction:column;align-items:center;gap:4px;
+      box-shadow:0 2px 6px rgba(0,0,0,.15);pointer-events:none}
+    .v12-subject-icon-label{font-family:'ZCOOL XiaoWei',serif;font-size:11px;color:#7C4E10}
+    @media (max-width:540px){
+      .v12-subject-icon{top:8px;left:8px;padding:4px}
+      .v12-subject-icon-label{font-size:9px}
+    }
+  `;
+  document.head.appendChild(st);
+}
+
+// v12 hub badges style inject
+if(typeof document!=="undefined" && !document.getElementById("v12-hub-badges-style")){
+  const _vs=document.createElement("style"); _vs.id="v12-hub-badges-style"; _vs.textContent=`
+/* v12.0 — hub home NEW / 最終 배지 */
+.hub-tool-btn{position:relative}
+.hub-new-badge{position:absolute;top:-6px;right:-6px;background:#C33;color:#fff;
+  font-size:10px;padding:2px 6px;border-radius:8px;font-weight:bold;letter-spacing:.5px;
+  box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.hub-final-badge{position:absolute;top:-6px;left:-6px;background:#7C4E10;color:#FFD89A;
+  font-size:10px;padding:2px 6px;border-radius:8px;font-weight:bold;font-family:'ZCOOL XiaoWei',serif;
+  box-shadow:0 1px 4px rgba(0,0,0,.25)}
+`; document.head.appendChild(_vs); }

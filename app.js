@@ -506,7 +506,12 @@ function _charPhotoMedallion(charOrId, size){
   const c = (typeof charOrId === 'string') ? PHYSICIAN_BY_ID[charOrId] : charOrId;
   if(!c) return _charMedallion(charOrId, size);
   const imgs = (typeof CHARACTER_IMAGES !== 'undefined') ? CHARACTER_IMAGES : {};
-  const meta = imgs[c.id];
+  let meta = imgs[c.id];
+  // v12.0: 이스터에그 — 인도인(lindaoren)·오우가(wuyouke) 1/10 확률 사진 교체
+  if(typeof window.V12MultiIntro !== 'undefined' && window.V12MultiIntro.applyEasterEgg){
+    const ee = window.V12MultiIntro.applyEasterEgg(c);
+    if(ee && ee.photo){ meta = {url: ee.photo, fallback: '', caption: '???'}; }
+  }
   if(!meta || !meta.url) return _charMedallion(c, size);
   // 메달리온을 안쪽에 깔고 사진을 위에 덮음.
   const showName = size >= 80;
@@ -3057,13 +3062,13 @@ async function renderMatchConfirmation(roomId, isCreator){
 
       <div class="match-confirm-vs">
         <div class="match-confirm-side is-me">
-          ${_charPhotoMedallion(meChar, 110)}
+          ${(window.V12Intro && window.V12Intro.charPhoto ? window.V12Intro.charPhoto(meChar, 110) : _charPhotoMedallion(meChar, 110))}
           <div class="name">${esc(me.name||'')}</div>
           <div class="charname han">${esc(meChar.han||'')}</div>
         </div>
         <div class="match-confirm-vs-han han">對</div>
         <div class="match-confirm-side is-opp">
-          ${_charPhotoMedallion(oppChar, 110)}
+          ${(window.V12Intro && window.V12Intro.charPhoto ? window.V12Intro.charPhoto(oppChar, 110) : _charPhotoMedallion(oppChar, 110))}
           <div class="name">${esc(opp.name||'')}</div>
           <div class="charname han">${esc(oppChar.han||'')}</div>
         </div>

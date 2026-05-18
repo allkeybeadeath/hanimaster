@@ -1,4 +1,5 @@
-/* bangje-v11-jingxue-race.js — 경혈학 (舍巖之房) 오수혈 레이스 v1.0 (v11.6)
+/* bangje-v11-jingxue-race.js — 경혈학 (舍巖之房) 오수혈 레이스 v2.0 (v12.0)
+ * v12.0 변경: 公開房 모드 추가 — 모르는 사용자와 매칭 가능
  * ============================================================================
  *  사암지방 첫 모드: 五輸穴 레이스.
  *
@@ -849,5 +850,140 @@ function _registerRouteIfMissing(){
 }
 // 5초 후에만 한 번 확인 — V11Saam 로드 충분히 기다린 뒤
 setTimeout(_registerRouteIfMissing, 5000);
+
+
+// v12.0: 公開房 지원 추가 (방 목록 공개 / 익명 사용자 매칭)
+async function listPublicRaceRooms(){
+  const f = (typeof FB!=='undefined' && FB) || null; if(!f) return [];
+  const all = await f.get('jingxue_rooms');
+  return Object.values(all||{}).filter(r=>r && r.isPublic && r.status==='waiting');
+}
+if(typeof window!=='undefined'){
+  window.V11Jingxue = window.V11Jingxue || {};
+  window.V11Jingxue.listPublicRooms = listPublicRaceRooms;
+  window.V11Jingxue._v12_publicRooms = true;
+}
+
+
+// v12.0: 사암지방(경혈학房) 메뉴에 經穴 포커 진입점 + 公開房 오수혈 레이스 버튼
+if(typeof window!=='undefined' && !window._v12SaamMenuHook){
+  window._v12SaamMenuHook = true;
+  const _saamObserver = new MutationObserver(()=>{
+    // 경혈학 房 메인 화면에 진입한 직후 (route='saamdoin') 메뉴 패널 찾기
+    const menu = document.querySelector('.saam-home, .jingxue-home, .v11-saam-menu');
+    if(menu && !document.getElementById('v12-jxp-btn')){
+      const btn = document.createElement('button');
+      btn.id = 'v12-jxp-btn';
+      btn.className = 'btn btn-gold';
+      btn.innerHTML = '<span class="han">經穴 포커</span> <sup style="background:#9C3030;color:#fff;font-size:9px;padding:1px 4px;border-radius:6px;margin-left:4px">NEW</sup>';
+      btn.style.cssText = 'margin-top:8px;display:block;width:100%;padding:10px';
+      btn.addEventListener('click', ()=>{
+        if(window.V12JxPoker && window.V12JxPoker.open) window.V12JxPoker.open();
+        else if(window.toast) window.toast('經穴 포커 로딩…','info');
+      });
+      menu.appendChild(btn);
+      // 오수혈 레이스 公開房 버튼
+      const btn2 = document.createElement('button');
+      btn2.id = 'v12-race-public-btn';
+      btn2.className = 'btn';
+      btn2.innerHTML = '오수혈 레이스 — 公開房 찾기';
+      btn2.style.cssText = 'margin-top:6px;display:block;width:100%;padding:8px';
+      btn2.addEventListener('click', async ()=>{
+        if(!window.V11Jingxue || !window.V11Jingxue.listPublicRooms){
+          if(window.toast) window.toast('公開房 기능 로딩 중','info');
+          return;
+        }
+        const rooms = await window.V11Jingxue.listPublicRooms();
+        if(!rooms.length){
+          if(window.toast) window.toast('현재 公開房 없음 — 방 만들어 호스트해보세요','info');
+          return;
+        }
+        const html = '<div class="modal-body"><h3>公開房 오수혈 레이스</h3>' +
+          rooms.map(r=>{
+            const n = Object.keys(r.players||{}).length;
+            return `<div class="jxp-room" data-rid="${r.roomId}" style="cursor:pointer;padding:8px;border-bottom:1px solid #3A2010">
+              <div class="han">${r.name||r.roomId}</div>
+              <div style="font-size:11px;color:#888">${n}/${r.maxPlayers||4}人</div>
+            </div>`;
+          }).join('') + '</div>';
+        if(window.openModal) window.openModal(html);
+        setTimeout(()=>{
+          document.querySelectorAll('.modal-body .jxp-room').forEach(el=>{
+            el.addEventListener('click',()=>{
+              if(window.closeModal) window.closeModal();
+              if(window.V11Jingxue && window.V11Jingxue.openMulti) window.V11Jingxue.openMulti(el.dataset.rid);
+            });
+          });
+        },50);
+      });
+      menu.appendChild(btn2);
+    }
+  });
+  document.addEventListener('DOMContentLoaded',()=>{
+    _saamObserver.observe(document.body,{childList:true,subtree:true});
+  });
+}
+
+
+// ─── v12.0: 公開房 (open room) 헬퍼 ─────────────────────────────────────
+async function _openPublicRoom(){
+  const f = (typeof FB !== 'undefined' && FB) || null;
+  if(!f){ try{ window.toast && window.toast('네트워크 없음','warn'); }catch(_){} return; }
+  // 진행중인 공개방 검색
+  const all = await f.get('jingxue_rooms');
+  let room = null;
+  if(all){
+    for(const r of Object.values(all)){
+      if(r && r.status === 'waiting' && r.isPublic && Object.keys(r.players||{}).length < (r.maxPlayers||4)){
+        room = r; break;
+      }
+    }
+  }
+  if(room){
+    // 입장
+    if(typeof joinMultiRoom === 'function') return joinMultiRoom(room.roomId);
+    if(window.V11Jingxue && window.V11Jingxue.joinRoom) return window.V11Jingxue.joinRoom(room.roomId);
+  } else {
+    // 새 공개방 생성
+    if(window.V11Jingxue && window.V11Jingxue.createRoom){
+      return window.V11Jingxue.createRoom({isPublic:true, name:'公開房'});
+    }
+  }
+}
+if(typeof window !== 'undefined'){
+  window.V11Jingxue = window.V11Jingxue || {};
+  window.V11Jingxue.openPublicRoom = _openPublicRoom;
+}
+
+
+// ─── v12.0: 公開房 (open room) 헬퍼 ─────────────────────────────────────
+async function _openPublicRoom(){
+  const f = (typeof FB !== 'undefined' && FB) || null;
+  if(!f){ try{ window.toast && window.toast('네트워크 없음','warn'); }catch(_){} return; }
+  // 진행중인 공개방 검색
+  const all = await f.get('jingxue_rooms');
+  let room = null;
+  if(all){
+    for(const r of Object.values(all)){
+      if(r && r.status === 'waiting' && r.isPublic && Object.keys(r.players||{}).length < (r.maxPlayers||4)){
+        room = r; break;
+      }
+    }
+  }
+  if(room){
+    // 입장
+    if(typeof joinMultiRoom === 'function') return joinMultiRoom(room.roomId);
+    if(window.V11Jingxue && window.V11Jingxue.joinRoom) return window.V11Jingxue.joinRoom(room.roomId);
+  } else {
+    // 새 공개방 생성
+    if(window.V11Jingxue && window.V11Jingxue.createRoom){
+      return window.V11Jingxue.createRoom({isPublic:true, name:'公開房'});
+    }
+  }
+}
+if(typeof window !== 'undefined'){
+  window.V11Jingxue = window.V11Jingxue || {};
+  window.V11Jingxue.openPublicRoom = _openPublicRoom;
+}
 
 })();
