@@ -35,23 +35,24 @@ const SUBJECTS = [
   { id:'huangdi',   room_han:'黃帝之房', subject_han:'預防醫學', subject_ko:'예방의학',     mascot_id:'huangdi',   status:'active', route:null,     accent:'#7C5810', desc:'上工治未病·攝生·三因制宜' },
   { id:'huatuo',    room_han:'華佗之房', subject_han:'洋方病理', subject_ko:'양방병리학',     mascot_id:'huatuo',    status:'active', route:null,     accent:'#7A3030', desc:'세포·조직·종양·염증 — 현대 病理' },
   { id:'lindaoren', room_han:'道人之房', subject_han:'影像診斷', subject_ko:'영상진단학', mascot_id:'lindaoren', status:'active', route:null,     accent:'#5C4070', desc:'X-ray·CT·MRI·초음파 판독' },
-  { id:'saamdoin',  room_han:'舍巖之房', subject_han:'經穴',   subject_ko:'경혈학',   mascot_id:'saamdoin',  status:'active',      route:'saamdoin', accent:'#3A6A4A', desc:'舍巖鍼法·經絡·五輸穴 · 經穴포커 NEW' },
+  { id:'saamdoin',  room_han:'舍巖之房', subject_han:'經穴',   subject_ko:'경혈학',   mascot_id:'saamdoin',  status:'active',      route:'saamdoin', accent:'#3A6A4A', desc:'舍巖鍼法·經絡·五輸穴' },
 ];
 const SUBJECT_BY_ID = {}; SUBJECTS.forEach(s => SUBJECT_BY_ID[s.id] = s);
 
 // ─── CHANGELOG ─────────────────────────────────────────────────────────
 const CHANGELOG_ENTRIES = [
-  { id:'v12.0', label:'v12.0', date:'2026-05-18', title:'經穴 포커 大신설 · 의서궁 八房 재편 · 멀티 컷 統一', body:
-    '經穴 포커 (jingxue-poker) 신규 — 361穴 카드덱 124장 / 14단계 족보 (확률 정확계산) / 최대 8人 멀티 + AI 봇 / ' +
+  { id:'v12.0', label:'v12.0', date:'2026-05-18', title:'經穴 포커 신설 · 八房 학과 재편 · 멀티 컷 統一', body:
+    '<b>★ 經穴 포커 (jingxue-poker) 신규</b> — 361穴 카드덱 124장 · 14단계 족보 (확률 정확계산) · 최대 8人 멀티 + AI 봇. ' +
     '베팅 (콜·체크·하프·쿼터·올인·폴드) · 최소 판돈 참여자 평균 氣 1/100. ' +
-    '모드: 五札引換(드로우)·七札對局(세븐)·德州式(홀덤)·隨機(랜덤). ' +
-    '<b>v12.1 修正</b> — 經穴포커는 의서궁(醫書宮) home 에서 제거. <b>경혈학(舍巖之房) 內부의 4번째 모드 버튼에서만 진입</b>. ' +
-    '의서궁 → 경혈학 → 「經穴 포커 NEW」 버튼 클릭하면 진입.<br>' +
-    '의서궁 八房 재편: 黃帝→預防醫學, 岐伯→病理學, 華佗→洋方病理學, 道人→影像診斷學. ' +
-    '모든 멀티 게임(방제 對決·방미큐브·경혈 포커·오수혈 레이스) 시작 컷 統一. ' +
-    '오수혈 레이스 公開房 추가. ' +
-    '방미큐브는 v1.1 (게임시간 ≤10분) 으로 最終 업데이트 — 이후 추가 없음. ' +
-    'HERB_ALIASES dead alias 20종 제거.' },
+    '모드: 五札引換(드로우)·七札對局(세븐)·德州式(홀덤)·隨機(랜덤).<br>' +
+    '<b>진입 경로 2곳</b>: (1) 의서궁 home 의 도구 영역 — <b>방미큐브 옆 「經穴 포커 NEW」 버튼</b>. ' +
+    '(2) 의서궁 → 경혈학(舍巖之房) → 4번째 모드 버튼 「經穴 포커 NEW」. ' +
+    '※ 經穴포커는 八房 과목이 아니므로 의서궁 「八房 과목」 카드 그리드에는 표시되지 않음.<br>' +
+    '<b>★ 八房 학과 재편</b>: 黃帝→預防醫學, 岐伯→病理學, 華佗→洋方病理學, 道人→影像診斷學. ' +
+    '<b>★ 멀티 컷 統一</b> — 방제 對決·방미큐브·경혈 포커·오수혈 레이스 모두 동일 cinematic. ' +
+    '<b>★ 오수혈 레이스 公開房</b> 추가. ' +
+    '<b>★ 방미큐브 最終</b> — v1.1 (게임시간 ≤10분) 이후 추가 업데이트 없음. ' +
+    '<b>★ HERB_ALIASES dead alias</b> 20종 정리.' },
   { id:'v11.6.0', label:'v11.6.0', date:'2026-05-18', title:'경혈학 정식 통합 · 과목별 하단nav 분리 · 對位 사진 확대 · 「전부다」 분리', body:
     '경혈학 (舍巖之房) — V11Saam 신규 모듈 정식 편입 (五輸穴·特定要穴 + 멀티 fully implemented). 의서궁 타일에서 바로 진입. ' +
     '하단 nav 가 房별로 교체됨 — 방제학은 處方·약재·암기·기출·통계·명예, 진단학은 圖鑑·對位·問答·速習·析究, 경혈학은 五輸·멀티. ' +
@@ -233,6 +234,12 @@ function renderClinicHub(){
       
       /* 도구 4종 */
       .hub-tools { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:12px; }
+      .hub-tools-5 { grid-template-columns:repeat(5,1fr); }
+      @media (max-width:480px){
+        .hub-tools-5 { grid-template-columns:repeat(3,1fr); }
+      }
+      .hub-tool-btn.is-new { background:linear-gradient(135deg,#FFF8E0,#FFE5C0); border-color:#D4AF37; box-shadow:0 0 0 1px #D4AF37 inset; animation:hubToolPulse 1.8s ease-in-out infinite; }
+      @keyframes hubToolPulse { 0%,100%{ box-shadow:0 0 0 1px #D4AF37 inset, 0 0 0 0 rgba(212,175,55,0); } 50%{ box-shadow:0 0 0 1px #D4AF37 inset, 0 0 0 6px rgba(212,175,55,0.18); } }
       .hub-tool-btn { background:#FFF8E0; border:1px solid #C9A22755; padding:8px 4px; border-radius:8px; text-align:center; cursor:pointer; font-family:inherit; color:var(--mo); transition:all .12s; }
       .hub-tool-btn:hover { background:#FFE8B0; border-color:#C9A227; transform:translateY(-1px); }
       .hub-tool-han { font-family:'Noto Serif SC',serif; font-size:16px; color:var(--zhusha-d); font-weight:700; line-height:1; }
@@ -341,11 +348,12 @@ function renderClinicHub(){
       <button class="gedit" type="button" id="hub-profile-edit">編 변경</button>
     </div>
     
-    <!-- 도구 4종 (v12.1: 經穴포커 도구 버튼 제거 — 경혈학 房 내부에서만 진입) -->
-    <div class="hub-tools">
+    <!-- 도구 5종 (v12.1: 經穴포커 NEW 버튼 — 방미큐브 옆. 경혈학 房 내부에서도 진입 가능) -->
+    <div class="hub-tools hub-tools-5">
       <button class="hub-tool-btn" type="button" id="hub-tool-prof"><div class="hub-tool-han">印·業</div><div class="hub-tool-ko">프로필·업적</div></button>
       <button class="hub-tool-btn" type="button" id="hub-tool-hall"><div class="hub-tool-han">譽</div><div class="hub-tool-ko">명예의 전당</div></button>
       <button class="hub-tool-btn" type="button" id="hub-tool-cube"><div class="hub-tool-han">方米</div><div class="hub-tool-ko">방미큐브</div><span class="hub-final-badge">最終</span></button>
+      <button class="hub-tool-btn is-new" type="button" id="hub-tool-poker"><div class="hub-tool-han">經穴</div><div class="hub-tool-ko">포커</div><span class="hub-new-badge">NEW</span></button>
       <button class="hub-tool-btn" type="button" id="hub-tool-duel"><div class="hub-tool-han">對決</div><div class="hub-tool-ko">멀티 入場</div></button>
     </div>
     
@@ -465,6 +473,13 @@ function _wireHub(){
   if(hall) hall.addEventListener('click', () => { if(typeof window.setTab === 'function') window.setTab('hall'); });
   const cube = $('#hub-tool-cube');
   if(cube) cube.addEventListener('click', () => { if(typeof window.setTab === 'function') window.setTab('cube'); });
+  // v12.1: 經穴포커 — 방미큐브 옆 NEW 버튼. 라우트 jxpoker 사용 (이미 _registerRoutes 에 등록됨)
+  const poker = $('#hub-tool-poker');
+  if(poker) poker.addEventListener('click', () => {
+    if(typeof window.setTab === 'function') window.setTab('jxpoker');
+    else if(window.V12JxPoker && window.V12JxPoker.open) window.V12JxPoker.open();
+    else toast('經穴포커 모듈 미로드','warn');
+  });
   const duel = $('#hub-tool-duel');
   if(duel) duel.addEventListener('click', () => {
     if(typeof window.setTab === 'function') window.setTab('hall');
