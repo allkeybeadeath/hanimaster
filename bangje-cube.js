@@ -1,4 +1,4 @@
-/* bangje-cube.js — 方劑Cube (방미큐브) v1.1
+/* bangje-cube.js — 方劑Cube (방미큐브) v2.0 (v12.0 최종 업데이트)
  * 본초 카드 2~4人 멀티 對局 — 루미큐브 룰 + 方劑學
  *  - 손패에서 본초 조합 → 처방(set) 만들어 보드에 출패
  *  - 유효 set = 완성 방제 | 派生方 | 증상별 加減
@@ -13,11 +13,11 @@
 // ──────────────────────────────────────────────────────────────────
 // 0. 상수
 // ──────────────────────────────────────────────────────────────────
-const BC_VER          = '1.1';
-const HAND_4P         = 4;     // v1.1: 10→4 (4P 對局 약 10분 이하)
-const HAND_23P        = 5;     // v1.1: 12→5 (2~3P 對局 약 6~8분)
-const PENALTY_DRAW    = 2;     // v1.1: 3→2 (페널티 누적 축소)
-const TURN_SEC        = 35;    // v1.1: 90→35 (턴 시간 단축, 4P 對局 worst-case ≤10분)
+const BC_VER          = '2.0';   // v12.0: 마지막 업데이트
+const HAND_4P         = 4;     // v12.0: 10→4 (4P 對局 약 10분 이하)
+const HAND_23P        = 5;     // v12.0: 12→5 (2~3P 對局 약 6~9분)
+const PENALTY_DRAW    = 2;     // v12.0: 3→2 (페널티 누적 축소)
+const TURN_SEC        = 35;    // v12.0: 90→35 (worst-case ≤10분)
 const POLL_MS         = 1800;
 const REWARD_WIN      = 80;
 const REWARD_RUNNER   = 20;
@@ -1724,5 +1724,24 @@ window.BC = {
     sample: (_sets||[]).slice(0,3).map(s => `${s.type}:${s.label}=${s.herbs.join('·')}`),
   }),
 };
+
+
+// v12.0: 방미큐브 最終 업뎃 배지 (런타임 주입)
+if(typeof window!=='undefined' && !window._v12CubeFinalHook){
+  window._v12CubeFinalHook = true;
+  const _origObserver = new MutationObserver(()=>{
+    const t = document.querySelector('.view-title');
+    if(t && t.textContent.includes('方劑Cube') && !document.getElementById('v12-cube-final-badge')){
+      const b = document.createElement('span');
+      b.id = 'v12-cube-final-badge';
+      b.textContent = '最終';
+      b.style.cssText = 'display:inline-block;margin-left:10px;padding:2px 8px;background:#7A1F1F;color:#F5E8D0;font-size:11px;border-radius:6px;vertical-align:middle;letter-spacing:2px';
+      t.appendChild(b);
+    }
+  });
+  document.addEventListener('DOMContentLoaded',()=>{
+    _origObserver.observe(document.body,{childList:true,subtree:true});
+  });
+}
 
 })();
