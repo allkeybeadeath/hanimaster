@@ -92,10 +92,26 @@ function levenshtein1(a, b){
 function tokenize(input){
   if(!input) return [];
   return String(input)
-    .replace(/[、，·+]/g, ',')
+    // 한문/유니코드 구두점 → 콤마 (v14.4 보강)
+    .replace(/[、，·+；：;。．\.|｜]/g, ',')
+    // 줄임 기호·괄호류 제거
+    .replace(/[「」『』〈〉《》【】〔〕（）()「」]/g, ' ')
     .split(/[,/\s]+/)
     .map(t => t.trim())
     .filter(t => t.length > 0);
+}
+
+// v14.4: 한글 처방명 접미사 동치 정규화
+//   "보중익기" ↔ "보중익기탕" ↔ "보중익기산" 등 접미사 한 글자 차이 허용
+//   matchKeyword에서 추가 시도로 사용
+const FORMULA_SUFFIXES = ['탕','산','환','음','고','단','자','산제','탕제'];
+function stripFormulaSuffix(s){
+  for(const suf of FORMULA_SUFFIXES){
+    if(s.length > suf.length && s.endsWith(suf)){
+      return s.slice(0, -suf.length);
+    }
+  }
+  return s;
 }
 
 // 큰 한 덩어리 문자열 안에서 별칭 longest-match 로 약재들을 추출
@@ -169,6 +185,12 @@ function matchKeyword(input, kw){
   if(!a || !b) return false;
   if(a.includes(b)) return true;
   if(b.includes(a) && a.length >= 2) return true;
+  // v14.4: 처방명 접미사 동치 ("보중익기" ↔ "보중익기탕")
+  const aStripped = stripFormulaSuffix(a);
+  const bStripped = stripFormulaSuffix(b);
+  if(aStripped && bStripped && aStripped === bStripped) return true;
+  if(aStripped && b === aStripped) return true;
+  if(bStripped && a === bStripped) return true;
   // 1글자 오타 — 길이 2 이상 토큰만
   if(a.length >= 3 && b.length >= 3){
     // sliding window over a
