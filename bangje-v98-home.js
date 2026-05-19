@@ -50,7 +50,7 @@ function openHub(){
 
   const html = `
     <h3 class="seal" style="margin:0;color:var(--zhusha-d);font-size:18px">v9.8 學習 强化</h3>
-    <div style="font-size:11px;color:var(--gutong);margin-top:1px">CIM Lab · 시험 D-2 학습 모드</div>
+    <div style="font-size:11px;color:var(--gutong);margin-top:1px">시험 D-2 학습 모드</div>
 
     <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
       ${tile('SRS 복습', '復', dueN ? `오늘 만기 ${dueN}` : '만기 없음', () => window.V98SRS.startReviewSession(), '#1C140A')}
@@ -90,7 +90,7 @@ function openHub(){
     </div>
 
     <div style="margin-top:10px;font-size:10.5px;color:var(--gutong);text-align:center">
-      <span class="han">v9.8 · CIM Lab 본과 2학년 방제학</span>
+      <span class="han">v9.8 본과 2학년 방제학</span>
     </div>
   `;
   if(window.openModal) window.openModal(html);
