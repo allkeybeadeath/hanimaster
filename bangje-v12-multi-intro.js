@@ -31,8 +31,9 @@ const EGG_TARGETS = {
     name_override: '간디', han_override: '甘地',
   },
   wuyouke: {
-    src: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/Arthur_Rackham_1909_Undine_Frontispiece.jpg/600px-Arthur_Rackham_1909_Undine_Frontispiece.jpg',
-    fallback: 'https://upload.wikimedia.org/wikipedia/commons/8/85/Arthur_Rackham_1909_Undine_Frontispiece.jpg',
+    // v14.3 패치: 사용자 제공 사진(WoW 兩頭 오우거 ─ 紅袍)으로 교체
+    src: 'ogre-egg.webp',
+    fallback: 'ogre-egg.webp',
     quote: {
       han: '우가우가',
       ko: '우가우가',

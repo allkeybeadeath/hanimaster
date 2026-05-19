@@ -36,7 +36,7 @@
  *
  *  ★ 캐시 키 build timestamp bump → SW 강제 재install + PRECACHE 재다운로드
  */
-const CACHE = 'bangje-pwa-v14-2-drill-' + (new Date().toISOString().slice(0,10).replace(/-/g,''));
+const CACHE = 'bangje-pwa-v14-3-realtime-' + (new Date().toISOString().slice(0,10).replace(/-/g,''));
 const PRECACHE = [
   './',
   './index.html',
@@ -103,6 +103,8 @@ const PRECACHE = [
   // v11 신규 캐릭터 사진
   './saamdoin.jpeg',
   './lindaoren.jpeg',
+  // v14.3: 오우거 이스터에그 이미지
+  './ogre-egg.webp',
   './data-physicians.js',
   './data-ranks.js',
   './data-factions.js',

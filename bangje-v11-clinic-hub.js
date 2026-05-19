@@ -100,6 +100,27 @@ function _medal(charId, size){
   if(typeof window._charMedallion === 'function')      return window._charMedallion(charId, size);
   return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:#E8C8A0;display:flex;align-items:center;justify-content:center;font-family:'ZCOOL XiaoWei',serif;font-size:${Math.round(size*0.4)}px;color:#3A1810">人</div>`;
 }
+// v14.3: 의서궁 8房 카드에 표시되는 말풍선 — 캐릭터별 명언 한 줄
+function _quoteBubbleHtml(charId){
+  if(!charId) return '';
+  try{
+    const pool = (typeof PHYSICIAN_BY_ID !== 'undefined' && PHYSICIAN_BY_ID) ||
+                 ((typeof PHYSICIANS !== 'undefined' && PHYSICIANS) ? PHYSICIANS.reduce((a,p)=>(a[p.id]=p,a),{}) : null);
+    if(!pool) return '';
+    const c = pool[charId];
+    if(!c || !c.quote) return '';
+    // 이스터에그 발동 시 명언도 교체 (오우거 → "우가우가")
+    let han = c.quote.han || '';
+    if(window.V12Intro && typeof window.V12Intro.eggQuote === 'function'){
+      const eq = window.V12Intro.eggQuote(charId);
+      if(eq && eq.han) han = eq.han;
+    }
+    if(!han) return '';
+    // 첫 14자 컷오프 + 줄임표 — 작은 카드 안에 들어가도록
+    const short = han.length > 14 ? (han.slice(0,14) + '⋯') : han;
+    return `<div class="hub-quote-bubble han" title="${esc(han)}">${esc(short)}</div>`;
+  }catch(_){ return ''; }
+}
 function _daysUntil(iso){
   if(!iso) return null;
   const d = new Date(iso).getTime();
@@ -161,7 +182,10 @@ function renderClinicHub(){
     return `
       <button class="hub-card${dim}" type="button" data-subject="${esc(s.id)}" style="--accent:${s.accent};position:relative">
         ${newBadge}
-        <div class="hub-medal">${_medal(s.mascot_id, 60)}</div>
+        <div class="hub-medal-wrap">
+          <div class="hub-medal">${_medal(s.mascot_id, 60)}</div>
+          ${_quoteBubbleHtml(s.mascot_id)}
+        </div>
         <div class="hub-room-han">${esc(s.room_han)}</div>
         <div class="hub-subject"><span class="han">${esc(s.subject_han)}</span> · ${esc(s.subject_ko)}</div>
         <div class="hub-desc">${esc(s.desc)}</div>
@@ -267,13 +291,50 @@ function renderClinicHub(){
       /* 8房 그리드 */
       .hub-grid-title { font-family:var(--font-display); font-size:12.5px; color:var(--zhusha-d); margin:8px 0 6px; display:flex; align-items:center; gap:6px; }
       .hub-grid-title:before, .hub-grid-title:after { content:''; flex:1; height:1px; background:linear-gradient(to right, transparent, #C9A22755, transparent); }
-      .hub-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:7px; margin-bottom:12px; }
+      .hub-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:7px; margin-bottom:12px; padding-top:22px; }
       @media (min-width:540px) { .hub-grid { grid-template-columns:repeat(3,1fr); } }
-      .hub-card { position:relative; background:#FAF1E0; border:1px solid var(--accent); border-left:4px solid var(--accent); border-radius:9px; padding:9px 7px 8px; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; transition:transform .15s ease, box-shadow .15s ease; font-family:inherit; text-align:center; color:var(--mo); }
+      .hub-card { position:relative; background:#FAF1E0; border:1px solid var(--accent); border-left:4px solid var(--accent); border-radius:9px; padding:9px 7px 8px; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; transition:transform .15s ease, box-shadow .15s ease; font-family:inherit; text-align:center; color:var(--mo); overflow:visible; }
       .hub-card:hover { transform:translateY(-2px); box-shadow:0 5px 12px rgba(60,30,10,.18); }
       .hub-card-dim { opacity:.62; }
+      .hub-medal-wrap { position:relative; width:60px; height:60px; }
       .hub-medal { width:60px; height:60px; border-radius:50%; overflow:hidden; }
       .hub-medal img, .hub-medal .cmedal { width:100%; height:100%; }
+      /* v14.3: 캐릭터 말풍선 — 진입 시 살짝 떠올라 명언 한 줄 표시 */
+      .hub-quote-bubble {
+        position:absolute; left:50%; bottom:calc(100% + 6px); transform:translateX(-50%);
+        background:#FFFDF6; color:#3A1810; border:1.2px solid var(--accent,#876A36);
+        padding:3px 7px; border-radius:8px; font-size:10.5px; line-height:1.3;
+        font-family:'Noto Serif SC',serif; font-weight:600; letter-spacing:.02em;
+        white-space:nowrap; max-width:160px; text-overflow:ellipsis; overflow:hidden;
+        box-shadow:0 2px 6px rgba(60,30,10,.15);
+        opacity:0; transform-origin:bottom center;
+        animation:hubQuoteIn .55s ease-out forwards;
+        pointer-events:none; z-index:5;
+      }
+      .hub-quote-bubble::after {
+        content:''; position:absolute; top:100%; left:50%; transform:translateX(-50%);
+        width:0; height:0; border:5px solid transparent;
+        border-top-color:var(--accent,#876A36);
+      }
+      .hub-quote-bubble::before {
+        content:''; position:absolute; top:100%; left:50%; transform:translateX(-50%) translateY(-1.3px);
+        width:0; height:0; border:4px solid transparent;
+        border-top-color:#FFFDF6; z-index:1;
+      }
+      /* 카드별로 등장 시점을 흐드러지게 — staggered */
+      .hub-grid .hub-card:nth-child(1) .hub-quote-bubble{ animation-delay:.10s }
+      .hub-grid .hub-card:nth-child(2) .hub-quote-bubble{ animation-delay:.22s }
+      .hub-grid .hub-card:nth-child(3) .hub-quote-bubble{ animation-delay:.34s }
+      .hub-grid .hub-card:nth-child(4) .hub-quote-bubble{ animation-delay:.46s }
+      .hub-grid .hub-card:nth-child(5) .hub-quote-bubble{ animation-delay:.58s }
+      .hub-grid .hub-card:nth-child(6) .hub-quote-bubble{ animation-delay:.70s }
+      .hub-grid .hub-card:nth-child(7) .hub-quote-bubble{ animation-delay:.82s }
+      .hub-grid .hub-card:nth-child(8) .hub-quote-bubble{ animation-delay:.94s }
+      @keyframes hubQuoteIn {
+        0%   { opacity:0; transform:translate(-50%, 6px) scale(.85); }
+        60%  { opacity:1; transform:translate(-50%, -2px) scale(1.04); }
+        100% { opacity:1; transform:translate(-50%, 0)    scale(1); }
+      }
       .hub-room-han { font-family:'Noto Serif SC',serif; font-size:14px; font-weight:700; color:var(--zhusha-d); }
       .hub-subject { font-size:10.5px; color:var(--mo); margin-top:1px; }
       .hub-subject .han { font-family:'Noto Serif SC',serif; font-weight:700; }

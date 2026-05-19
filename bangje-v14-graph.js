@@ -32,7 +32,7 @@ function injectStyles(){
   s.textContent = `
     /* ─── v14 關係圖 컨테이너 ─────────────────────────────────────── */
     .v14g-wrap{
-      max-width:680px;margin:0 auto;padding:12px 10px 80px;
+      max-width:1100px;margin:0 auto;padding:12px 10px 80px;
       font-family:var(--font-body,'Noto Serif KR',serif);color:var(--mo,#1C140A);
     }
     .v14g-wrap.fs{max-width:100%;padding:6px}
@@ -93,13 +93,14 @@ function injectStyles(){
       transition:transform 0s;
       will-change:transform;
     }
+    /* v14.3: SVG를 컨테이너 폭+높이에 꽉 차게 (해상도 향상) */
     .v14g-svg-host svg{
-      display:block;width:100%;height:auto;
-      pointer-events:none;  /* 드래그 방해 안하게 */
+      display:block;width:100%;height:100%;
+      pointer-events:none;
     }
-    /* 모바일 그래프 높이 */
-    .v14g-graph{height:52vh;min-height:340px}
-    .v14g-graph.fs{height:100vh}
+    /* 모바일 그래프 높이 — v14.3: 해상도 향상 (저화질 클레임 대응) */
+    .v14g-graph{height:78vh;min-height:560px}
+    .v14g-graph.fs{height:100vh;min-height:100vh}
 
     /* 컨트롤 패널 */
     .v14g-ctrl{
@@ -183,8 +184,9 @@ function injectStyles(){
 
     @media(max-width:520px){
       .v14g-hint{display:none}
-      .v14g-graph{height:48vh;min-height:300px}
+      .v14g-graph{height:72vh;min-height:480px}
       .v14g-tab{font-size:12px;padding:8px 4px}
+      .v14g-wrap{padding:8px 6px 70px}
     }
   `;
   document.head.appendChild(s);
@@ -201,7 +203,7 @@ function createPanZoom(container, svgHost, opts){
     scale: opts.initialScale || 1,
     tx: 0, ty: 0,
     minScale: 0.4,
-    maxScale: 8,
+    maxScale: 12,   // v14.3: 8 → 12 (고해상도 정밀 확인용)
   };
   let isDragging = false;
   let dragStartX=0, dragStartY=0, dragStartTx=0, dragStartTy=0;
@@ -466,11 +468,11 @@ function render(initialTab){
     initSvg.setAttribute('viewBox', G.pyori.viewBox);
   }
 
-  // PanZoom 시작
+  // PanZoom 시작 — v14.3: 초기 1.3배 줌으로 노드 글자가 한 눈에 또렷하게
   const graphEl = $('#v14g-graph');
   const hostEl = $('#v14g-svg-host');
   _pz = createPanZoom(graphEl, hostEl, {
-    initialScale: 1,
+    initialScale: 1.3,
     onChange: (s) => updateZoomInfo(s.scale),
   });
 

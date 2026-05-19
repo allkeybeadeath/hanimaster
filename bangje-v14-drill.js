@@ -1,11 +1,14 @@
-/* bangje-v14-drill.js — v14.2 「原文 配列 드릴」 엔진
+/* bangje-v14-drill.js — v14.3 「原文 配列 드릴」 엔진
  * ============================================================================
  *  - 처방별 한문 원문을 무작위 토막으로 섞은 뒤 순서대로 재배열하는 드릴
  *  - 챕터 분리: 표리쌍해제 / 보익제
  *  - 처방별로 순차 진행 (1처방 끝나면 다음 처방으로)
- *  - 인터랙션: 토막 클릭으로 슬롯 채움 / 슬롯 클릭으로 되돌리기
- *  - 채점: 즉시 채점 (정답 위치 = 초록, 오답 = 빨강)
- *  - 진도 저장: localStorage에 마지막 위치 저장
+ *
+ *  v14.3 변경사항 (실시간 채점 패치):
+ *    ▸ 각 원문의 첫 구절은 문제 영역에 도입부로 미리 제시 (선두 토막 = pre-locked)
+ *    ▸ 「채점 ✓」 버튼 삭제 — 슬롯 채우는 즉시 실시간 채점
+ *    ▸ 같은 글자(텍스트)의 토막은 순서 무관 — 같은 글자 슬롯이면 어디에 들어가도 正解
+ *    ▸ 모든 슬롯이 정답으로 채워지면 自動 完成 (이전/다음/다시 풀기만 노출)
  *
  *  외부 API: window.V14Drill = { open, render }
  *  라우트: ROUTES.drill
@@ -24,9 +27,10 @@ const STATE = {
   chapter: 'pyori',     // pyori / boik
   index: 0,              // 현재 문제 index
   slots: [],             // 사용자가 채운 토막 인덱스 (null = 비어있음)
+  locked: [],            // v14.3: 슬롯이 pre-locked인지 (첫 구절 = true)
   pool: [],              // 토막 풀의 순서 (셔플된 원본 idx 배열)
   taken: new Set(),      // 이미 슬롯에 들어간 풀 인덱스
-  graded: false,         // 채점 완료 여부
+  graded: false,         // 채점 완료 여부 (실시간 채점에서 = 完成 상태)
   showHint: false,       // 한글 해석 힌트 표시 여부
   // 통계
   correct: 0,
@@ -165,9 +169,22 @@ function injectStyles(){
       background:var(--mi-d,#E8D4B8);color:var(--mo,#1C140A);
       border-color:var(--gutong,#876A36);
     }
-    .v14d-slot.filled:hover:not(.graded){
+    .v14d-slot.filled:hover:not(.graded):not(.locked){
       background:#F0DDB6;transform:translateY(-1px);
     }
+    /* v14.3: 첫 구절(pre-locked) — 문제 영역에 미리 주어진 도입부 */
+    .v14d-slot.locked{
+      background:linear-gradient(135deg,#FFF3D6,#F5DCB8);
+      color:#5A3008;border-color:#B8860B;border-style:solid;
+      cursor:default;box-shadow:inset 0 0 0 1px #FFE08A;
+    }
+    .v14d-slot.locked::after{
+      content:'始';position:absolute;top:-6px;right:-4px;
+      font-family:var(--font-display,'ZCOOL XiaoWei',serif);font-size:9px;
+      background:#B8860B;color:#FFE08A;padding:0 4px;border-radius:6px;
+      letter-spacing:.05em;
+    }
+    .v14d-slot.locked{position:relative}
     .v14d-slot.correct{
       background:#C8E6C9;color:#1B5E20;border-color:#2E6B48;
       box-shadow:0 1px 4px rgba(46,107,72,.3);
@@ -329,58 +346,96 @@ function getChapterTotal(){
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 문제 초기화
+// 문제 초기화 (v14.3: 첫 토막을 미리 슬롯에 lock 시키고 풀에서 제외)
 // ─────────────────────────────────────────────────────────────────────
 function initProblem(){
   const p = getCurrentProblem();
   if(!p){ STATE.slots = []; STATE.pool = []; return; }
   const n = p.tokens.length;
   STATE.slots = new Array(n).fill(null);
-  STATE.pool = shuffleIndices(n);
+  STATE.locked = new Array(n).fill(false);
   STATE.taken = new Set();
   STATE.graded = false;
+
+  // v14.3: 첫 구절(0번 토막)은 문제에 미리 주어진다 — 슬롯에 박힌 상태로 시작
+  if(n >= 1){
+    STATE.slots[0] = 0;
+    STATE.locked[0] = true;
+  }
+
+  // 풀: 0번 토막은 제외하고 나머지만 셔플 (length가 1이면 풀이 비어 그대로 정답)
+  if(n <= 1){
+    STATE.pool = [];
+  } else {
+    const remaining = Array.from({length: n-1}, (_,i) => i+1);  // [1..n-1]
+    if(remaining.length >= 2){
+      do {
+        for(let i = remaining.length-1; i>0; i--){
+          const j = Math.floor(Math.random() * (i+1));
+          [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
+        }
+      } while(remaining.every((v,i) => v === i+1));  // 정답 그대로 나오면 다시
+    }
+    STATE.pool = remaining;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 액션
+// 액션 (v14.3: 실시간 채점)
 // ─────────────────────────────────────────────────────────────────────
+//   채점 기준: "슬롯의 텍스트가 그 슬롯 정답 텍스트와 같으면 正解"
+//   → 동일 글자의 토막은 어디 들어가도 그 슬롯 정답과 같기만 하면 OK
+function slotTextEquals(slotIdx, origIdx){
+  const p = getCurrentProblem();
+  if(!p) return false;
+  return p.tokens[slotIdx] === p.tokens[origIdx];
+}
+function isSlotCorrect(slotIdx){
+  const orig = STATE.slots[slotIdx];
+  if(orig == null) return false;
+  return slotTextEquals(slotIdx, orig);
+}
+function isAllCorrect(){
+  if(!STATE.slots.length) return false;
+  return STATE.slots.every((v,i) => v != null && slotTextEquals(i, v));
+}
+
 function placeToken(poolIdx){
   if(STATE.graded) return;
   if(STATE.taken.has(poolIdx)) return;
-  // 첫 번째 비어있는 슬롯에 배치
-  const slotIdx = STATE.slots.indexOf(null);
+  // pre-locked 슬롯은 건드리지 못함 — 그 다음 빈 슬롯부터 채움
+  const slotIdx = STATE.slots.findIndex((v,i) => v == null && !STATE.locked[i]);
   if(slotIdx === -1) return;
-  // 실제 토큰의 원본 인덱스 = STATE.pool[poolIdx]
   STATE.slots[slotIdx] = STATE.pool[poolIdx];
   STATE.taken.add(poolIdx);
+  checkAutoComplete();
   renderProblem();
 }
 
 function unplaceSlot(slotIdx){
   if(STATE.graded) return;
+  if(STATE.locked[slotIdx]) return;       // pre-locked는 되돌릴 수 없음
   const origIdx = STATE.slots[slotIdx];
   if(origIdx == null) return;
-  // 어느 풀 인덱스인지 찾아서 taken에서 제거
   const poolIdx = STATE.pool.indexOf(origIdx);
   if(poolIdx !== -1) STATE.taken.delete(poolIdx);
   STATE.slots[slotIdx] = null;
   renderProblem();
 }
 
-function gradeProblem(){
-  const p = getCurrentProblem();
-  if(!p) return;
-  // 모든 슬롯 채워졌는지
-  if(STATE.slots.some(s => s == null)){
-    alert('모든 빈 칸을 채워주세요!');
-    return;
+// 모든 슬롯이 정답이면 자동 완성 (graded=true) — 통계 1회만 증가
+function checkAutoComplete(){
+  if(STATE.graded) return;
+  // 모든 비-locked 슬롯이 채워졌을 때만 채점 평가
+  const allFilled = STATE.slots.every(s => s != null);
+  if(!allFilled) return;
+  if(isAllCorrect()){
+    STATE.graded = true;
+    STATE.tried++;
+    STATE.correct++;
+    saveProgress();
   }
-  STATE.graded = true;
-  const correct = STATE.slots.every((origIdx, i) => origIdx === i);
-  STATE.tried++;
-  if(correct) STATE.correct++;
-  saveProgress();
-  renderProblem();
+  // 다 채워졌지만 틀린 경우는 graded 처리하지 않음 → 사용자가 토막을 빼서 고치도록 유도
 }
 
 function resetProblem(){
@@ -493,27 +548,32 @@ function renderProblem(){
     stat.textContent = `${STATE.index+1}/${total} · 정답률 ${acc}% (${STATE.correct}/${STATE.tried})`;
   }
 
-  // 정답 여부 (채점됐을 때)
+  // 정답 여부 (실시간 — 완성됐을 때)
   let resultBar = '';
   if(STATE.graded){
-    const correct = STATE.slots.every((origIdx, i) => origIdx === i);
-    if(correct){
-      resultBar = `<div class="v14d-result win">✓ 正解! 잘 외우셨습니다.</div>`;
-    } else {
-      const cnt = STATE.slots.filter((v,i) => v===i).length;
-      resultBar = `<div class="v14d-result lose">✗ ${cnt}/${STATE.slots.length} 정답. 색상으로 확인하세요.</div>`;
+    resultBar = `<div class="v14d-result win">✓ 正解! 잘 외우셨습니다.</div>`;
+  } else {
+    // 부분 채점 상황 표시 (잠긴 첫 토막 제외한 빈 슬롯이 모두 차 있는데 틀리면)
+    const allFilled = STATE.slots.every(s => s != null);
+    if(allFilled){
+      const cnt = STATE.slots.filter((v,i) => v != null && slotTextEquals(i, v)).length;
+      resultBar = `<div class="v14d-result lose">${cnt}/${STATE.slots.length} 일치 — 빨강 토막을 다시 빼서 옮겨보세요.</div>`;
     }
   }
 
-  // 슬롯 영역
+  // 슬롯 영역 — v14.3: 실시간 색상, locked 토막은 항상 correct로 노출
   const slotsHtml = STATE.slots.map((origIdx, i) => {
     if(origIdx == null){
       return `<span class="v14d-slot empty">·</span>`;
     }
     let cls = 'v14d-slot filled';
-    if(STATE.graded){
-      cls += origIdx === i ? ' correct graded' : ' wrong graded';
+    if(STATE.locked[i]){
+      cls += ' locked correct';
+    } else {
+      // 채워진 모든 토막은 실시간으로 채점 색상 표시
+      cls += slotTextEquals(i, origIdx) ? ' correct' : ' wrong';
     }
+    if(STATE.graded) cls += ' graded';
     const text = p.tokens[origIdx];
     return `<span class="${cls}" data-slot="${i}"><span class="num">${i+1}</span>${esc(text)}</span>`;
   }).join('');
@@ -532,8 +592,7 @@ function renderProblem(){
     ? `<div class="v14d-hint-box"><span class="lab">解</span>${esc(p.meaning || '')}</div>`
     : '';
 
-  // 컨트롤
-  const allFilled = STATE.slots.every(s => s != null);
+  // 컨트롤 (v14.3: 채점 버튼 삭제 — 실시간 자동 채점)
   let ctrlsHtml = '';
   if(STATE.graded){
     ctrlsHtml = `
@@ -546,7 +605,7 @@ function renderProblem(){
       <button class="v14d-btn" id="v14d-prev" ${STATE.index === 0 ? 'disabled' : ''}>← 이전</button>
       <button class="v14d-btn" id="v14d-hint">${STATE.showHint ? '해석 숨기기' : '해석 보기'}</button>
       <button class="v14d-btn" id="v14d-reset">초기화</button>
-      <button class="v14d-btn primary" id="v14d-grade" ${allFilled ? '' : 'disabled'}>채점 ✓</button>
+      <button class="v14d-btn" id="v14d-next">${STATE.index === total-1 ? '완료 →' : '다음 →'}</button>
     `;
   }
 
@@ -561,7 +620,7 @@ function renderProblem(){
         <span class="v14d-level ${levelCls}">${levelLabel}</span>
       </div>
 
-      <div class="v14d-slots-label">▼ 정답 자리 (탭하면 되돌리기)</div>
+      <div class="v14d-slots-label">▼ 정답 자리 · <span style="color:#B8860B">첫 구절(始)은 도입부로 미리 제시</span> · 나머지 토막을 탭하여 채우기</div>
       <div class="v14d-slots" id="v14d-slots">${slotsHtml}</div>
 
       <div class="v14d-pool-label">▼ 토막 (탭하여 채우기)</div>
@@ -582,7 +641,8 @@ function renderProblem(){
       placeToken(poolIdx);
     };
   });
-  $$('#v14d-slots .v14d-slot.filled:not(.graded)').forEach(el => {
+  // locked / graded 슬롯은 되돌리기 불가
+  $$('#v14d-slots .v14d-slot.filled:not(.locked):not(.graded)').forEach(el => {
     el.onclick = () => {
       const slotIdx = parseInt(el.dataset.slot, 10);
       unplaceSlot(slotIdx);
@@ -590,7 +650,6 @@ function renderProblem(){
   });
 
   if($('#v14d-prev'))  $('#v14d-prev').onclick = prevProblem;
-  if($('#v14d-grade')) $('#v14d-grade').onclick = gradeProblem;
   if($('#v14d-hint'))  $('#v14d-hint').onclick = () => { STATE.showHint = !STATE.showHint; renderProblem(); };
   if($('#v14d-reset')) $('#v14d-reset').onclick = resetProblem;
   if($('#v14d-retry')) $('#v14d-retry').onclick = resetProblem;
@@ -830,6 +889,6 @@ window.V14Drill = {
   render: renderShell,
 };
 
-console.log('[v14.2 드릴] 엔진 ready');
+console.log('[v14.3 드릴] 실시간 채점 엔진 ready (첫 구절 lock + 같은글자 인터체인저블)');
 
 })();
