@@ -376,38 +376,170 @@ async function applyBotBet(rid, uid, action){
 }
 
 // ─── 6) UI — 메인 진입 ──────────────────────────────────────
+// 현재 선택된 모드 (home 화면 mode picker 상태)
+let _pickedMode = 'five_draw';
+
 function open(){
-  // 모드 선택 화면
   const v = view(); if(!v) return;
   v.innerHTML = `
     <div class="jxp-lobby fade-in">
       <h2 class="view-title"><span class="han">經穴</span> 포커</h2>
-      <div class="view-sub">361穴 카드 덱 · 14단계 족보 · 최대 8人</div>
+      <div class="view-sub">361穴 카드 덱 · 14단계 족보 · 최대 8人 · 학술 보너스 4종 (★)</div>
 
+      <div class="jxp-step-label">① 모드 선택</div>
       <div class="jxp-mode-grid">
         ${modeCard('five_draw',  '五札引換', '파이브카드 드로우', '5장 + 1회 교체')}
         ${modeCard('seven_card', '七札對局', '세븐 포커', '7장 중 5장 최강')}
         ${modeCard('holdem',     '德州式',   '텍사스 홀덤', '홀 2 + 커뮤니티 5')}
-        ${modeCard('random',     '隨機',     '랜덤', '위 3종 중 무작위')}
+        ${modeCard('random',     '隨機',     '랜덤 배정', '위 3종 중 무작위')}
       </div>
 
-      <div class="jxp-actions">
-        <button class="btn btn-gold" id="jxp-public">公開房 찾기</button>
-        <button class="btn"          id="jxp-private">私房 코드 입장</button>
-        <button class="btn"          id="jxp-howto">族譜·룰 보기</button>
+      <div class="jxp-step-label">② 對局 시작</div>
+      <div class="jxp-actions-grid">
+        <button class="jxp-action-btn jxp-act-public" type="button" id="jxp-act-public">
+          <div class="jxp-act-han">公開房 만들기</div>
+          <div class="jxp-act-ko">새 방 개설 · 다른 醫家 대기</div>
+        </button>
+        <button class="jxp-action-btn jxp-act-ai" type="button" id="jxp-act-ai">
+          <div class="jxp-act-han">AI와 大局</div>
+          <div class="jxp-act-ko">AI 3봇 즉시 대국</div>
+        </button>
+        <button class="jxp-action-btn" type="button" id="jxp-act-private">
+          <div class="jxp-act-han">私房 만들기</div>
+          <div class="jxp-act-ko">코드로 친구 초대</div>
+        </button>
+        <button class="jxp-action-btn" type="button" id="jxp-act-joincode">
+          <div class="jxp-act-han">私房 코드 입장</div>
+          <div class="jxp-act-ko">4자 코드 입력</div>
+        </button>
       </div>
 
+      <div class="jxp-step-label">③ 모집 中 公開房 <small style="opacity:.6">(클릭 즉시 합류)</small></div>
       <div class="jxp-public-list" id="jxp-public-list"></div>
+
+      <div style="margin-top:14px;text-align:center">
+        <button class="btn btn-o" type="button" id="jxp-howto">📜 族譜·룰 보기 (14단계 + 확률표)</button>
+      </div>
     </div>
   `;
-  $$('.jxp-mode').forEach(el => el.addEventListener('click', ()=>{
-    const mode = el.dataset.mode;
-    openCreateModal(mode);
-  }));
-  $('#jxp-public').addEventListener('click', renderPublicList);
-  $('#jxp-private').addEventListener('click', promptJoinCode);
+  // 모드 카드 — 선택 토글
+  $$('.jxp-mode').forEach(el => {
+    if(el.dataset.mode === _pickedMode) el.classList.add('is-picked');
+    el.addEventListener('click', () => {
+      _pickedMode = el.dataset.mode;
+      $$('.jxp-mode').forEach(e => e.classList.toggle('is-picked', e.dataset.mode === _pickedMode));
+    });
+  });
+  // 액션 4종
+  $('#jxp-act-public').addEventListener('click', () => createPublicAndEnter(_pickedMode));
+  $('#jxp-act-ai').addEventListener('click',     () => startSoloVsAI(_pickedMode));
+  $('#jxp-act-private').addEventListener('click',() => createPrivateAndEnter(_pickedMode));
+  $('#jxp-act-joincode').addEventListener('click', promptJoinCode);
   $('#jxp-howto').addEventListener('click', showRulebook);
   renderPublicList();
+}
+
+// ─── ② 액션 헬퍼 ──────────────────────────────────────────────────────────
+
+// 公開房 즉시 만들고 V12Intro 컷 → 다른 醫家 대기
+async function createPublicAndEnter(mode){
+  if(!fb() || !myUid()){
+    if(typeof toast === 'function') toast('네트워크 미연결','warn');
+    return;
+  }
+  const rid = await createRoom({mode, maxPlayers:8, isPublic:true});
+  if(!rid){
+    if(typeof toast === 'function') toast('公開房 생성 실패','warn');
+    return;
+  }
+  if(window.V12Intro && window.V12Intro.show){
+    const me = { id: myUid(), name: myName(), character: (S_()||{}).character };
+    window.V12Intro.show({
+      gameLabel:'經穴포커', subLabel: '公開房 · ' + MODE_LABEL(mode),
+      han:'卦', players:[me],
+      startLabel:'바로 시작 (AI 채움)',
+      waitText:`방 코드 ${rid} · 다른 醫家가 합류할 때까지 대기. 「바로 시작」을 누르면 AI 봇으로 채워 시작합니다.`,
+      onStart:()=>{ window.V12Intro.hide && window.V12Intro.hide(); _fillBotsAndStart(rid); },
+      onCancel:()=>{ window.V12Intro.hide && window.V12Intro.hide(); renderRoom(rid); },
+    });
+  } else renderRoom(rid);
+}
+
+// AI와 즉시 대국 — 私房 생성 + AI 봇 3명 추가 + 자동 시작
+async function startSoloVsAI(mode){
+  if(!fb() || !myUid()){
+    if(typeof toast === 'function') toast('네트워크 미연결','warn');
+    return;
+  }
+  const rid = await createRoom({mode, maxPlayers:4, isPublic:false, name:`${myName()}의 AI 대국`});
+  if(!rid){
+    if(typeof toast === 'function') toast('방 생성 실패','warn');
+    return;
+  }
+  // AI 봇 3명 추가
+  await addBot(rid); await addBot(rid); await addBot(rid);
+
+  if(window.V12Intro && window.V12Intro.show){
+    const me = { id: myUid(), name: myName(), character: (S_()||{}).character };
+    // 봇 이름 미리 결정 (UI 표시용)
+    const f = fb();
+    const room = await f.get(`${FB_NODE}/${rid}`);
+    const bots = Object.entries(room.players||{})
+      .filter(([uid, p]) => p.isBot)
+      .map(([uid, p]) => ({ id: uid, name: p.name, character: ['qibo','huatuo','bianque'][Math.floor(Math.random()*3)] }));
+    window.V12Intro.show({
+      gameLabel:'經穴포커', subLabel: 'AI 對局 · ' + MODE_LABEL(mode),
+      han:'卦', players:[me, ...bots],
+      startLabel:'對局 시작',
+      waitText:'AI 봇 3명과 대국합니다',
+      onStart: async () => {
+        window.V12Intro.hide && window.V12Intro.hide();
+        await startGame(rid);
+        renderRoom(rid);
+      },
+      onCancel: () => { window.V12Intro.hide && window.V12Intro.hide(); renderRoom(rid); },
+    });
+  } else {
+    await startGame(rid);
+    renderRoom(rid);
+  }
+}
+
+// 私房 만들기 — 코드만 받아서 친구 초대
+async function createPrivateAndEnter(mode){
+  if(!fb() || !myUid()){
+    if(typeof toast === 'function') toast('네트워크 미연결','warn');
+    return;
+  }
+  const rid = await createRoom({mode, maxPlayers:8, isPublic:false});
+  if(!rid){
+    if(typeof toast === 'function') toast('私房 생성 실패','warn');
+    return;
+  }
+  alert(`私房 코드: ${rid}\n친구에게 이 코드를 알려주세요.\n친구는 「私房 코드 입장」 으로 들어옵니다.`);
+  renderRoom(rid);
+}
+
+// 公開房 「바로 시작」 시 AI 봇으로 채우고 게임 시작
+async function _fillBotsAndStart(rid){
+  const f = fb();
+  const room = await f.get(`${FB_NODE}/${rid}`);
+  if(!room) return;
+  const cur = Object.keys(room.players||{}).length;
+  const need = Math.max(0, Math.min(3, 4 - cur));  // 최소 4명 채움 (호스트 + 봇들)
+  for(let i = 0; i < need; i++) await addBot(rid);
+  await startGame(rid);
+  renderRoom(rid);
+}
+
+// 모드 라벨 (UI 표시용 helper)
+function MODE_LABEL(mode){
+  return ({
+    five_draw:  '五札引換',
+    seven_card: '七札對局',
+    holdem:     '德州式',
+    random:     '隨機',
+  })[mode] || mode;
 }
 
 function modeCard(mode, han, ko, desc){
@@ -418,44 +550,9 @@ function modeCard(mode, han, ko, desc){
   </div>`;
 }
 
+// legacy — 기존 openCreateModal 호출 시 createPublicAndEnter 로 위임 (호환)
 function openCreateModal(mode){
-  const html = `
-    <div class="modal-body">
-      <h3 class="han">經穴포커 — 방 만들기</h3>
-      <div class="form-row"><label>모드</label><div class="han">${esc(mode)}</div></div>
-      <div class="form-row"><label>최대 인원</label>
-        <select id="jxp-max"><option>2</option><option>3</option><option>4</option><option selected>6</option><option>8</option></select>
-      </div>
-      <div class="form-row"><label>공개</label>
-        <select id="jxp-public-sel"><option value="1" selected>公開房</option><option value="0">私房</option></select>
-      </div>
-      <button class="btn btn-gold" id="jxp-create-go">방 만들기</button>
-    </div>
-  `;
-  if(window.openModal) window.openModal(html);
-  setTimeout(()=>{
-    const btn = document.getElementById('jxp-create-go');
-    if(btn) btn.addEventListener('click', async ()=>{
-      const maxP = parseInt(document.getElementById('jxp-max').value, 10) || 6;
-      const isPub = document.getElementById('jxp-public-sel').value === '1';
-      const rid = await createRoom({mode, maxPlayers:maxP, isPublic:isPub});
-      if(window.closeModal) window.closeModal();
-      if(rid){
-        if(window.V12Intro && window.V12Intro.show) {
-          // 호스트 솔로 시연(2인 컷): 자기 + 'AI 대기'
-          const me = { id: myUid(), name: myName(), character: (S_()||{}).character };
-          window.V12Intro.show({
-            gameLabel:'經穴포커', subLabel: mode === 'random' ? '隨機' : mode,
-            han:'卦',
-            players:[me, {id:'_wait', name:'대기 중', character:'qibo'}],
-            startLabel:'바로 시작', waitText:'다른 사람을 기다리거나 AI를 추가하세요.',
-            onStart:()=>{ window.V12Intro.hide && window.V12Intro.hide(); renderRoom(rid); },
-            onCancel:()=>{ window.V12Intro.hide && window.V12Intro.hide(); renderRoom(rid); },
-          });
-        } else renderRoom(rid);
-      }
-    });
-  }, 50);
+  return createPublicAndEnter(mode);
 }
 
 async function renderPublicList(){
@@ -464,14 +561,17 @@ async function renderPublicList(){
   const list = $('#jxp-public-list'); if(!list) return;
   const rooms = Object.values(all||{}).filter(r=>r && r.isPublic && r.status==='waiting');
   if(!rooms.length){
-    list.innerHTML = '<div class="empty">현재 公開房 없음 — 방 만들기로 호스팅</div>';
+    list.innerHTML = '<div class="jxp-empty">현재 모집 中인 公開房이 없습니다 — 「公開房 만들기」로 첫 호스트가 되어보세요</div>';
     return;
   }
   list.innerHTML = rooms.map(r=>{
     const n = Object.keys(r.players||{}).length;
     return `<div class="jxp-room" data-rid="${esc(r.roomId)}">
-      <div class="han">${esc(r.name)}</div>
-      <div class="meta">${esc(r.mode)} · ${n}/${r.maxPlayers}人 · 최소 ${r.minBet||MIN_QI}氣</div>
+      <div>
+        <div class="jxp-room-name">${esc(r.name)}</div>
+        <div class="jxp-room-meta">${MODE_LABEL(r.mode)} · ${n}/${r.maxPlayers}人 · 최소 ${r.minBet||MIN_QI}氣</div>
+      </div>
+      <div style="font-size:11px;color:#3A6A4A;font-weight:600">→ 합류</div>
     </div>`;
   }).join('');
   $$('.jxp-room', list).forEach(el => el.addEventListener('click', async ()=>{
@@ -624,7 +724,72 @@ function updateRoomView(room, rid){
 window.V12JxPoker = {
   open, createRoom, joinRoom, startGame, bet, swapCards, showdown,
   addBot, setReady, renderRoom, showRulebook,
-  VERSION:'12.0',
+  createPublicAndEnter, startSoloVsAI, createPrivateAndEnter,   // v12.3 신규
+  VERSION:'12.3',
 };
-console.log('[經穴포커 v12.0] 모듈 로드');
+
+// ─── 스타일 주입 (모듈 1회만) ─────────────────────────────────────────────
+if(!document.getElementById('v12-jxpoker-style')){
+  const st = document.createElement('style');
+  st.id = 'v12-jxpoker-style';
+  st.textContent = `
+    .jxp-lobby { padding: 14px 16px 22px; }
+    .jxp-lobby .view-title { margin: 6px 0 4px; font-family:'ZCOOL XiaoWei',serif; color:#7C5810; font-size:24px; letter-spacing:4px; }
+    .jxp-lobby .view-sub { font-size:12px; color:#888; margin-bottom:14px; }
+    .jxp-step-label { font-family:'ZCOOL XiaoWei',serif; color:#7C5810; font-size:14px; margin:14px 0 8px; padding-left:4px; border-left:3px solid #D4AF37; padding-left:8px; }
+
+    /* 모드 카드 그리드 (4칸, 모바일 2칸) */
+    .jxp-mode-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; margin-bottom:6px; }
+    @media (max-width:520px){ .jxp-mode-grid { grid-template-columns:repeat(2, 1fr); } }
+    .jxp-mode {
+      background:#FAF6EC; border:1.5px solid #D8C9A0; border-radius:10px;
+      padding:12px 8px; cursor:pointer; text-align:center; transition:all .15s;
+      user-select:none;
+    }
+    .jxp-mode:hover { transform:translateY(-1px); border-color:#C9A227; }
+    .jxp-mode.is-picked {
+      background:linear-gradient(135deg, #FFF8E0, #FFE5C0);
+      border-color:#D4AF37; box-shadow:0 0 0 2px #D4AF37 inset, 0 4px 12px rgba(212,175,55,.25);
+    }
+    .jxp-mode-han { font-family:'ZCOOL XiaoWei',serif; font-size:18px; color:#7C5810; font-weight:600; }
+    .jxp-mode-ko  { font-size:11px; color:#666; margin-top:3px; }
+    .jxp-mode-desc { font-size:10px; color:#999; margin-top:2px; line-height:1.3; }
+
+    /* 액션 4 버튼 (2x2 그리드) */
+    .jxp-actions-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; margin-bottom:6px; }
+    .jxp-action-btn {
+      background:#fff; border:1.5px solid #D8C9A0; border-radius:10px;
+      padding:14px 10px; cursor:pointer; text-align:center; transition:all .15s;
+      font-family:inherit;
+    }
+    .jxp-action-btn:hover { transform:translateY(-1px); border-color:#C9A227; box-shadow:0 4px 12px rgba(201,162,39,.15); }
+    .jxp-action-btn.jxp-act-public {
+      background:linear-gradient(135deg, #FFF8E0, #FFE5C0); border-color:#D4AF37;
+    }
+    .jxp-action-btn.jxp-act-ai {
+      background:linear-gradient(135deg, #E8F0E8, #D8E8D8); border-color:#3A6A4A;
+    }
+    .jxp-act-han { font-family:'ZCOOL XiaoWei',serif; font-size:17px; color:#7C5810; font-weight:600; }
+    .jxp-act-ai .jxp-act-han { color:#3A6A4A; }
+    .jxp-act-ko  { font-size:11px; color:#666; margin-top:4px; }
+
+    /* 公開房 리스트 */
+    .jxp-public-list { display:flex; flex-direction:column; gap:6px; min-height:40px; }
+    .jxp-public-list .jxp-room {
+      padding:10px 12px; background:#fff; border:1px solid #D8C9A0; border-radius:8px;
+      cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:transform .15s;
+    }
+    .jxp-public-list .jxp-room:hover { transform:translateY(-1px); box-shadow:0 3px 8px rgba(0,0,0,0.1); }
+    .jxp-public-list .jxp-empty { padding:14px; text-align:center; color:#888; font-size:12px; background:#FAF6EC; border-radius:8px; }
+    .jxp-room-name { font-family:'ZCOOL XiaoWei',serif; font-size:14px; color:#7C5810; }
+    .jxp-room-meta { font-size:11px; color:#888; }
+
+    /* 게임 진행 카드 */
+    .jxp-card { display:inline-block; padding:4px 6px; margin:2px; background:#fff;
+      border:2px solid #888; border-radius:6px; min-width:50px; text-align:center; }
+  `;
+  document.head.appendChild(st);
+}
+
+console.log('[經穴포커 v12.3] 모듈 로드 — 公開房 만들기 + AI 對局 추가');
 })();
