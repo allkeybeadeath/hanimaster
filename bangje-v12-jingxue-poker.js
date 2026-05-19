@@ -28,7 +28,45 @@ const $$ = (q,r)=>Array.from((r||document).querySelectorAll(q));
 const esc = s => String(s||'').replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
 const toast = (m,k)=>{ try{ window.toast && window.toast(m,k); }catch(_){}};
 const view = ()=>document.getElementById('view');
-const fb = ()=>(typeof FB!=='undefined'&&FB)||null;
+// v12.5.6: AI 對局용 in-memory 스토어 (Firebase 우회)
+const _localStore = {};
+function _isLocal(rid){ return typeof rid === 'string' && rid.startsWith('LOC_'); }
+function _localPath(path){
+  const m = String(path).match(new RegExp('^' + FB_NODE + '\\/([^\\/]+)(\\/(.*))?$'));
+  if(!m) return null;
+  const rid = m[1]; if(!_isLocal(rid)) return null;
+  return { rid, sub: m[3] || '' };
+}
+function _localGet(path){
+  const p = _localPath(path); if(!p) return undefined;
+  let cur = _localStore[p.rid];
+  if(!cur || !p.sub) return cur ? JSON.parse(JSON.stringify(cur)) : null;
+  for(const k of p.sub.split('/')){ if(cur && typeof cur === 'object') cur = cur[k]; else return null; }
+  return cur === undefined ? null : JSON.parse(JSON.stringify(cur));
+}
+function _localPut(path, val){
+  const p = _localPath(path); if(!p) return undefined;
+  if(!p.sub){ _localStore[p.rid] = JSON.parse(JSON.stringify(val)); return true; }
+  if(!_localStore[p.rid]) _localStore[p.rid] = {};
+  let cur = _localStore[p.rid];
+  const keys = p.sub.split('/');
+  for(let i = 0; i < keys.length - 1; i++){
+    if(!cur[keys[i]] || typeof cur[keys[i]] !== 'object') cur[keys[i]] = {};
+    cur = cur[keys[i]];
+  }
+  cur[keys[keys.length-1]] = JSON.parse(JSON.stringify(val));
+  return true;
+}
+const _realFb = () => (typeof FB!=='undefined'&&FB)||null;
+function fb(){
+  const real = _realFb(); if(!real) return null;
+  return {
+    ...real,
+    get: async (path, t) => { const v = _localGet(path); return v !== undefined ? v : real.get(path, t); },
+    put: async (path, val, t) => { const v = _localPut(path, val); return v !== undefined ? v : real.put(path, val, t); },
+    del: async (path) => { const p = _localPath(path); if(p){ if(!p.sub) delete _localStore[p.rid]; return true; } return real.del(path); },
+  };
+}
 const S_ = ()=>(typeof S!=='undefined'&&S)||null;
 const myUid = ()=>{const s=S_();return s&&s.userId||null;};
 const myName = ()=>{const s=S_();return s&&s.name||'醫家';};
@@ -467,42 +505,51 @@ async function createPublicAndEnter(mode){
 
 // AI와 즉시 대국 — 私房 생성 + AI 봇 3명 추가 + 자동 시작
 async function startSoloVsAI(mode){
-  if(!fb() || !myUid()){
-    if(typeof toast === 'function') toast('네트워크 미연결','warn');
+  const f = fb();
+  const uid = myUid();
+  if(!f){ toast('Firebase 미연결','warn'); return; }
+  if(!uid){ toast('사용자 ID 없음 — 새로고침','warn'); return; }
+  if(mode === 'random'){
+    mode = ['five_draw','seven_card','holdem'][Math.floor(Math.random()*3)];
+  }
+  const rid = 'LOC_' + roomCode();  // v12.5.6: LOC_ prefix → in-memory
+  const botNames = ['岐伯AI','華佗AI','扁鵲AI'];
+  const players = {};
+  players[uid] = {
+    name: myName(), character: (S_()||{}).character||null,
+    qi: myQi(), isHost:true, isReady:true, isBot:false,
+    seat:0, joinedAt: nowMs(), folded:false, chips:0, currentBet:0,
+  };
+  for(let i = 1; i <= 3; i++){
+    const botUid = `bot_${i}_${nowMs()}_${Math.floor(Math.random()*9999)}`;
+    players[botUid] = {
+      name: botNames[i-1], character: null,
+      qi: 800 + Math.floor(Math.random()*1200),
+      isHost:false, isReady:true, isBot:true,
+      seat:i, joinedAt: nowMs(), folded:false, chips:0, currentBet:0,
+    };
+  }
+  const room = {
+    roomId: rid, status:'waiting', hostId: uid,
+    name: `${myName()}의 AI 대국`,
+    mode, maxPlayers:4, isPublic:false, createdAt: nowMs(),
+    players,
+    pot:0, minBet:MIN_QI, board:[], deck:[],
+    turnOrder:[], turnIdx:0, turnUserId:'', turnStartedAt:0,
+    phase:'lobby', lastAction:null, round:0,
+  };
+  console.log('[經穴포커] AI 對局 단일 PUT', { rid, mode, players:Object.keys(players).length });
+  let ok = false;
+  try{ ok = await f.put(`${FB_NODE}/${rid}`, room); }
+  catch(e){ console.error('[經穴포커] PUT 예외', e); toast('서버 통신 오류','warn'); return; }
+  if(!ok){
+    console.error('[經穴포커] PUT 실패 — Firebase 룰 확인', {path:`${FB_NODE}/${rid}`});
+    toast('서버 쓰기 실패 — Firebase 룰 확인','warn');
     return;
   }
-  const rid = await createRoom({mode, maxPlayers:4, isPublic:false, name:`${myName()}의 AI 대국`});
-  if(!rid){
-    if(typeof toast === 'function') toast('방 생성 실패','warn');
-    return;
-  }
-  // AI 봇 3명 추가
-  await addBot(rid); await addBot(rid); await addBot(rid);
-
-  if(window.V12Intro && window.V12Intro.show){
-    const me = { id: myUid(), name: myName(), character: (S_()||{}).character };
-    // 봇 이름 미리 결정 (UI 표시용)
-    const f = fb();
-    const room = await f.get(`${FB_NODE}/${rid}`);
-    const bots = Object.entries(room.players||{})
-      .filter(([uid, p]) => p.isBot)
-      .map(([uid, p]) => ({ id: uid, name: p.name, character: ['qibo','huatuo','bianque'][Math.floor(Math.random()*3)] }));
-    window.V12Intro.show({
-      gameLabel:'經穴포커', subLabel: 'AI 對局 · ' + MODE_LABEL(mode),
-      han:'卦', players:[me, ...bots],
-      startLabel:'對局 시작',
-      waitText:'AI 봇 3명과 대국합니다',
-      onStart: async () => {
-        window.V12Intro.hide && window.V12Intro.hide();
-        await startGame(rid);
-        renderRoom(rid);
-      },
-      onCancel: () => { window.V12Intro.hide && window.V12Intro.hide(); renderRoom(rid); },
-    });
-  } else {
-    await startGame(rid);
-    renderRoom(rid);
-  }
+  console.log('[經穴포커] AI 對局 시작 OK:', rid);
+  await startGame(rid);
+  renderRoom(rid);
 }
 
 // 私房 만들기 — 코드만 받아서 친구 초대

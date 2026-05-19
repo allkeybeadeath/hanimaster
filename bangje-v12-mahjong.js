@@ -44,7 +44,60 @@ const $$ = (q,r)=>Array.from((r||document).querySelectorAll(q));
 const esc = s => String(s||'').replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
 const toast = (m,k)=>{ try{ window.toast && window.toast(m,k); }catch(_){}};
 const view = ()=>document.getElementById('view');
-const fb = ()=>(typeof FB!=='undefined'&&FB)||null;
+// v12.5.6: AI 對局용 in-memory 스토어 (Firebase 우회) — 카드 對決(bangje-v96-part3)과 동일 패턴
+const _localStore = {};   // rid → room object
+function _isLocal(rid){ return typeof rid === 'string' && rid.startsWith('LOC_'); }
+function _localPath(path){
+  // "FB_NODE/RID" 또는 "FB_NODE/RID/players/X..." 형태에서 rid 추출
+  const m = String(path).match(new RegExp('^' + FB_NODE + '\\/([^\\/]+)(\\/(.*))?$'));
+  if(!m) return null;
+  const rid = m[1]; if(!_isLocal(rid)) return null;
+  return { rid, sub: m[3] || '' };
+}
+function _localGet(path){
+  const p = _localPath(path); if(!p) return undefined;
+  let cur = _localStore[p.rid];
+  if(!cur || !p.sub) return cur ? JSON.parse(JSON.stringify(cur)) : null;
+  for(const k of p.sub.split('/')){ if(cur && typeof cur === 'object') cur = cur[k]; else return null; }
+  return cur === undefined ? null : JSON.parse(JSON.stringify(cur));
+}
+function _localPut(path, val){
+  const p = _localPath(path); if(!p) return undefined;
+  if(!p.sub){ _localStore[p.rid] = JSON.parse(JSON.stringify(val)); return true; }
+  if(!_localStore[p.rid]) _localStore[p.rid] = {};
+  let cur = _localStore[p.rid];
+  const keys = p.sub.split('/');
+  for(let i = 0; i < keys.length - 1; i++){
+    if(!cur[keys[i]] || typeof cur[keys[i]] !== 'object') cur[keys[i]] = {};
+    cur = cur[keys[i]];
+  }
+  cur[keys[keys.length-1]] = JSON.parse(JSON.stringify(val));
+  return true;
+}
+// fb() 가 항상 wrapped 어댑터 반환 — local rid 면 in-memory, 아니면 진짜 FB로 통과
+const _realFb = () => (typeof FB!=='undefined'&&FB)||null;
+function fb(){
+  const real = _realFb();
+  if(!real) return null;
+  return {
+    ...real,
+    get: async (path, t) => {
+      const v = _localGet(path);
+      if(v !== undefined) return v;
+      return real.get(path, t);
+    },
+    put: async (path, val, t) => {
+      const v = _localPut(path, val);
+      if(v !== undefined) return v;
+      return real.put(path, val, t);
+    },
+    del: async (path) => {
+      const p = _localPath(path);
+      if(p){ if(!p.sub) delete _localStore[p.rid]; return true; }
+      return real.del(path);
+    },
+  };
+}
 const S_ = ()=>(typeof S!=='undefined'&&S)||null;
 const myUid = ()=>{const s=S_();return s&&s.userId||null;};
 const myName = ()=>{const s=S_();return s&&s.name||'醫家';};
@@ -99,46 +152,6 @@ for(const F of FORMULAS) for(const h of F.comp){
   if(!HERB_TO_F[h]) HERB_TO_F[h] = [];
   HERB_TO_F[h].push(F.han);
 }
-
-// ─── 본초 분류 (本草學 효능별 8 카테고리) — 카드 색상/디자인 차별화용 ─────
-//   解表(해표): 풍한·풍열 발산. 麻黃·桂枝·葛根·柴胡·防風·蘇葉·生薑
-//   淸熱(청열): 열을 식힘. 石膏·知母·黃連·黃芩·黃柏·梔子·茵蔯·竹葉·香豉·滑石
-//   瀉下(사하): 대변 통하게. 大黃·芒硝·麻仁·蜂蜜
-//   祛濕(거습): 습 제거. 茯苓·豬苓·澤瀉·蒼朮·白朮·厚朴·陳皮·半夏
-//   溫裏(온리): 속을 데움. 乾薑·桂枝(겸)·朱砂
-//   理氣(이기): 기 운행. 枳實·香附·神麯·烏梅·蘇葉(겸)
-//   補益(보익): 기·혈·음·양 보충. 人蔘·黃耆·甘草·當歸·熟地黃·白芍·麥門冬·阿膠·酸棗仁·大棗·粳米·浮小麥
-//   活血(활혈): 혈 활성. 川芎·桃仁·紅花·赤芍·地龍·生地黃·杏仁·麻黃根·牡蠣
-const HERB_CAT = {
-  // 解表
-  '麻黃':'jie','桂枝':'jie','葛根':'jie','柴胡':'jie','防風':'jie','蘇葉':'jie','生薑':'jie',
-  // 淸熱
-  '石膏':'qing','知母':'qing','黃連':'qing','黃芩':'qing','黃柏':'qing','梔子':'qing','茵蔯':'qing','竹葉':'qing','香豉':'qing','滑石':'qing',
-  // 瀉下
-  '大黃':'xia','芒硝':'xia','麻仁':'xia','蜂蜜':'xia',
-  // 祛濕
-  '茯苓':'shi','豬苓':'shi','澤瀉':'shi','蒼朮':'shi','白朮':'shi','厚朴':'shi','陳皮':'shi','半夏':'shi',
-  // 溫裏
-  '乾薑':'wen','朱砂':'wen',
-  // 理氣
-  '枳實':'qi','香附':'qi','神麯':'qi','烏梅':'qi',
-  // 補益
-  '人蔘':'bu','黃耆':'bu','甘草':'bu','當歸':'bu','熟地黃':'bu','白芍':'bu','麥門冬':'bu','阿膠':'bu','酸棗仁':'bu','大棗':'bu','粳米':'bu','浮小麥':'bu',
-  // 活血(겸 일부 化痰·止血)
-  '川芎':'huo','桃仁':'huo','紅花':'huo','赤芍':'huo','地龍':'huo','生地黃':'huo','杏仁':'huo','麻黃根':'huo','牡蠣':'huo',
-};
-const HERB_CAT_META = {
-  jie:  { name:'解表', color:'#5BA889', bg:'#E8F5EE', text:'#1F5A3F' },  // 풀빛 (發散)
-  qing: { name:'淸熱', color:'#3A7BB7', bg:'#E4EEFA', text:'#1F4267' },  // 청옥 (冷)
-  xia:  { name:'瀉下', color:'#7B4A8A', bg:'#F0E5F5', text:'#4A2A5A' },  // 자줏빛 (下)
-  shi:  { name:'祛濕', color:'#A88B4A', bg:'#F8F0DA', text:'#5C4520' },  // 토색 (土)
-  wen:  { name:'溫裏', color:'#C4502A', bg:'#FAE3D8', text:'#7A2F15' },  // 화염 (火)
-  qi:   { name:'理氣', color:'#C9941F', bg:'#FBF1D8', text:'#7C5810' },  // 황금 (氣)
-  bu:   { name:'補益', color:'#B8395C', bg:'#FAE0E8', text:'#6A1A2F' },  // 단심 (心血)
-  huo:  { name:'活血', color:'#8A2A2A', bg:'#F5D8D8', text:'#5A1414' },  // 핏빛
-  default: { name:'本草', color:'#888',  bg:'#FAF6EC', text:'#444' },
-};
-function herbMeta(h){ return HERB_CAT_META[HERB_CAT[h]] || HERB_CAT_META.default; }
 
 // 카드 매수 (시뮬에서 검증한 분포)
 function cardCount(n){
@@ -243,96 +256,6 @@ function botDiscard(handArr){
     if(s < worstScore){ worstScore = s; worstHerb = h; }
   }
   return worstHerb;
-}
-
-// ─── 4.5) 사운드 (Web Audio — 경쾌한 마작 효과음) ─────────────────────────
-let _ac = null;
-function _audioCtx(){
-  if(_ac) return _ac;
-  try{ _ac = new (window.AudioContext || window.webkitAudioContext)(); }catch(_){ _ac = null; }
-  return _ac;
-}
-function _tone(ctx, gainNode, t0, freq, dur, type, peak){
-  const o = ctx.createOscillator();
-  const g = ctx.createGain();
-  o.type = type || 'sine';
-  o.frequency.value = freq;
-  const now = ctx.currentTime;
-  g.gain.setValueAtTime(0, now + t0);
-  g.gain.linearRampToValueAtTime(peak || 0.16, now + t0 + 0.008);
-  g.gain.exponentialRampToValueAtTime(0.0001, now + t0 + dur);
-  o.connect(g); g.connect(gainNode);
-  o.start(now + t0); o.stop(now + t0 + dur + 0.03);
-}
-function sfx(kind){
-  try{
-    const ctx = _audioCtx(); if(!ctx) return;
-    if(ctx.state === 'suspended'){ try{ ctx.resume(); }catch(_){} }
-    const G = ctx.createGain(); G.gain.value = 0.85; G.connect(ctx.destination);
-    const C5=523.25, D5=587.33, E5=659.25, G5=783.99, A5=880, C6=1046.5, E6=1318.5, G6=1568;
-    switch(kind){
-      case 'discard':
-        // 마작 패가 탁자에 떨어지는 듯 — 짧은 우드 톡톡
-        _tone(ctx, G, 0,    220, 0.05, 'square',   0.10);
-        _tone(ctx, G, 0.005,440, 0.08, 'triangle', 0.14);
-        _tone(ctx, G, 0.01, 880, 0.05, 'sine',     0.08);
-        break;
-      case 'draw':
-        // 패를 뽑는 짧은 상승음
-        _tone(ctx, G, 0,    G5, 0.08, 'sine', 0.10);
-        _tone(ctx, G, 0.04, C6, 0.10, 'sine', 0.10);
-        break;
-      case 'select':
-        // 카드 호버/선택
-        _tone(ctx, G, 0, E6, 0.05, 'triangle', 0.08);
-        break;
-      case 'win':
-        // 화료! 화려한 5도+옥타브
-        _tone(ctx, G, 0,    C5, 0.5, 'sine',     0.14);
-        _tone(ctx, G, 0.06, E5, 0.5, 'sine',     0.12);
-        _tone(ctx, G, 0.12, G5, 0.5, 'sine',     0.12);
-        _tone(ctx, G, 0.18, C6, 0.6, 'triangle', 0.14);
-        _tone(ctx, G, 0.30, E6, 0.7, 'triangle', 0.12);
-        _tone(ctx, G, 0.42, G6, 0.8, 'sine',     0.14);
-        break;
-      case 'lose':
-      case 'timeout':
-        _tone(ctx, G, 0,    330, 0.4, 'triangle', 0.10);
-        _tone(ctx, G, 0.10, 220, 0.5, 'triangle', 0.10);
-        break;
-      case 'turn':
-        // 내 턴 시작
-        _tone(ctx, G, 0,    G5, 0.10, 'sine',     0.10);
-        _tone(ctx, G, 0.08, C6, 0.14, 'triangle', 0.10);
-        break;
-      case 'shuffle':
-        // 게임 시작 — 셔플 느낌
-        for(let i = 0; i < 6; i++){
-          _tone(ctx, G, i*0.04, 600 + Math.random()*400, 0.06, 'square', 0.06);
-        }
-        break;
-      default:
-        _tone(ctx, G, 0, 440, 0.1, 'sine', 0.10);
-    }
-  }catch(_){}
-}
-
-// ─── 4.6) 캐릭터 이미지 헬퍼 ──────────────────────────────────────────────
-function charImgUrl(charId){
-  if(!charId) return null;
-  try{
-    const dict = window.CHARACTER_IMAGES;
-    if(dict && dict[charId]){
-      return dict[charId].url || dict[charId].fallback || null;
-    }
-  }catch(_){}
-  // fallback: 직접 파일명 추측
-  return charId + '.jpg';
-}
-function charInitial(name){
-  if(!name) return '?';
-  // 한자 1글자 또는 한글 1글자
-  return String(name).trim().charAt(0) || '?';
 }
 
 // ─── 5) 덱 셔플 ──────────────────────────────────────────────────────────
@@ -497,7 +420,6 @@ async function declareWin(rid){
   if(!me) return;
   const w = checkWinning(me.hand);
   if(!w){ toast('화료 불가','warn'); return; }
-  try{ sfx('win'); }catch(_){}
   await f.put(`${FB_NODE}/${rid}`, {
     ...room, status:'finished', phase:'showdown',
     winner: myUid(), winningFormula: w.formula.id,
@@ -599,12 +521,10 @@ async function botPlay(rid, botUid){
     updated.status = 'finished';
     updated.phase = 'timeout';
   }
-  // 봇이 패를 버리는 소리 — 호스트 클라이언트에서만 (봇 자동 진행자)
-  try{ sfx('discard'); }catch(_){}
   await f.put(`${FB_NODE}/${rid}`, updated);
 
   // 다음 봇도 자동
-  if(updated.status === 'playing' && updated.players[nextUid] && updated.players[nextUid].isBot){
+  if(updated.status === 'playing' && updated.players[nextUid].isBot){
     setTimeout(() => botPlay(rid, nextUid), 1500);
   }
 }
@@ -692,48 +612,71 @@ async function createPublicAndEnter(){
 }
 
 async function startSoloVsAI(nPlayers){
-  if(!fb() || !myUid()){ toast('네트워크 미연결','warn'); return; }
-  // nPlayers 미지정 시 사용자에게 묻기 (2/3/4)
+  const f = fb();
+  const uid = myUid();
+  if(!f){ toast('Firebase 미연결','warn'); return; }
+  if(!uid){ toast('사용자 ID 없음 — 새로고침','warn'); return; }
   if(!nPlayers){
     const choice = prompt('AI 對局 인원 (2-4): 봇 수가 (입력값 - 1)명이 됩니다', '4');
     if(!choice) return;
     nPlayers = Math.max(2, Math.min(4, parseInt(choice, 10) || 4));
   }
-  console.log('[方劑麻雀] AI 對局 시작 시도:', nPlayers, '人');
-  const rid = await createRoom({maxPlayers:nPlayers, isPublic:false, name:`${myName()}의 AI 對局 (${nPlayers}人)`});
-  if(!rid){ toast('방 생성 실패','warn'); return; }
-  // v12.5.1: 봇 (nPlayers-1)명 순차 추가 + 각 추가 후 짧은 지연 (Firebase 반영 대기)
-  const needBots = nPlayers - 1;
-  let added = 0;
-  for(let i = 0; i < needBots; i++){
-    const ok = await addBot(rid);
-    if(ok) added++;
-    else console.warn('[方劑麻雀] AI ' + (i+1) + '번째 봇 추가 실패');
-    // Firebase eventual consistency 대비 — 다음 봇 추가 전 짧은 대기
-    await new Promise(res => setTimeout(res, 150));
+  console.log('[方劑麻雀] AI 對局 시작:', nPlayers, '人');
+  const rid = 'LOC_' + roomCode();  // v12.5.6: LOC_ prefix → in-memory 스토어 사용 (Firebase 우회)
+  const botNames = ['岐伯AI','華佗AI','扁鵲AI','張仲景AI','孫思邈AI'];
+  const players = {};
+  // 사용자 (seat 0, host)
+  players[uid] = {
+    name: myName(), character: (S_()||{}).character||null,
+    qi: myQi(), isHost:true, isReady:true, isBot:false,
+    seat:0, joinedAt: nowMs(),
+    handPlaceholder: 1,
+  };
+  // 봇 (seat 1, 2, ..., nPlayers-1)
+  for(let i = 1; i < nPlayers; i++){
+    const botUid = `bot_${i}_${nowMs()}_${Math.floor(Math.random()*9999)}`;
+    players[botUid] = {
+      name: botNames[i-1] || ('Bot' + i),
+      character: null,
+      qi: 800 + Math.floor(Math.random()*1200),
+      isHost:false, isReady:true, isBot:true,
+      seat: i, joinedAt: nowMs(),
+      handPlaceholder: 1,
+    };
   }
-  console.log('[方劑麻雀] 봇 추가 결과:', added, '/', needBots, '명');
-  if(added < needBots){
-    toast(`AI 봇 ${added}/${needBots}명만 추가됨 — 진행`, 'warn');
+  // v12.5.5: 처음부터 playing 상태 + 손패 분배 완료된 방을 단 1회 PUT
+  const deck = shuffleDeck();
+  for(const pid of Object.keys(players)){
+    players[pid].hand = deck.splice(0, HAND_INIT);
+    players[pid].discards = [];
+    delete players[pid].handPlaceholder;
   }
-  // 방 상태 한 번 더 fetch해서 players 수 확인 (Firebase 반영 보장)
-  await new Promise(res => setTimeout(res, 300));
-  const f = fb();
-  const verifyRoom = await f.get(`${FB_NODE}/${rid}`);
-  const actualPlayers = Object.keys((verifyRoom && verifyRoom.players) || {}).length;
-  console.log('[方劑麻雀] 시작 직전 방 상태:', actualPlayers, '/', nPlayers, '人');
-  if(actualPlayers < 2){
-    toast('방에 사람이 너무 적음 — AI 추가 실패','warn');
-    renderRoom(rid);
+  const room = {
+    roomId: rid, status:'playing', hostId: uid,
+    name: `${myName()}의 AI 對局 (${nPlayers}人)`,
+    maxPlayers: nPlayers,
+    isPublic: false, createdAt: nowMs(),
+    gameType: 'mahjong',
+    players,
+    pot:0, deck, turnIdx:0, turnUserId: uid, turnStartedAt: nowMs(),
+    phase:'playing', lastAction:null, turn:1,
+  };
+  console.log('[方劑麻雀] AI 對局 단일 PUT', { rid, players: Object.keys(players).length });
+
+  let ok = false;
+  try{
+    ok = await f.put(`${FB_NODE}/${rid}`, room);
+  }catch(e){
+    console.error('[方劑麻雀] PUT 예외', e);
+    toast('서버 통신 오류','warn');
     return;
   }
-  // 자동 시작
-  const sr = await startGame(rid);
-  if(sr && sr.ok === false){
-    toast('게임 시작 실패: ' + (sr.msg||''), 'warn');
-    renderRoom(rid);
+  if(!ok){
+    console.error('[方劑麻雀] PUT 실패', {path: `${FB_NODE}/${rid}`});
+    toast('서버 쓰기 실패 — Firebase 룰 확인','warn');
     return;
   }
+  console.log('[方劑麻雀] AI 對局 시작 OK:', rid);
   renderRoom(rid);
 }
 
@@ -783,69 +726,40 @@ async function renderPublicList(){
 }
 
 // ─── 10) UI: 방 / 게임 ───────────────────────────────────────────────────
-// v12.6: 폴링 시 매번 innerHTML 전체 교체 → '화면 새로고침/깜빡임' 문제 해결.
-//   ・ 상태 hash (status + turnUserId + turn + 손패합 + 버린패합) 가 같으면 skip
-//   ・ status 천이(waiting→playing, playing→finished) 시에만 전체 재렌더
-//   ・ playing 中 같은 status면 변하는 부분만 부분 업데이트
-function stateHash(room){
-  if(!room) return '';
-  const ps = room.players || {};
-  const me = ps[myUid()] || {};
-  const handStr = (me.hand||[]).slice().sort().join(',');
-  const discStr = (me.discards||[]).join(',');
-  let othersStr = '';
-  for(const [uid, p] of Object.entries(ps)){
-    if(uid === myUid()) continue;
-    othersStr += uid + ':' + ((p.hand||[]).length) + ':' + ((p.discards||[]).length) + '|';
-  }
-  return [room.status, room.phase, room.turn||0, room.turnUserId||'', handStr, discStr, othersStr, Object.keys(ps).length].join('#');
-}
-
 function renderRoom(rid){
   const v = view(); if(!v) return;
   const f = fb();
-  // 폴링 lock — 사용자 액션 직후 짧은 동안 폴링 차단 (깜빡임 방지)
-  if(window._bjmPoll) clearInterval(window._bjmPoll);
-  window._bjmState = { lastHash:'', lastStatus:'', actionLockUntil:0, rid };
+  let lastSig = '';   // v12.5.3: 방 상태 시그니처 — 변경 없을 때 재렌더 skip (버튼 클릭 도중 DOM 파괴 방지)
 
   const tick = async () => {
-    if(nowMs() < (window._bjmState.actionLockUntil||0)) return;  // 액션 직후 짧은 lock
+    // v12.5.3: 사용자가 액션 진행 중이면 폴링 skip (clearInterval 대안)
+    if(window._bjmActionLock){
+      return;
+    }
     const room = await f.get(`${FB_NODE}/${rid}`);
     if(!room){
       v.innerHTML = '<div style="padding:20px;text-align:center;color:#888">방이 사라졌습니다</div>';
       clearInterval(window._bjmPoll);
       return;
     }
-    const h = stateHash(room);
-    if(h === window._bjmState.lastHash) return;  // 변화 없음 → 재렌더 skip
-    const prevStatus = window._bjmState.lastStatus;
-    window._bjmState.lastHash = h;
-    window._bjmState.lastStatus = room.status;
-    window._bjmState.lastRoom = room;
-    // status 천이 또는 첫 그림이면 전체 재렌더
-    if(prevStatus !== room.status){
-      drawRoom(rid, room);
-      if(room.status === 'playing' && prevStatus === 'waiting'){
-        try{ sfx('shuffle'); }catch(_){}
-      }
-      if(room.status === 'finished'){
-        try{ sfx(room.winner === myUid() ? 'win' : (room.phase === 'timeout' ? 'timeout' : 'lose')); }catch(_){}
-      }
-    } else if(room.status === 'playing'){
-      // 게임 중: 부분 업데이트만
-      updateGameTable(rid, room);
-    } else {
-      // waiting / finished : 같은 status 內 변화 (좌석 추가 등)
-      drawRoom(rid, room);
-    }
+    // 시그니처: status + phase + players uids + turnUserId + turn
+    const sig = JSON.stringify([
+      room.status, room.phase,
+      Object.keys(room.players||{}).sort(),
+      room.turnUserId, room.turn,
+      room.winner || '',
+      // 게임 중일 때 손패 개수 변경도 감지
+      Object.values(room.players||{}).map(p => (p.hand||[]).length).join(','),
+      (room.deck||[]).length,
+    ]);
+    if(sig === lastSig) return;   // 변경 없음 → 재렌더 안 함 → 버튼 DOM 보존 → 클릭 가능
+    lastSig = sig;
+    drawRoom(rid, room);
   };
+  if(window._bjmPoll) clearInterval(window._bjmPoll);
+  window._bjmActionLock = false;
   tick();
   window._bjmPoll = setInterval(tick, POLL_MS);
-}
-
-// 사용자 액션 직후 짧은 lock + 즉시 부분 업데이트 (낙관적 UI)
-function _lockPolling(ms){
-  if(window._bjmState) window._bjmState.actionLockUntil = nowMs() + (ms||600);
 }
 
 function drawRoom(rid, room){
@@ -860,18 +774,11 @@ function drawRoom(rid, room){
         <h2 class="han">方劑麻雀房 — ${esc(rid)}</h2>
         <div style="font-size:12px;color:#888;margin-bottom:8px">${room.isPublic?'公開房':'私房'} · ${Object.keys(room.players).length}/${room.maxPlayers}人</div>
         <div class="bjm-seats">
-          ${players.map(([uid, p]) => {
-            const cimg = charImgUrl(p.character);
-            const avatar = cimg
-              ? `<div class="bjm-seat-avatar"><img src="${esc(cimg)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'bjm-seat-avatar-init',textContent:'${esc(charInitial(p.name))}'}))"></div>`
-              : `<div class="bjm-seat-avatar"><div class="bjm-seat-avatar-init">${esc(charInitial(p.name))}</div></div>`;
-            return `
+          ${players.map(([uid, p]) => `
             <div class="bjm-seat ${uid===myUid()?'is-me':''}">
-              ${avatar}
               <div class="bjm-seat-name">${esc(p.name)}${p.isHost?' 👑':''}${p.isBot?' 🤖':''}</div>
-              <div class="bjm-seat-seat">座 ${(p.seat||0)+1}</div>
-            </div>`;
-          }).join('')}
+            </div>
+          `).join('')}
         </div>
         <div class="bjm-tools">
           ${isHost ? `<button class="btn btn-gold" id="bjm-start" type="button">對局 시작</button>` : ''}
@@ -882,16 +789,30 @@ function drawRoom(rid, room){
     `;
     if(isHost){
       $('#bjm-start').addEventListener('click', async () => {
-        const r = await startGame(rid);
-        if(!r.ok) toast(r.msg,'warn');
+        window._bjmActionLock = true;
+        try{
+          const r = await startGame(rid);
+          if(!r.ok) toast(r.msg,'warn');
+        } finally { window._bjmActionLock = false; }
       });
       const ab = $('#bjm-addbot');
       if(ab) ab.addEventListener('click', async () => {
+        window._bjmActionLock = true;
         ab.disabled = true; ab.textContent = '추가 중…';
-        const ok = await addBot(rid);
-        ab.disabled = false; ab.textContent = '+ AI 봇';
-        if(!ok) toast('AI 봇 추가 실패','warn');
-        else toast('AI 봇 추가됨','gold');
+        try{
+          const ok = await addBot(rid);
+          if(!ok) toast('AI 봇 추가 실패 — F12 콘솔 확인','warn');
+          else toast('AI 봇 추가됨','gold');
+        } finally {
+          window._bjmActionLock = false;
+          // 락 해제 후 즉시 한 번 렌더 호출 — 봇이 화면에 즉시 보이도록
+          setTimeout(() => {
+            if(window._bjmPoll){
+              const evt = new Event('forceTick');
+              window.dispatchEvent(evt);
+            }
+          }, 50);
+        }
       });
     }
     $('#bjm-leave').addEventListener('click', () => {
@@ -903,13 +824,11 @@ function drawRoom(rid, room){
   } else if(room.status === 'finished'){
     const winner = (room.players||{})[room.winner] || {name:'?'};
     const winF = FORMULAS_BY_ID[room.winningFormula] || {han:'?', ko:'?'};
-    const wImg = charImgUrl(winner.character);
     v.innerHTML = `
       <div class="bjm-finished fade-in">
         <h2 class="han">${room.phase === 'timeout' ? '無勝負' : '對局 終了'}</h2>
         ${room.winner ? `
           <div class="bjm-winner-block">
-            ${wImg ? `<div class="bjm-winner-avatar"><img src="${esc(wImg)}" alt="" onerror="this.parentElement.style.display='none'"></div>` : ''}
             <div class="bjm-winner-name">${esc(winner.name)} 화료!</div>
             <div class="bjm-winner-formula han">${esc(winF.han)} <small>(${esc(winF.ko)})</small></div>
             <div class="bjm-winner-score">${room.winningScore || 0}番 · 雀頭: <span class="han">${esc(room.winningJaktou||'')}</span></div>
@@ -925,198 +844,68 @@ function drawRoom(rid, room){
   }
 }
 
-function _cardHtml(h, opts){
-  opts = opts || {};
-  const meta = herbMeta(h);
-  const idx = opts.idx;
-  const formulas = (HERB_TO_F[h]||[]).slice(0,3).join('·');
-  const clickable = opts.clickable ? 'is-clickable' : '';
-  const attrs = (idx !== undefined) ? `data-idx="${idx}"` : '';
-  return `<div class="bjm-card ${clickable}" ${attrs}
-      style="--cat:${meta.color}; --cat-bg:${meta.bg}; --cat-text:${meta.text}"
-      data-cat="${HERB_CAT[h]||''}" title="${esc(meta.name)} · ${esc(formulas)}">
-      <div class="bjm-card-cat">${esc(meta.name)}</div>
-      <div class="bjm-card-han han">${esc(h)}</div>
-    </div>`;
-}
-
-function _opponentBlockHtml(uid, p, room){
-  const isTurn = room.turnUserId === uid;
-  const cimg = charImgUrl(p.character);
-  const avatar = cimg
-    ? `<div class="bjm-opp-avatar"><img src="${esc(cimg)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'bjm-opp-avatar-init',textContent:'${esc(charInitial(p.name))}'}))"></div>`
-    : `<div class="bjm-opp-avatar"><div class="bjm-opp-avatar-init">${esc(charInitial(p.name))}</div></div>`;
-  const handLen = (p.hand||[]).length;
-  const discards = (p.discards||[]);
-  return `
-    <div class="bjm-opponent ${isTurn?'is-turn':''}" data-uid="${esc(uid)}">
-      <div class="bjm-opp-header">
-        ${avatar}
-        <div class="bjm-opp-headtxt">
-          <div class="bjm-opp-name">${esc(p.name)}${p.isBot?' 🤖':''}</div>
-          <div class="bjm-opp-meta">${handLen}장 ${isTurn?'· ☀ 차례':''}</div>
-        </div>
-      </div>
-      <div class="bjm-opp-hand">${'<span class="bjm-back-card"></span>'.repeat(handLen)}</div>
-      <div class="bjm-opp-discards">
-        ${discards.length === 0 ? '<span style="opacity:.5;font-size:10px">버린 패 없음</span>' : discards.map(h => {
-          const meta = herbMeta(h);
-          return `<span class="han bjm-discard-mini" style="background:${meta.bg};color:${meta.text};border-color:${meta.color}">${esc(h)}</span>`;
-        }).join('')}
-      </div>
-    </div>
-  `;
-}
-
-function _myHandHtml(myHand, isMyTurn){
-  return myHand.map((h, i) => _cardHtml(h, {idx:i, clickable:isMyTurn})).join('');
-}
-
-function _myDiscardsHtml(discards){
-  if(!discards || discards.length === 0) return '<span style="opacity:.5">버린 패 없음</span>';
-  return discards.map(h => {
-    const meta = herbMeta(h);
-    return `<span class="han bjm-discard-mini" style="background:${meta.bg};color:${meta.text};border-color:${meta.color}">${esc(h)}</span>`;
-  }).join('');
-}
-
 function drawGameTable(rid, room, me){
   const v = view(); if(!v) return;
   const isMyTurn = room.turnUserId === myUid();
   const players = Object.entries(room.players||{}).sort((a,b) => a[1].seat - b[1].seat);
+
+  // 다른 플레이어 패 (개수만 노출)
+  const otherPlayersHtml = players.filter(([uid]) => uid !== myUid()).map(([uid, p]) => {
+    const isTurn = room.turnUserId === uid;
+    return `
+      <div class="bjm-opponent ${isTurn?'is-turn':''}">
+        <div class="bjm-opp-name">${esc(p.name)}${p.isBot?' 🤖':''}</div>
+        <div class="bjm-opp-hand">${(p.hand||[]).map(()=>'<span class="bjm-back-card"></span>').join('')}</div>
+        <div class="bjm-opp-discards">버린패: ${(p.discards||[]).slice(-5).map(h => `<span class="han bjm-discard-mini">${esc(h)}</span>`).join(' ')}</div>
+      </div>
+    `;
+  }).join('');
+
+  // 내 손패 — 클릭 시 버리기 (내 턴일 때만)
   const myHand = (me && me.hand) || [];
+  const myHandHtml = myHand.map((h, i) => {
+    const formulas = (HERB_TO_F[h]||[]).slice(0,3).join('·');
+    return `<div class="bjm-card ${isMyTurn?'is-clickable':''}" data-idx="${i}" title="${esc(formulas)}">
+      <span class="han">${esc(h)}</span>
+    </div>`;
+  }).join('');
+
   const canWin = checkWinning(myHand);
 
-  const otherPlayersHtml = players
-    .filter(([uid]) => uid !== myUid())
-    .map(([uid, p]) => _opponentBlockHtml(uid, p, room))
-    .join('');
-
   v.innerHTML = `
-    <div class="bjm-game fade-in" id="bjm-game-root">
+    <div class="bjm-game fade-in">
       <div class="bjm-header">
         <div class="han">方劑麻雀 — ${esc(rid)}</div>
-        <div class="bjm-info" id="bjm-info">턴 ${room.turn||0}/${MAX_TURNS} · 덱 ${(room.deck||[]).length}장</div>
+        <div class="bjm-info">턴 ${room.turn||0}/${MAX_TURNS} · 덱 ${(room.deck||[]).length}장</div>
       </div>
-      <div class="bjm-opponents" id="bjm-opponents">${otherPlayersHtml}</div>
+      <div class="bjm-opponents">${otherPlayersHtml}</div>
       <div class="bjm-my-area">
-        <div class="bjm-turn-indicator ${isMyTurn?'is-active':''}" id="bjm-turn-ind">${isMyTurn ? '☀ 내 턴 — 1장 클릭해서 버리기' : '⏳ 상대 턴 대기 中…'}</div>
-        <div id="bjm-win-btn-wrap">
-          ${canWin ? `<button class="btn btn-gold bjm-win-btn" id="bjm-declare-win" type="button">🎴 화료! (${canWin.formula.han}, ${canWin.score}번)</button>` : ''}
-        </div>
-        <div class="bjm-my-hand" id="bjm-my-hand">${_myHandHtml(myHand, isMyTurn)}</div>
-        <div class="bjm-cat-legend">
-          ${Object.entries(HERB_CAT_META).filter(([k]) => k !== 'default').map(([k, m]) =>
-            `<span class="bjm-leg" style="background:${m.bg};color:${m.text};border-color:${m.color}">${esc(m.name)}</span>`
-          ).join('')}
-        </div>
-        <div class="bjm-my-discards"><span style="font-size:11px;color:#666">내가 버린: </span><span id="bjm-my-disc">${_myDiscardsHtml(me && me.discards)}</span></div>
+        <div class="bjm-turn-indicator ${isMyTurn?'is-active':''}">${isMyTurn ? '☀ 내 턴 — 1장 클릭해서 버리기' : '⏳ 상대 턴 대기 中…'}</div>
+        ${canWin ? `<button class="btn btn-gold" id="bjm-declare-win" type="button">🎴 화료! (${canWin.formula.han}, ${canWin.score}번)</button>` : ''}
+        <div class="bjm-my-hand">${myHandHtml}</div>
+        <div class="bjm-my-discards">내가 버린: ${(me.discards||[]).map(h => `<span class="han bjm-discard-mini">${esc(h)}</span>`).join(' ')}</div>
       </div>
       <button class="btn btn-o" id="bjm-leave-game" type="button" style="margin-top:10px">포기</button>
     </div>
   `;
 
-  _bindGameTableEvents(rid);
-  // 초기 손패 길이 기록 (draw 감지용)
-  const hand0 = document.getElementById('bjm-my-hand');
-  if(hand0) hand0.dataset.len = String(myHand.length);
-  if(isMyTurn) try{ sfx('turn'); }catch(_){}
-}
-
-// 부분 업데이트 — drawGameTable 호출 없이 변하는 부분만 patch
-function updateGameTable(rid, room){
-  const root = document.getElementById('bjm-game-root');
-  if(!root){ drawGameTable(rid, room, (room.players||{})[myUid()]); return; }
-
-  const isMyTurn = room.turnUserId === myUid();
-  const me = (room.players||{})[myUid()] || {};
-  const myHand = me.hand || [];
-  const canWin = checkWinning(myHand);
-
-  // 헤더 정보
-  const info = document.getElementById('bjm-info');
-  if(info) info.textContent = `턴 ${room.turn||0}/${MAX_TURNS} · 덱 ${(room.deck||[]).length}장`;
-
-  // 턴 인디케이터
-  const ti = document.getElementById('bjm-turn-ind');
-  if(ti){
-    const wasActive = ti.classList.contains('is-active');
-    ti.classList.toggle('is-active', isMyTurn);
-    ti.textContent = isMyTurn ? '☀ 내 턴 — 1장 클릭해서 버리기' : '⏳ 상대 턴 대기 中…';
-    if(isMyTurn && !wasActive) try{ sfx('turn'); }catch(_){}
-  }
-
-  // 화료 버튼
-  const wbw = document.getElementById('bjm-win-btn-wrap');
-  if(wbw){
-    const had = !!wbw.querySelector('#bjm-declare-win');
-    if(canWin && !had){
-      wbw.innerHTML = `<button class="btn btn-gold bjm-win-btn" id="bjm-declare-win" type="button">🎴 화료! (${canWin.formula.han}, ${canWin.score}번)</button>`;
-      const b = document.getElementById('bjm-declare-win');
-      if(b) b.addEventListener('click', () => { _lockPolling(1000); declareWin(rid); });
-    } else if(!canWin && had){
-      wbw.innerHTML = '';
-    } else if(canWin && had){
-      // 텍스트 갱신
-      const b = wbw.querySelector('#bjm-declare-win');
-      if(b) b.textContent = `🎴 화료! (${canWin.formula.han}, ${canWin.score}번)`;
-    }
-  }
-
-  // 내 손패
-  const hand = document.getElementById('bjm-my-hand');
-  if(hand){
-    // 새 카드 뽑힘 감지 — 손패가 늘었으면 draw 사운드 (내 턴 시작)
-    const prevLen = parseInt(hand.dataset.len || '0', 10);
-    if(myHand.length > prevLen && prevLen > 0){
-      try{ sfx('draw'); }catch(_){}
-    }
-    hand.dataset.len = String(myHand.length);
-    hand.innerHTML = _myHandHtml(myHand, isMyTurn);
-    if(isMyTurn){
-      Array.from(hand.querySelectorAll('.bjm-card.is-clickable')).forEach(el => {
-        el.addEventListener('click', () => {
-          const idx = parseInt(el.dataset.idx, 10);
-          _lockPolling(800);
-          try{ sfx('discard'); }catch(_){}
-          // 즉시 시각 피드백 — 카드 빠지는 애니메이션
-          el.classList.add('is-discarding');
-          setTimeout(() => discard(rid, idx), 130);
-        });
-      });
-    }
-  }
-
-  // 내가 버린 패
-  const mdisc = document.getElementById('bjm-my-disc');
-  if(mdisc) mdisc.innerHTML = _myDiscardsHtml(me.discards);
-
-  // 상대 영역 — 전체 갈아끼우기 (개수가 적어 부담 적음)
-  const opp = document.getElementById('bjm-opponents');
-  if(opp){
-    const players = Object.entries(room.players||{}).sort((a,b) => a[1].seat - b[1].seat);
-    const newHtml = players.filter(([uid]) => uid !== myUid()).map(([uid, p]) => _opponentBlockHtml(uid, p, room)).join('');
-    if(opp.innerHTML !== newHtml) opp.innerHTML = newHtml;
-  }
-}
-
-function _bindGameTableEvents(rid){
-  const wb = document.getElementById('bjm-declare-win');
-  if(wb) wb.addEventListener('click', () => { _lockPolling(1000); declareWin(rid); });
-
-  // 손패 클릭
-  $$('.bjm-card.is-clickable').forEach(el => {
-    el.addEventListener('click', () => {
-      const idx = parseInt(el.dataset.idx, 10);
-      _lockPolling(800);
-      try{ sfx('discard'); }catch(_){}
-      el.classList.add('is-discarding');
-      setTimeout(() => discard(rid, idx), 130);
+  if(canWin){
+    $('#bjm-declare-win').addEventListener('click', async () => {
+      window._bjmActionLock = true;
+      try{ await declareWin(rid); } finally { window._bjmActionLock = false; }
     });
-  });
-
-  const lg = document.getElementById('bjm-leave-game');
-  if(lg) lg.addEventListener('click', () => {
+  }
+  if(isMyTurn){
+    $$('.bjm-card.is-clickable').forEach(el => {
+      el.addEventListener('click', async () => {
+        if(window._bjmActionLock) return;
+        window._bjmActionLock = true;
+        const idx = parseInt(el.dataset.idx, 10);
+        try{ await discard(rid, idx); } finally { window._bjmActionLock = false; }
+      });
+    });
+  }
+  $('#bjm-leave-game').addEventListener('click', () => {
     if(confirm('포기 하시겠습니까?')){
       clearInterval(window._bjmPoll);
       open();
@@ -1174,10 +963,8 @@ window.V12Mahjong = {
   addBot, renderRoom, showRulebook,
   createPublicAndEnter, startSoloVsAI, createPrivateAndEnter,
   FORMULAS, HERB_TO_F, DECK_TEMPLATE,
-  HERB_CAT, HERB_CAT_META,
   checkWinning, handScore,
-  sfx,
-  VERSION:'12.6.0',
+  VERSION:'12.5.6',
 };
 
 // ─── 13) 스타일 주입 ─────────────────────────────────────────────────────
@@ -1206,110 +993,33 @@ if(!document.getElementById('v12-mahjong-style')){
     .bjm-room-name { font-family:'ZCOOL XiaoWei',serif; font-size:14px; color:#1F3F2C; }
     .bjm-room-meta { font-size:11px; color:#888; }
     .bjm-empty { padding:14px; text-align:center; color:#888; font-size:12px; background:#FAF6EC; border-radius:8px; }
-
-    /* === 좌석 (대기실) — 캐릭터 아바타 === */
     .bjm-seats { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin:14px 0; }
-    .bjm-seat { padding:10px 8px; background:#fff; border:1px solid #D8C9A0; border-radius:10px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:4px; }
-    .bjm-seat.is-me { background:linear-gradient(135deg,#E8F5E8,#D0E8D0); border-color:#3A6A4A; box-shadow:0 0 0 2px rgba(58,106,74,.18); }
-    .bjm-seat-avatar { width:54px; height:54px; border-radius:50%; overflow:hidden; background:#FAF6EC; border:2px solid #D8C9A0; display:flex; align-items:center; justify-content:center; }
-    .bjm-seat-avatar img { width:100%; height:100%; object-fit:cover; }
-    .bjm-seat-avatar-init { font-family:'ZCOOL XiaoWei',serif; font-size:24px; color:#1F3F2C; }
-    .bjm-seat-name { font-family:'ZCOOL XiaoWei',serif; font-size:13px; color:#1F3F2C; font-weight:600; }
-    .bjm-seat-seat { font-size:10px; color:#888; }
-
+    .bjm-seat { padding:10px; background:#fff; border:1px solid #D8C9A0; border-radius:8px; text-align:center; }
+    .bjm-seat.is-me { background:linear-gradient(135deg,#E8F5E8,#D0E8D0); border-color:#3A6A4A; }
     .bjm-tools { display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; }
-    .bjm-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding:8px 12px; background:#1F3F2C; color:#F4E2C0; border-radius:6px; }
-    .bjm-info { font-size:11px; opacity:.85; }
-
-    /* === 상대 영역 === */
-    .bjm-opponents { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; margin-bottom:14px; }
-    .bjm-opponent { padding:8px; background:#FAF6EC; border:1.5px solid #D8C9A0; border-radius:8px; transition:all .2s; }
-    .bjm-opponent.is-turn { border-color:#C9701F; background:linear-gradient(135deg,#FFF8E0,#FFE5C0); box-shadow:0 0 0 2px rgba(201,112,31,.25); }
-    .bjm-opp-header { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
-    .bjm-opp-avatar { width:32px; height:32px; border-radius:50%; overflow:hidden; background:#fff; border:1.5px solid #D8C9A0; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
-    .bjm-opp-avatar img { width:100%; height:100%; object-fit:cover; }
-    .bjm-opp-avatar-init { font-family:'ZCOOL XiaoWei',serif; font-size:16px; color:#1F3F2C; }
-    .bjm-opp-headtxt { flex:1; min-width:0; }
-    .bjm-opp-name { font-size:12px; font-weight:600; color:#1F3F2C; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .bjm-opp-meta { font-size:10px; color:#888; }
-    .bjm-opp-hand { display:flex; flex-wrap:wrap; gap:2px; margin-bottom:6px; min-height:18px; }
-    .bjm-back-card { width:9px; height:14px; background:linear-gradient(135deg,#3A6A4A,#2A4A35); border-radius:2px; display:inline-block; box-shadow:inset 0 1px 0 rgba(255,255,255,.15); }
-    .bjm-opp-discards { display:flex; flex-wrap:wrap; gap:2px; min-height:18px; }
-
-    /* === 본초 카드 (본초별 카테고리 색상) === */
-    .bjm-my-area { padding:12px; background:#FAF6EC; border:2px solid #3A6A4A; border-radius:10px; }
-    .bjm-turn-indicator { font-family:'ZCOOL XiaoWei',serif; color:#888; font-size:14px; margin-bottom:10px; text-align:center; transition:all .25s; }
-    .bjm-turn-indicator.is-active { color:#C9701F; font-weight:600; font-size:16px; animation:bjm-pulse 1.8s ease-in-out infinite; }
-    @keyframes bjm-pulse { 0%,100%{opacity:1} 50%{opacity:.65} }
-
-    .bjm-my-hand { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; min-height:62px; justify-content:center; }
-    .bjm-card {
-      display:flex; flex-direction:column; align-items:center; justify-content:center;
-      padding:6px 4px; min-width:48px; min-height:62px;
-      background:var(--cat-bg, #fff);
-      border:2px solid var(--cat, #888);
-      border-radius:8px;
-      cursor:default;
-      transition:transform .15s, box-shadow .15s, opacity .12s;
-      box-shadow:0 2px 4px rgba(0,0,0,.06), inset 0 1px 0 rgba(255,255,255,.4);
-      position:relative;
-    }
-    .bjm-card-cat {
-      font-size:9px;
-      color:var(--cat, #888);
-      background:rgba(255,255,255,.7);
-      padding:1px 4px;
-      border-radius:8px;
-      margin-bottom:2px;
-      font-weight:600;
-      letter-spacing:1px;
-    }
-    .bjm-card-han {
-      font-family:'ZCOOL XiaoWei',serif;
-      font-size:18px;
-      color:var(--cat-text, #222);
-      font-weight:600;
-      line-height:1.1;
-    }
-    .bjm-card.is-clickable { cursor:pointer; }
-    .bjm-card.is-clickable:hover { transform:translateY(-5px); box-shadow:0 6px 12px rgba(0,0,0,.18); }
-    .bjm-card.is-clickable:active { transform:translateY(-2px); }
-    .bjm-card.is-discarding { animation:bjm-discard-anim .25s ease-out forwards; }
-    @keyframes bjm-discard-anim {
-      0%   { transform:translateY(0)    scale(1)   rotate(0);   opacity:1; }
-      100% { transform:translateY(40px) scale(.6)  rotate(8deg); opacity:0; }
-    }
-
-    .bjm-cat-legend { display:flex; flex-wrap:wrap; gap:3px; justify-content:center; margin:6px 0 4px; padding-top:6px; border-top:1px dashed #D8C9A0; }
-    .bjm-leg { display:inline-block; padding:1px 6px; border:1px solid; border-radius:8px; font-family:'ZCOOL XiaoWei',serif; font-size:10px; }
-
-    .bjm-discard-mini {
-      display:inline-block;
-      padding:2px 5px;
-      background:#fff;
-      border:1px solid #D8C9A0;
-      border-radius:4px;
-      font-size:11px;
-      margin:1px;
-      font-weight:600;
-    }
-    .bjm-my-discards { font-size:11px; color:#666; margin-top:8px; padding-top:8px; border-top:1px dashed #D8C9A0; display:flex; flex-wrap:wrap; align-items:center; gap:2px; }
-
-    .bjm-win-btn { animation:bjm-glow 1.4s ease-in-out infinite; margin-bottom:8px; }
-    @keyframes bjm-glow {
-      0%,100% { box-shadow:0 0 0 0 rgba(212,175,55,.6); }
-      50%     { box-shadow:0 0 14px 4px rgba(212,175,55,.65); }
-    }
-
-    /* === 종료 화면 === */
+    .bjm-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding:8px; background:#1F3F2C; color:#F4E2C0; border-radius:6px; }
+    .bjm-info { font-size:11px; opacity:.8; }
+    .bjm-opponents { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:6px; margin-bottom:14px; }
+    .bjm-opponent { padding:8px; background:#FAF6EC; border:1px solid #D8C9A0; border-radius:6px; }
+    .bjm-opponent.is-turn { border-color:#C9701F; background:linear-gradient(135deg,#FFF8E0,#FFE5C0); }
+    .bjm-opp-name { font-size:12px; font-weight:600; color:#1F3F2C; margin-bottom:4px; }
+    .bjm-opp-hand { display:flex; flex-wrap:wrap; gap:2px; margin-bottom:4px; }
+    .bjm-back-card { width:10px; height:14px; background:#3A6A4A; border-radius:2px; display:inline-block; }
+    .bjm-opp-discards { font-size:9px; color:#888; }
+    .bjm-discard-mini { display:inline-block; padding:1px 3px; background:#fff; border:1px solid #D8C9A0; border-radius:3px; font-size:10px; margin:1px; }
+    .bjm-my-area { padding:10px; background:#FAF6EC; border:2px solid #3A6A4A; border-radius:8px; }
+    .bjm-turn-indicator { font-family:'ZCOOL XiaoWei',serif; color:#888; font-size:14px; margin-bottom:10px; text-align:center; }
+    .bjm-turn-indicator.is-active { color:#C9701F; font-weight:600; font-size:16px; }
+    .bjm-my-hand { display:flex; flex-wrap:wrap; gap:4px; margin:10px 0; }
+    .bjm-card { display:inline-block; padding:8px 6px; background:#fff; border:2px solid #888; border-radius:6px; min-width:42px; text-align:center; font-family:'ZCOOL XiaoWei',serif; font-size:16px; cursor:default; transition:all .15s; }
+    .bjm-card.is-clickable { cursor:pointer; border-color:#3A6A4A; }
+    .bjm-card.is-clickable:hover { transform:translateY(-3px); border-color:#C9701F; box-shadow:0 4px 8px rgba(0,0,0,.15); }
+    .bjm-my-discards { font-size:11px; color:#666; margin-top:8px; padding-top:8px; border-top:1px dashed #D8C9A0; }
     .bjm-finished { padding:20px; text-align:center; }
-    .bjm-winner-block { padding:20px; background:linear-gradient(135deg,#FFF8E0,#FFE5C0); border:2px solid #D4AF37; border-radius:12px; margin:14px 0; }
-    .bjm-winner-avatar { width:80px; height:80px; margin:0 auto 10px; border-radius:50%; overflow:hidden; border:3px solid #D4AF37; background:#fff; }
-    .bjm-winner-avatar img { width:100%; height:100%; object-fit:cover; }
+    .bjm-winner-block { padding:20px; background:linear-gradient(135deg,#FFF8E0,#FFE5C0); border:2px solid #D4AF37; border-radius:10px; margin:14px 0; }
     .bjm-winner-name { font-family:'ZCOOL XiaoWei',serif; font-size:22px; color:#7C5810; font-weight:600; }
     .bjm-winner-formula { font-size:18px; margin:8px 0; color:#1F3F2C; }
     .bjm-winner-score { font-size:14px; color:#7C5810; }
-
     .bjm-yaku-table { width:100%; border-collapse:collapse; margin:8px 0; font-size:12px; }
     .bjm-yaku-table th, .bjm-yaku-table td { padding:4px 6px; border:1px solid #D8C9A0; text-align:left; }
     .bjm-yaku-table th { background:#FAF6EC; }
@@ -1322,5 +1032,5 @@ if(!document.getElementById('v12-mahjong-style')){
   document.head.appendChild(st);
 }
 
-console.log('[方劑麻雀 v12.6.0] 모듈 로드 — 새로고침 픽스 + 본초별 디자인 + 캐릭터 아이콘 + 사운드');
+console.log('[方劑麻雀 v12.5.4] 모듈 로드 — AI 對局 단일 PUT (race condition 회피) · FB 노드: ' + FB_NODE);
 })();
