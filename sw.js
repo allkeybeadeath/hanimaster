@@ -1,6 +1,13 @@
-/* sw.js — v14 方鑑 서비스 워커 (2026-05-19 fangjian build)
+/* sw.js — v14.1 關係圖 추가 서비스 워커 (2026-05-19 graph build)
  *
- *  v14 변경 (이번 빌드):
+ *  v14.1 변경 (이번 빌드):
+ *   • 「關係圖」 패치 — 處方 Network 시각화 추가. 3개 SVG (表裏雙解·補益·章間連結)를
+ *     pan/zoom 가능한 인터랙티브 뷰어로 제공. 마우스 휠/터치 핀치 줌, 드래그 팬,
+ *     더블클릭/더블탭 리셋, 풀스크린, 키보드 단축키(+ - 0 F ESC).
+ *     의서궁·방제학 home에 翡翠색 「關係圖 NEW」 배너, 方鑑 헤더에 「關係圖 보기」 미니 버튼.
+ *     데이터: data-v14-graph.js (3개 SVG raw + viewBox 메타).
+ *
+ *  v14 변경 (이전 빌드):
  *   • 「方鑑」 패치 — 표리쌍해제(7장) + 보익제(8장) 시각적 매핑 화면 추가.
  *     의서궁·방제학 home의 헬게이트 배너 바로 아래에 「方鑑 NEW」 黃금 배너 삽입.
  *     화면 구성: 분류표 / 13 主要方 카드 / 派生 系譜 (理中→四君→八方) /
@@ -25,7 +32,7 @@
  *
  *  ★ 캐시 키 build timestamp bump → SW 강제 재install + PRECACHE 재다운로드
  */
-const CACHE = 'bangje-pwa-v14-fangjian-' + (new Date().toISOString().slice(0,10).replace(/-/g,''));
+const CACHE = 'bangje-pwa-v14-1-graph-' + (new Date().toISOString().slice(0,10).replace(/-/g,''));
 const PRECACHE = [
   './',
   './index.html',
@@ -83,6 +90,9 @@ const PRECACHE = [
   // v14: 方鑑(방감) — 표리쌍해제 + 보익제 시각적 매핑
   './data-v14-relations.js',
   './bangje-v14-pyori-bo-map.js',
+  // v14: 關係圖(관계도) — 處方 Network · pan/zoom 인터랙티브 SVG
+  './data-v14-graph.js',
+  './bangje-v14-graph.js',
   // v11 신규 캐릭터 사진
   './saamdoin.jpeg',
   './lindaoren.jpeg',
