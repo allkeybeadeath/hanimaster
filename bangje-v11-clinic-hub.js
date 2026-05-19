@@ -716,8 +716,17 @@ function _registerRoutes(){
   if(window.ROUTES){
     window.ROUTES.hub    = renderClinicHub;
     window.ROUTES.dongmu = (window.renderDongmuHome || renderClinicHub);
-    // v12.1: 經穴포커는 의서궁에서 제거 — ROUTES.jxpoker 등록 안 함.
-    //        경혈학(舍巖之房) 內부에서 window.V12JxPoker.open() 으로 직접 진입.
+    // v12.2: jxpoker 라우트 등록 (의서궁 八房 카드에는 표시 안 함 — 도구 영역 + 경혈학 內부에서 진입)
+    //        없으면 setTab 이 ROUTES.home 으로 폴백되어 방제학으로 잘못 진입함.
+    window.ROUTES.jxpoker = function(){
+      if(window.V12JxPoker && typeof window.V12JxPoker.open === 'function'){
+        try{ if(window.V12Intro && window.V12Intro.setSubjectIcon) window.V12Intro.setSubjectIcon('poker'); }catch(_){}
+        window.V12JxPoker.open();
+      } else {
+        if(typeof toast === 'function') toast('經穴포커 모듈 로드 실패','warn');
+        else console.warn('V12JxPoker not loaded');
+      }
+    };
   }
 }
 // v11.6.1 FIX: jindan 로드 완료 후 dongmu 라우트 재등록 (초기 _init 시점엔 미정의일 수 있음)

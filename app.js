@@ -1218,6 +1218,7 @@ function setTab(name){
       home:'shennong', formula:'shennong', herb:'shennong', flash:'shennong',
       quiz:'shennong', stats:'shennong', hall:'shennong', cube:'shennong', warrior2h:'shennong', battle:'shennong',
       hub:'hub', dongmu:'dongmu', saamdoin:'saamdoin', jingxue:'saamdoin',
+      jxpoker:'saamdoin',  // v12.2: 經穴포커는 경혈학 컨텍스트 유지
     };
     const wantCtx = CTX_BY_TAB[name];
     if(wantCtx && typeof setHeaderContext === 'function') setHeaderContext(wantCtx);
@@ -1235,6 +1236,7 @@ function setTab(name){
       // v11.6: 의서궁 / 8房 라벨 (clinic-hub _wrapSetTab 에서 sub 까지 다시 set 하지만,
       //         외부 모듈이 setTab 만 호출했을 때를 위한 fallback)
       hub: '醫書宮', dongmu: '東武之房 (진단)', jingxue: '舍巖之房 (경혈)',
+      jxpoker: '經穴 포커 對局',
       tongue: '舌診 對位',
     };
     try{ window.V96Activity.set(labels[name] || name, ''); }catch(_){}
