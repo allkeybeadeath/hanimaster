@@ -27,6 +27,9 @@
 (function(){
 'use strict';
 
+// v12.5.1: Firebase 보안 룰에 'bangje_mahjong_rooms' 노드 권한 추가 必要.
+//   Console → Realtime Database → Rules 에서 아래 추가 (CHANGELOG_v12.5.1.md 참고):
+//     "bangje_mahjong_rooms": { ".read": true, ".write": true }
 const FB_NODE = 'bangje_mahjong_rooms';
 const POLL_MS = 1500;
 const TURN_SEC = 25;
@@ -215,15 +218,25 @@ function shuffleDeck(){
 // ─── 6) 방 만들기 / 입장 ────────────────────────────────────────────────
 async function createRoom(opts){
   const f = fb();
-  if(!f || !myUid()){ toast('네트워크/사용자 없음','warn'); return null; }
+  const uid = myUid();
+  if(!f){
+    console.error('[方劑麻雀] createRoom 실패: FB 객체 없음', { FB_exists: typeof window.FB });
+    toast('Firebase 미연결','warn'); return null;
+  }
+  if(!uid){
+    console.error('[方劑麻雀] createRoom 실패: 사용자 ID 없음 — 새로고침 必要');
+    toast('사용자 ID 없음 — 새로고침 후 재시도','warn'); return null;
+  }
   opts = Object.assign({maxPlayers:4, isPublic:true, name:''}, opts);
+  const maxP = Math.min(MAX_PLAYERS, opts.maxPlayers || 4);
   const rid = roomCode();
   const room = {
-    roomId: rid, status:'waiting', hostId: myUid(),
+    roomId: rid, status:'waiting', hostId: uid,
     name: opts.name || `${myName()}의 方劑麻雀房`,
-    maxPlayers: Math.min(MAX_PLAYERS, opts.maxPlayers),
+    maxPlayers: maxP,
     isPublic: !!opts.isPublic, createdAt: nowMs(),
-    players: { [myUid()]: {
+    gameType: 'mahjong',   // v12.5: 큐브와 마작 노드 구분용 (cube_rooms 재사용 시 충돌 방지)
+    players: { [uid]: {
       name: myName(), character: (S_()||{}).character||null,
       qi: myQi(), isHost:true, isReady:true, isBot:false,
       seat:0, joinedAt: nowMs(), hand:[], pickedUp:[], discards:[],
@@ -231,8 +244,25 @@ async function createRoom(opts){
     pot:0, deck:[], turnIdx:0, turnUserId:'', turnStartedAt:0,
     phase:'lobby', lastAction:null, turn:0,
   };
-  const ok = await f.put(`${FB_NODE}/${rid}`, room);
-  return ok ? rid : null;
+  console.log('[方劑麻雀] createRoom 시도', { rid, FB_NODE, maxP });
+  let ok = false;
+  try{
+    ok = await f.put(`${FB_NODE}/${rid}`, room);
+  }catch(e){
+    console.error('[方劑麻雀] f.put 예외 발생', e);
+    toast('서버 통신 오류: ' + (e && e.message || '?'), 'warn');
+    return null;
+  }
+  if(!ok){
+    console.error('[方劑麻雀] f.put returned false — Firebase 룰 또는 네트워크 문제', {
+      rid, path: `${FB_NODE}/${rid}`,
+      hint: 'Firebase Console → Realtime Database → Rules 에 "' + FB_NODE + '" 노드 .read/.write 권한 확인 必要'
+    });
+    toast('서버 쓰기 실패 (보안 룰 또는 네트워크)','warn');
+    return null;
+  }
+  console.log('[方劑麻雀] createRoom 성공:', rid);
+  return rid;
 }
 
 async function joinRoom(rid){
@@ -241,6 +271,8 @@ async function joinRoom(rid){
   rid = String(rid||'').toUpperCase().trim();
   const room = await f.get(`${FB_NODE}/${rid}`);
   if(!room) return {ok:false, msg:'방 없음'};
+  // v12.5: 큐브 잔여방 방어 (cube_rooms 노드 재사용)
+  if(room.gameType && room.gameType !== 'mahjong') return {ok:false, msg:'마작방 아님'};
   if(room.status !== 'waiting') return {ok:false, msg:'이미 시작'};
   const ps = room.players || {};
   if(ps[myUid()]) return {ok:true, roomId:rid, rejoin:true};
@@ -256,20 +288,48 @@ async function joinRoom(rid){
 
 async function addBot(rid){
   const f = fb();
-  const room = await f.get(`${FB_NODE}/${rid}`);
-  if(!room || room.hostId !== myUid()) return;
+  if(!f) return false;
+  // v12.5.1: createRoom 직후 즉시 호출 시 방을 못 찾을 수 있음 → 최대 3회 재시도
+  let room = null;
+  for(let attempt = 0; attempt < 3; attempt++){
+    room = await f.get(`${FB_NODE}/${rid}`);
+    if(room) break;
+    console.warn('[方劑麻雀 addBot] 방 fetch 실패 — 재시도', attempt+1);
+    await new Promise(res => setTimeout(res, 200));
+  }
+  if(!room){
+    console.error('[方劑麻雀 addBot] 방 못 찾음 (3회 재시도 실패)', rid);
+    return false;
+  }
+  if(room.hostId !== myUid()){
+    console.error('[方劑麻雀 addBot] 호스트 아님', { rid, hostId: room.hostId, myUid: myUid() });
+    return false;
+  }
   const ps = room.players || {};
-  if(Object.keys(ps).length >= room.maxPlayers) return toast('가득참','warn');
+  if(Object.keys(ps).length >= room.maxPlayers){
+    toast('가득참','warn');
+    return false;
+  }
   const botNames = ['岐伯AI','華佗AI','扁鵲AI','張仲景AI','孫思邈AI'];
-  const used = new Set(Object.values(ps).map(p=>p.name));
+  const used = new Set(Object.values(ps).map(p => p.name));
   const name = botNames.find(n => !used.has(n)) || `Bot${Object.keys(ps).length}`;
   const seat = Object.keys(ps).length;
-  const botUid = `bot_${seat}_${nowMs()}`;
-  await f.put(`${FB_NODE}/${rid}/players/${botUid}`, {
-    name, character: null, qi: 800 + Math.floor(Math.random()*1200),
-    isHost:false, isReady:true, isBot:true, seat, joinedAt: nowMs(),
-    hand:[], pickedUp:[], discards:[],
-  });
+  // v12.5.1: nowMs+random 조합으로 ID 충돌 회피
+  const botUid = `bot_${seat}_${nowMs()}_${Math.floor(Math.random()*9999)}`;
+  const botData = {
+    name, character: null,
+    qi: 800 + Math.floor(Math.random()*1200),
+    isHost:false, isReady:true, isBot:true,
+    seat, joinedAt: nowMs(),
+    handPlaceholder: 1,   // 시작 시 startGame 에서 hand 로 덮어쓰여짐
+  };
+  const ok = await f.put(`${FB_NODE}/${rid}/players/${botUid}`, botData);
+  if(!ok){
+    console.error('[方劑麻雀 addBot] PUT 실패', { rid, botUid });
+    return false;
+  }
+  console.log('[方劑麻雀 addBot] 봇 추가 성공:', name, '(seat', seat, ')');
+  return true;
 }
 
 // ─── 7) 게임 시작 ────────────────────────────────────────────────────────
@@ -506,12 +566,42 @@ async function startSoloVsAI(nPlayers){
     if(!choice) return;
     nPlayers = Math.max(2, Math.min(4, parseInt(choice, 10) || 4));
   }
+  console.log('[方劑麻雀] AI 對局 시작 시도:', nPlayers, '人');
   const rid = await createRoom({maxPlayers:nPlayers, isPublic:false, name:`${myName()}의 AI 對局 (${nPlayers}人)`});
   if(!rid){ toast('방 생성 실패','warn'); return; }
-  // 봇 (nPlayers - 1)명 추가
-  for(let i = 0; i < nPlayers - 1; i++) await addBot(rid);
+  // v12.5.1: 봇 (nPlayers-1)명 순차 추가 + 각 추가 후 짧은 지연 (Firebase 반영 대기)
+  const needBots = nPlayers - 1;
+  let added = 0;
+  for(let i = 0; i < needBots; i++){
+    const ok = await addBot(rid);
+    if(ok) added++;
+    else console.warn('[方劑麻雀] AI ' + (i+1) + '번째 봇 추가 실패');
+    // Firebase eventual consistency 대비 — 다음 봇 추가 전 짧은 대기
+    await new Promise(res => setTimeout(res, 150));
+  }
+  console.log('[方劑麻雀] 봇 추가 결과:', added, '/', needBots, '명');
+  if(added < needBots){
+    toast(`AI 봇 ${added}/${needBots}명만 추가됨 — 진행`, 'warn');
+  }
+  // 방 상태 한 번 더 fetch해서 players 수 확인 (Firebase 반영 보장)
+  await new Promise(res => setTimeout(res, 300));
+  const f = fb();
+  const verifyRoom = await f.get(`${FB_NODE}/${rid}`);
+  const actualPlayers = Object.keys((verifyRoom && verifyRoom.players) || {}).length;
+  console.log('[方劑麻雀] 시작 직전 방 상태:', actualPlayers, '/', nPlayers, '人');
+  if(actualPlayers < 2){
+    toast('방에 사람이 너무 적음 — AI 추가 실패','warn');
+    renderRoom(rid);
+    return;
+  }
   // 자동 시작
-  setTimeout(() => startGame(rid).then(() => renderRoom(rid)), 800);
+  const sr = await startGame(rid);
+  if(sr && sr.ok === false){
+    toast('게임 시작 실패: ' + (sr.msg||''), 'warn');
+    renderRoom(rid);
+    return;
+  }
+  renderRoom(rid);
 }
 
 async function createPrivateAndEnter(){
@@ -534,7 +624,10 @@ async function renderPublicList(){
   if(!list) return;
   if(!f) return list.innerHTML = '<div class="bjm-empty">네트워크 미연결</div>';
   const all = await f.get(FB_NODE);
-  const rooms = !all ? [] : Object.values(all).filter(r => r && r.isPublic && r.status === 'waiting');
+  // v12.5: cube_rooms 노드 재사용 — 마작방만 표시 (gameType==='mahjong'). 옛 큐브방 잔여 제외.
+  const rooms = !all ? [] : Object.values(all).filter(r =>
+    r && r.gameType === 'mahjong' && r.isPublic && r.status === 'waiting'
+  );
   if(!rooms.length){
     list.innerHTML = '<div class="bjm-empty">모집 중인 公開房 없음 — 만들어서 호스트가 되어보세요</div>';
     return;
@@ -605,7 +698,14 @@ function drawRoom(rid, room){
         const r = await startGame(rid);
         if(!r.ok) toast(r.msg,'warn');
       });
-      const ab = $('#bjm-addbot'); if(ab) ab.addEventListener('click', () => addBot(rid));
+      const ab = $('#bjm-addbot');
+      if(ab) ab.addEventListener('click', async () => {
+        ab.disabled = true; ab.textContent = '추가 중…';
+        const ok = await addBot(rid);
+        ab.disabled = false; ab.textContent = '+ AI 봇';
+        if(!ok) toast('AI 봇 추가 실패','warn');
+        else toast('AI 봇 추가됨','gold');
+      });
     }
     $('#bjm-leave').addEventListener('click', () => {
       clearInterval(window._bjmPoll);
@@ -751,7 +851,7 @@ window.V12Mahjong = {
   createPublicAndEnter, startSoloVsAI, createPrivateAndEnter,
   FORMULAS, HERB_TO_F, DECK_TEMPLATE,
   checkWinning, handScore,
-  VERSION:'12.5',
+  VERSION:'12.5.2',
 };
 
 // ─── 13) 스타일 주입 ─────────────────────────────────────────────────────
@@ -819,5 +919,5 @@ if(!document.getElementById('v12-mahjong-style')){
   document.head.appendChild(st);
 }
 
-console.log('[方劑麻雀 v12.5] 모듈 로드 — 시뮬 검증: 화료율 96% / 평균 6분');
+console.log('[方劑麻雀 v12.5.2] 모듈 로드 — FB 노드: ' + FB_NODE + ' (AI 봇 추가 재시도+동기화 픽스)');
 })();
