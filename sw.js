@@ -1,6 +1,14 @@
-/* sw.js — v11.6.2 서비스 워커 (2026-05-18 fix build 2)
+/* sw.js — v14 方鑑 서비스 워커 (2026-05-19 fangjian build)
  *
- *  v11.6.2 변경 (이번 빌드, 누적):
+ *  v14 변경 (이번 빌드):
+ *   • 「方鑑」 패치 — 표리쌍해제(7장) + 보익제(8장) 시각적 매핑 화면 추가.
+ *     의서궁·방제학 home의 헬게이트 배너 바로 아래에 「方鑑 NEW」 黃금 배너 삽입.
+ *     화면 구성: 분류표 / 13 主要方 카드 / 派生 系譜 (理中→四君→八方) /
+ *     용량 비교표 (大柴胡 vs 小承氣 등) / 處方×本草 매트릭스 / 五積 분해 /
+ *     비교 카드 (백호 vs 당귀보혈) / 22 함정 카드 9종.
+ *     데이터: data-v14-relations.js (계보·용량·五積·함정 메타) — FORMULAS는 기존 그대로 활용.
+ *
+ *  v11.6.2 변경 (이전 빌드):
  *   • 방미큐브 orphan 본초 15종 제거 — 처방 어디에도 없는 飴糖·龍眼肉·山茱萸·龜板·鱉甲·
  *     石斛·沙蔘·肉蓯蓉·巴戟天·蜀椒·茯神·通草·石菖蒲·豬脊髓·麝香 (v11.5.4 syllabus 축소
  *     이후 HERBS dict 에 잔존). HERBS 79 → 64. 본초 팝오버·카드 對決 distractor 정화.
@@ -17,7 +25,7 @@
  *
  *  ★ 캐시 키 build timestamp bump → SW 강제 재install + PRECACHE 재다운로드
  */
-const CACHE = 'bangje-pwa-v13-hellgate-' + (new Date().toISOString().slice(0,10).replace(/-/g,''));
+const CACHE = 'bangje-pwa-v14-fangjian-' + (new Date().toISOString().slice(0,10).replace(/-/g,''));
 const PRECACHE = [
   './',
   './index.html',
@@ -72,6 +80,9 @@ const PRECACHE = [
   './data-hellgate.js',
   './bangje-v13-hellgate.js',
   './bangje-v13-integration.js',
+  // v14: 方鑑(방감) — 표리쌍해제 + 보익제 시각적 매핑
+  './data-v14-relations.js',
+  './bangje-v14-pyori-bo-map.js',
   // v11 신규 캐릭터 사진
   './saamdoin.jpeg',
   './lindaoren.jpeg',
