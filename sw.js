@@ -1,11 +1,15 @@
-/* sw.js — v14.1 關係圖 추가 서비스 워커 (2026-05-19 graph build)
+/* sw.js — v14.2 原文 配列 드릴 추가 서비스 워커 (2026-05-19 drill build)
  *
- *  v14.1 변경 (이번 빌드):
- *   • 「關係圖」 패치 — 處方 Network 시각화 추가. 3개 SVG (表裏雙解·補益·章間連結)를
- *     pan/zoom 가능한 인터랙티브 뷰어로 제공. 마우스 휠/터치 핀치 줌, 드래그 팬,
- *     더블클릭/더블탭 리셋, 풀스크린, 키보드 단축키(+ - 0 F ESC).
- *     의서궁·방제학 home에 翡翠색 「關係圖 NEW」 배너, 方鑑 헤더에 「關係圖 보기」 미니 버튼.
- *     데이터: data-v14-graph.js (3개 SVG raw + viewBox 메타).
+ *  v14.2 변경 (이번 빌드):
+ *   • 「原文 配列 드릴」 패치 — 족보에 인용된 한문 원문을 토막내어 무작위 순서로 섞은 뒤
+ *     사용자가 정답 순서대로 배열하는 암기 드릴. 표리쌍해제 13문 + 보익제 13문.
+ *     예: 대시호탕 의종금감 평 "斯方也, 柴胡得生薑之倍, 解半表之功捷; 枳·芍得大黃之少..."
+ *     인터랙션: 풀에서 토막 클릭 → 슬롯 채움 / 슬롯 클릭 → 되돌리기 / 채점 → 색상 표시.
+ *     의서궁·홈에 銅色 「原文 드릴 NEW」 배너, 方鑑 헤더에 미니 버튼.
+ *     데이터: data-v14-drill.js — 처방별 원문 토막 + 한글 해석 + 출전.
+ *
+ *  v14.1 변경 (이전 빌드):
+ *   • 「關係圖」 패치 — 處方 Network 시각화 추가.
  *
  *  v14 변경 (이전 빌드):
  *   • 「方鑑」 패치 — 표리쌍해제(7장) + 보익제(8장) 시각적 매핑 화면 추가.
@@ -32,7 +36,7 @@
  *
  *  ★ 캐시 키 build timestamp bump → SW 강제 재install + PRECACHE 재다운로드
  */
-const CACHE = 'bangje-pwa-v14-1-graph-' + (new Date().toISOString().slice(0,10).replace(/-/g,''));
+const CACHE = 'bangje-pwa-v14-2-drill-' + (new Date().toISOString().slice(0,10).replace(/-/g,''));
 const PRECACHE = [
   './',
   './index.html',
@@ -93,6 +97,9 @@ const PRECACHE = [
   // v14: 關係圖(관계도) — 處方 Network · pan/zoom 인터랙티브 SVG
   './data-v14-graph.js',
   './bangje-v14-graph.js',
+  // v14.2: 原文 配列 드릴 — 한문 원문을 토막내어 순서대로 배열
+  './data-v14-drill.js',
+  './bangje-v14-drill.js',
   // v11 신규 캐릭터 사진
   './saamdoin.jpeg',
   './lindaoren.jpeg',
