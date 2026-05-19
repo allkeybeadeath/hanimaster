@@ -1216,7 +1216,8 @@ function setTab(name){
   try{
     const CTX_BY_TAB = {
       home:'shennong', formula:'shennong', herb:'shennong', flash:'shennong',
-      quiz:'shennong', stats:'shennong', hall:'shennong', cube:'shennong', warrior2h:'shennong', battle:'shennong',
+      quiz:'shennong', stats:'shennong', hall:'shennong', warrior2h:'shennong', battle:'shennong',
+      mahjong:'shennong',  // v12.5: 方劑麻雀 (방미큐브 영구 대체)
       hub:'hub', dongmu:'dongmu', saamdoin:'saamdoin', jingxue:'saamdoin',
       jxpoker:'saamdoin',  // v12.2: 經穴포커는 경혈학 컨텍스트 유지
     };
@@ -1232,11 +1233,12 @@ function setTab(name){
     const labels = {
       home: '大廳', formula: '處方 학습', herb: '本草 학습', quiz: '기출·암기',
       flash: '암기·주관식', stats: '통계·분석', hall: '명예의 전당',
-      cube: '방미큐브 對局', warrior2h: '2시간의 전사', battle: '對決 진행 중',
+      warrior2h: '2시간의 전사', battle: '對決 진행 중',
       // v11.6: 의서궁 / 8房 라벨 (clinic-hub _wrapSetTab 에서 sub 까지 다시 set 하지만,
       //         외부 모듈이 setTab 만 호출했을 때를 위한 fallback)
       hub: '醫書宮', dongmu: '東武之房 (진단)', jingxue: '舍巖之房 (경혈)',
       jxpoker: '經穴 포커 對局',
+      mahjong: '方劑麻雀 對局',
       tongue: '舌診 對位',
     };
     try{ window.V96Activity.set(labels[name] || name, ''); }catch(_){}
@@ -1356,7 +1358,7 @@ const ROUTES = {
   flash: renderFlashHub,       // v9.4: 플래시카드 + 주관식 허브
   stats: renderStats,
   hall: renderHall,
-  cube: (typeof renderCube === 'function') ? renderCube : renderHome,  // v9.5: 방미큐브
+  // v12.5: cube 라우트 영구 삭제 (방제마작이 대체. ROUTES.mahjong 은 clinic-hub _registerRoutes 에서 등록)
   warrior2h: (typeof window !== 'undefined' && typeof window.V96RenderWarrior2H === 'function') ? window.V96RenderWarrior2H : renderHome,  // v9.6: 2시간의전사
   admin: renderAdminPanel,  // v8.2: PWA 내장 관리자 패널 (#admin URL 또는 hidden 진입)
 };
@@ -1652,9 +1654,9 @@ function renderHome(){
 
     <!-- 학습 메뉴 타일 -->
     <div class="tile-grid fade-in">
-      <button class="tile cube" type="button" onclick="setTab('cube')">
-        <span class="han">方劑Cube</span><span class="ttl">방미큐브 · 4人 對局<span class="new-badge">NEW</span></span>
-        <span class="desc">루미큐브 룰 · 본초 카드 · 처방 짜서 손패 비우자</span>
+      <button class="tile mahjong" type="button" onclick="setTab('mahjong')">
+        <span class="han">方劑麻雀</span><span class="ttl">방제마작 · 2-4人 對局<span class="new-badge">NEW</span></span>
+        <span class="desc">처방 33개로 役 짜기 · AI 봇 對局 가능 · 평균 6분</span>
       </button>
       <button class="tile" type="button" onclick="setTab('formula')">
         <span class="han">方劑</span><span class="ttl">처방</span>
@@ -9050,9 +9052,9 @@ function _initContinue(){
   const hashIsAdmin = () => (location.hash || '').toLowerCase() === '#admin';
   let firstTab = 'hub';                          // v11.2: 항상 醫書宮 시작 (방제학 home → 의서궁의 神農之房 클릭)
   if(hashIsAdmin()) firstTab = 'admin';
-  // 특수 hash 로 직접 진입 (#home #hall #cube 등) 지원 — 디버그·딥링크용
+  // 특수 hash 로 직접 진입 (#home #hall #mahjong 등) 지원 — 디버그·딥링크용. v12.5: cube 제거
   const specialHash = (location.hash || '').toLowerCase().slice(1);
-  if(specialHash && ['home','hall','cube','flash','quiz','formula','herb','stats','dongmu'].includes(specialHash)){
+  if(specialHash && ['home','hall','mahjong','jxpoker','flash','quiz','formula','herb','stats','dongmu','saamdoin'].includes(specialHash)){
     firstTab = specialHash;
   }
   setTab(firstTab);

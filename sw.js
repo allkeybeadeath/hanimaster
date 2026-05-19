@@ -17,16 +17,17 @@
  *
  *  ★ 캐시 키 build timestamp bump → SW 강제 재install + PRECACHE 재다운로드
  */
-const CACHE = 'bangje-pwa-v11-6-2-build-20260518-2200';
+const CACHE = 'bangje-pwa-v12-5-mahjong-' + (new Date().toISOString().slice(0,10).replace(/-/g,''));
 const PRECACHE = [
   './',
   './index.html',
   './app.js',
-  './bangje-cube.js',
+  './bangje-v12-mahjong.js',
+  './bangje-v12-multi-intro.js',
+  './bangje-v12-jingxue-poker.js',
   './bangje-v96-part1.js',
   './bangje-v96-part2.js',
   './bangje-v96-part3.js',
-  './bangje-v96-part4.js',
   './bangje-v96-part5.js',
   './bangje-v97-achievements.js',
   './bangje-v97-signatures.js',
@@ -113,14 +114,13 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if(req.method !== 'GET') return;
   const url = new URL(req.url);
-  // network-first: index.html, app.js, bangje-cube.js, 모든 v9x/v1x 모듈, data-*.js
+  // network-first: index.html, app.js, 모든 v9x/v1x 모듈, data-*.js, v12 모듈
   const networkFirst =
     url.pathname.endsWith('index.html') ||
     url.pathname.endsWith('/') ||
     url.pathname.endsWith('app.js') ||
-    url.pathname.endsWith('bangje-cube.js') ||
     url.pathname.endsWith('sw.js') ||
-    /bangje-v(9[6789]|1[01])(?:[-.\d]+)?[-\w]*\.js$/.test(url.pathname) ||
+    /bangje-v(9[6789]|1[012])(?:[-.\d]+)?[-\w]*\.js$/.test(url.pathname) ||
     /\/data-[\w-]+\.js$/.test(url.pathname);
   if(networkFirst){
     e.respondWith(

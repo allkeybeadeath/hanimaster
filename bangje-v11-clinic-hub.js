@@ -28,7 +28,7 @@ function closeModal(){ try{ window.closeModal && window.closeModal(); }catch(_){
 //   v12.1: 經穴포커는 의서궁에서 제거 — 경혈학(舍巖之房) 內부에서만 진입.
 //          黃帝→預防醫學, 岐伯→病理學, 華佗→洋方病理學, 道人(lindaoren)→影像診斷學
 const SUBJECTS = [
-  { id:'shennong',  room_han:'神農之房', subject_han:'方劑學', subject_ko:'방제학',   mascot_id:'shennong',  status:'active',      route:'home',   accent:'#C9A227', desc:'處方·本草·君臣佐使', badge:'方米큐브 最終 v1.1' },
+  { id:'shennong',  room_han:'神農之房', subject_han:'方劑學', subject_ko:'방제학',   mascot_id:'shennong',  status:'active',      route:'home',   accent:'#C9A227', desc:'處方·本草·君臣佐使', badge:'方劑麻雀 NEW v12.5' },
   { id:'dongmu',    room_han:'東武之房', subject_han:'診斷學', subject_ko:'진단학',   mascot_id:'leejema',   status:'active',      route:'dongmu', accent:'#9C3030', desc:'設診·四象·辨證' },
   { id:'zhongjing', room_han:'仲景之房', subject_han:'傷寒論', subject_ko:'상한론',   mascot_id:'zhongjing', status:'placeholder', route:null,     accent:'#1A4C7C', desc:'六經辨證·經方' },
   { id:'qibo',      room_han:'岐伯之房', subject_han:'病理學',   subject_ko:'병리학',     mascot_id:'qibo',      status:'active', route:null,     accent:'#2A7060', desc:'臟象·經絡·病機 — 內經 病理' },
@@ -41,6 +41,23 @@ const SUBJECT_BY_ID = {}; SUBJECTS.forEach(s => SUBJECT_BY_ID[s.id] = s);
 
 // ─── CHANGELOG ─────────────────────────────────────────────────────────
 const CHANGELOG_ENTRIES = [
+  { id:'v12.5', label:'v12.5', date:'2026-05-19', title:'방미큐브 영구 삭제 → 方劑麻雀 신규 게임으로 완전 대체', body:
+    '<b style="color:#9C3030">방미큐브 영구 삭제</b><br>' +
+    '데드 카드 16종(시험범위 외 처방의 加減 본초) · 시뮬 검증 실패 (4인 화료 0%) · 게임시간 한계 등의 누적 이슈로, ' +
+    '방미큐브(bangje-cube)는 영구히 삭제되고 방제마작으로 완전 대체됩니다.<br><br>' +
+    '<b style="color:#1F3F2C">신규 게임: 方劑麻雀 (방제마작)</b><br>' +
+    '마작 룰을 한의학 방제학에 매핑한 신규 카드 게임. 학습+오락 동시 제공.<br>' +
+    '<b>덱</b>: 시험범위 핵심 처방 33개 · 본초 40종 · 카드 246장 (마작 비율).<br>' +
+    '<b>화료</b>: 손패 안에 한 처방의 본초 모두 포함 + 그 중 한 본초 2장 (君藥 雀頭).<br>' +
+    '<b>役</b>: 小方 (2-3장, 1번) · 中方 (4-5장, 2-4번) · 大方 (6장, 8번) · 方役満 (7장, 16번).<br>' +
+    '<b>對局 모드</b>:<br>' +
+    '・公開房 만들기 — 인원 2-4 선택, 다른 의가 대기<br>' +
+    '・公開房 入場 — 모집중 방 클릭 즉시 합류<br>' +
+    '・AI 對局 2/3/4人 — 봇 1-3명과 즉시 대국 (각 인원별 별도 버튼)<br>' +
+    '・私房 만들기 / 코드 입장 — 친구 초대용<br>' +
+    '<b>시뮬 검증 (500회 × 4가지 인원)</b>: 2인 90% · 3인 95% · 4인 96% · 6인 98% 화료율, 평균 시간 <b>5-6분</b>.<br>' +
+    '<b>진입</b>: 의서궁 home 도구 영역 · 방제학 home 첫 타일.<br>' +
+    '<br><b>관련 데이터 정리</b>: bangje-cube.js / bangje-v98-cube-rules.js / bangje-v98-cube-victory.js / bangje-v96-part4.js (큐브 AI) 4개 파일 삭제. cube-rooms FB 노드는 그대로 보존 (이미 진행 중인 큐브 데이터 손실 방지). ' },
   { id:'v12.0', label:'v12.0', date:'2026-05-18', title:'經穴 포커 신설 · 八房 학과 재편 · 멀티 컷 統一', body:
     '<b>★ 經穴 포커 (jingxue-poker) 신규</b> — 361穴 카드덱 124장 · 14단계 족보 (확률 정확계산) · 최대 8人 멀티 + AI 봇. ' +
     '베팅 (콜·체크·하프·쿼터·올인·폴드) · 최소 판돈 참여자 평균 氣 1/100. ' +
@@ -235,8 +252,10 @@ function renderClinicHub(){
       /* 도구 4종 */
       .hub-tools { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:12px; }
       .hub-tools-5 { grid-template-columns:repeat(5,1fr); }
+      .hub-tools-6 { grid-template-columns:repeat(6,1fr); }
       @media (max-width:480px){
         .hub-tools-5 { grid-template-columns:repeat(3,1fr); }
+        .hub-tools-6 { grid-template-columns:repeat(3,1fr); }
       }
       .hub-tool-btn.is-new { background:linear-gradient(135deg,#FFF8E0,#FFE5C0); border-color:#D4AF37; box-shadow:0 0 0 1px #D4AF37 inset; animation:hubToolPulse 1.8s ease-in-out infinite; }
       @keyframes hubToolPulse { 0%,100%{ box-shadow:0 0 0 1px #D4AF37 inset, 0 0 0 0 rgba(212,175,55,0); } 50%{ box-shadow:0 0 0 1px #D4AF37 inset, 0 0 0 6px rgba(212,175,55,0.18); } }
@@ -348,11 +367,11 @@ function renderClinicHub(){
       <button class="gedit" type="button" id="hub-profile-edit">編 변경</button>
     </div>
     
-    <!-- 도구 5종 (v12.1: 經穴포커 NEW 버튼 — 방미큐브 옆. 경혈학 房 내부에서도 진입 가능) -->
+    <!-- 도구 5종 (v12.5: 방미큐브 영구 삭제 → 方劑麻雀 으로 대체) -->
     <div class="hub-tools hub-tools-5">
       <button class="hub-tool-btn" type="button" id="hub-tool-prof"><div class="hub-tool-han">印·業</div><div class="hub-tool-ko">프로필·업적</div></button>
       <button class="hub-tool-btn" type="button" id="hub-tool-hall"><div class="hub-tool-han">譽</div><div class="hub-tool-ko">명예의 전당</div></button>
-      <button class="hub-tool-btn" type="button" id="hub-tool-cube"><div class="hub-tool-han">方米</div><div class="hub-tool-ko">방미큐브</div><span class="hub-final-badge">最終</span></button>
+      <button class="hub-tool-btn is-new" type="button" id="hub-tool-mahjong"><div class="hub-tool-han">方雀</div><div class="hub-tool-ko">방제마작</div><span class="hub-new-badge">NEW</span></button>
       <button class="hub-tool-btn is-new" type="button" id="hub-tool-poker"><div class="hub-tool-han">經穴</div><div class="hub-tool-ko">포커</div><span class="hub-new-badge">NEW</span></button>
       <button class="hub-tool-btn" type="button" id="hub-tool-duel"><div class="hub-tool-han">對決</div><div class="hub-tool-ko">멀티 入場</div></button>
     </div>
@@ -471,9 +490,15 @@ function _wireHub(){
   });
   const hall = $('#hub-tool-hall');
   if(hall) hall.addEventListener('click', () => { if(typeof window.setTab === 'function') window.setTab('hall'); });
-  const cube = $('#hub-tool-cube');
-  if(cube) cube.addEventListener('click', () => { if(typeof window.setTab === 'function') window.setTab('cube'); });
-  // v12.1: 經穴포커 — 방미큐브 옆 NEW 버튼. 라우트 jxpoker 사용 (이미 _registerRoutes 에 등록됨)
+  // v12.5: 방미큐브 영구 삭제됨 (방제마작으로 대체)
+  // v12.5: 方劑麻雀 — 방미큐브 바로 옆 NEW 버튼
+  const mahjong = $('#hub-tool-mahjong');
+  if(mahjong) mahjong.addEventListener('click', () => {
+    if(typeof window.setTab === 'function') window.setTab('mahjong');
+    else if(window.V12Mahjong && window.V12Mahjong.open) window.V12Mahjong.open();
+    else toast('方劑麻雀 모듈 미로드','warn');
+  });
+  // v12.1: 經穴포커 — 방제마작 옆 NEW 버튼
   const poker = $('#hub-tool-poker');
   if(poker) poker.addEventListener('click', () => {
     if(typeof window.setTab === 'function') window.setTab('jxpoker');
@@ -725,6 +750,16 @@ function _registerRoutes(){
       } else {
         if(typeof toast === 'function') toast('經穴포커 모듈 로드 실패','warn');
         else console.warn('V12JxPoker not loaded');
+      }
+    };
+    // v12.5: 方劑麻雀 — 방미큐브 옆 NEW 버튼
+    window.ROUTES.mahjong = function(){
+      if(window.V12Mahjong && typeof window.V12Mahjong.open === 'function'){
+        try{ if(window.V12Intro && window.V12Intro.setSubjectIcon) window.V12Intro.setSubjectIcon('shennong'); }catch(_){}
+        window.V12Mahjong.open();
+      } else {
+        if(typeof toast === 'function') toast('方劑麻雀 모듈 로드 실패','warn');
+        else console.warn('V12Mahjong not loaded');
       }
     };
   }
