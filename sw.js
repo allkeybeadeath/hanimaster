@@ -17,7 +17,7 @@
  *
  *  ★ 캐시 키 build timestamp bump → SW 강제 재install + PRECACHE 재다운로드
  */
-const CACHE = 'bangje-pwa-v12-5-mahjong-' + (new Date().toISOString().slice(0,10).replace(/-/g,''));
+const CACHE = 'bangje-pwa-v13-hellgate-' + (new Date().toISOString().slice(0,10).replace(/-/g,''));
 const PRECACHE = [
   './',
   './index.html',
@@ -68,6 +68,10 @@ const PRECACHE = [
   // v11.6.1 — 서술형 기출 플래시 (4년치 22~18학번, 보혈제까지)
   './data-essay-exams.js',
   './bangje-v11-6-1-essay-flash.js',
+  // v13: 헬게이트 (獄門) — 논스톱 주관식 100+문제
+  './data-hellgate.js',
+  './bangje-v13-hellgate.js',
+  './bangje-v13-integration.js',
   // v11 신규 캐릭터 사진
   './saamdoin.jpeg',
   './lindaoren.jpeg',
